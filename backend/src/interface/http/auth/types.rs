@@ -489,6 +489,7 @@ mod tests {
             web_url: "https://bot.example.com".to_string(),
             link_signup_allowlist: Default::default(),
             discord: None,
+            telegram: None,
             ocr_enabled: false,
             ocr_base_url: None,
             voice_enabled: false,

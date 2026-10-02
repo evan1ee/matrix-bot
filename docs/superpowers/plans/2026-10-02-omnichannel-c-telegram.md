@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** draft for the user's approval (2026-10-02). No code before approval.
+**Status:** approved 2026-10-02; in progress (HANDOFF §4 Plan C).
 
 **Goal:** Telegram becomes the third `ChannelAdapter`. A linked Telegram user runs `/todo`, `/expense`, `/portfolio`, `/help`, `/link` (and any other registry command typed as `/name …`) and talks to the agent in a private chat, against the same `BotModule` registry, services and account as on Matrix and Discord. In groups the bot answers only commands addressed to it and mentions. The todo list carries a "Done" button per item whose press is re-dispatched **as the presser**. Reminders and the link confirmation come back to the Telegram chat they started in. An unlinked Telegram user can only `/start`, `/help` and `/link`.
 

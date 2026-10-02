@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::fmt;
 
-use crate::domain::channels::Channel;
+use crate::domain::channels::{Channel, PlatformUserId};
 
 /// The Discord adapter's settings; present only when `DISCORD_TOKEN` is set.
 #[derive(Clone)]
@@ -47,6 +47,118 @@ pub(super) fn parse_discord(
         },
     };
     Ok(Some(DiscordConfig { token, guild_id }))
+}
+
+/// How the Telegram adapter receives updates.
+#[derive(Clone)]
+pub enum TelegramMode {
+    /// Telegram POSTs updates to us, proving itself with this secret token.
+    Webhook { secret: String },
+    /// We long-poll `getUpdates`; needs no public URL.
+    Polling,
+}
+
+/// The Telegram adapter's settings; present only when `TELEGRAM_BOT_TOKEN` is set.
+#[derive(Clone)]
+pub struct TelegramConfig {
+    /// `TELEGRAM_BOT_TOKEN`: the bot token. A credential; never logged.
+    pub token: String,
+    pub mode: TelegramMode,
+}
+
+// Hand-written so neither the token nor the webhook secret can reach a log
+// through `{:?}` of `Config`.
+impl fmt::Debug for TelegramConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mode = match self.mode {
+            TelegramMode::Webhook { .. } => "webhook",
+            TelegramMode::Polling => "polling",
+        };
+        let secret = match self.mode {
+            TelegramMode::Webhook { .. } => "<redacted>",
+            TelegramMode::Polling => "<none>",
+        };
+        f.debug_struct("TelegramConfig")
+            .field("token", &"<redacted>")
+            .field("mode", &mode)
+            .field("webhook_secret", &secret)
+            .finish()
+    }
+}
+
+/// `None` when `TELEGRAM_BOT_TOKEN` is unset or blank. `Err` naming the variable
+/// for an unknown `TELEGRAM_MODE` (`webhook`, the default, or `polling`) or for
+/// webhook mode without a valid `TELEGRAM_WEBHOOK_SECRET`: Telegram accepts 1-256
+/// characters of `A-Z a-z 0-9 _ -`, and a bot that silently accepts unsigned
+/// webhooks would take updates from anyone.
+pub(super) fn parse_telegram(
+    get: impl Fn(&str) -> Option<String>,
+) -> anyhow::Result<Option<TelegramConfig>> {
+    let Some(token) = get("TELEGRAM_BOT_TOKEN")
+        .map(|t| t.trim().to_owned())
+        .filter(|t| !t.is_empty())
+    else {
+        return Ok(None);
+    };
+    let mode = get("TELEGRAM_MODE")
+        .map(|m| m.trim().to_lowercase())
+        .filter(|m| !m.is_empty())
+        .unwrap_or_else(|| "webhook".to_owned());
+    let mode = match mode.as_str() {
+        "polling" => TelegramMode::Polling,
+        "webhook" => {
+            let secret = get("TELEGRAM_WEBHOOK_SECRET")
+                .map(|s| s.trim().to_owned())
+                .unwrap_or_default();
+            let valid = (1..=256).contains(&secret.len())
+                && secret
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+            if !valid {
+                anyhow::bail!(
+                    "TELEGRAM_WEBHOOK_SECRET is required in webhook mode and must be 1-256 \
+                     characters of A-Z a-z 0-9 _ -"
+                );
+            }
+            TelegramMode::Webhook { secret }
+        }
+        other => anyhow::bail!("TELEGRAM_MODE must be 'webhook' or 'polling' (got '{other}')"),
+    };
+    Ok(Some(TelegramConfig { token, mode }))
+}
+
+/// Webhook mode needs an `https://` `WEB_URL` (Telegram only calls HTTPS); an
+/// allowlist entry that is not a Telegram user id is refused by name, since a
+/// typo would silently keep that person from signing up (spec D4).
+pub(super) fn validate_telegram(
+    cfg: Option<&TelegramConfig>,
+    web_url: &str,
+    allowlist: &[String],
+) -> anyhow::Result<()> {
+    if matches!(cfg.map(|c| &c.mode), Some(TelegramMode::Webhook { .. }))
+        && !web_url.starts_with("https://")
+    {
+        anyhow::bail!(
+            "WEB_URL must be an https:// URL for Telegram webhook mode (got '{web_url}')"
+        );
+    }
+    for entry in allowlist {
+        if PlatformUserId::parse(Channel::Telegram, entry).is_err() {
+            anyhow::bail!("TELEGRAM_ALLOWED_USERS entry '{entry}' is not a Telegram user id");
+        }
+    }
+    Ok(())
+}
+
+/// A typo in `DISCORD_ALLOWED_USERS` would silently keep that person from
+/// signing up (spec D4), so a malformed entry is refused by name.
+pub(super) fn validate_discord_allowlist(allowlist: &[String]) -> anyhow::Result<()> {
+    for entry in allowlist {
+        if PlatformUserId::parse(Channel::Discord, entry).is_err() {
+            anyhow::bail!("DISCORD_ALLOWED_USERS entry '{entry}' is not a Discord user id");
+        }
+    }
+    Ok(())
 }
 
 /// The signup allowlist, one environment variable per channel, each a
@@ -165,5 +277,109 @@ mod tests {
     fn the_link_signup_allowlist_is_empty_when_unset_or_blank() {
         assert!(parse_link_signup_allowlist(|_| None).is_empty());
         assert!(parse_link_signup_allowlist(|_| Some(" , ,".to_string())).is_empty());
+    }
+
+    fn tg(pairs: &[(&str, &str)]) -> anyhow::Result<Option<TelegramConfig>> {
+        parse_telegram(env_of(pairs))
+    }
+
+    #[test]
+    fn telegram_is_absent_without_a_token() {
+        assert!(tg(&[]).unwrap().is_none());
+        assert!(tg(&[("TELEGRAM_BOT_TOKEN", "  ")]).unwrap().is_none());
+    }
+
+    #[test]
+    fn telegram_defaults_to_webhook_mode_and_needs_a_secret() {
+        let cfg = tg(&[
+            ("TELEGRAM_BOT_TOKEN", " 123:abc "),
+            ("TELEGRAM_WEBHOOK_SECRET", "s3cret_-X"),
+        ])
+        .unwrap()
+        .unwrap();
+        assert_eq!(cfg.token, "123:abc");
+        assert!(matches!(cfg.mode, TelegramMode::Webhook { ref secret } if secret == "s3cret_-X"));
+    }
+
+    #[test]
+    fn telegram_polling_needs_no_secret() {
+        let cfg = tg(&[
+            ("TELEGRAM_BOT_TOKEN", "123:abc"),
+            ("TELEGRAM_MODE", " Polling "),
+        ])
+        .unwrap()
+        .unwrap();
+        assert!(matches!(cfg.mode, TelegramMode::Polling));
+    }
+
+    #[test]
+    fn telegram_webhook_refuses_a_missing_or_invalid_secret() {
+        let long = "a".repeat(257);
+        for secret in [None, Some(""), Some("bad secret!"), Some(long.as_str())] {
+            let mut pairs = vec![("TELEGRAM_BOT_TOKEN", "123:abc")];
+            if let Some(s) = secret {
+                pairs.push(("TELEGRAM_WEBHOOK_SECRET", s));
+            }
+            let err = tg(&pairs).unwrap_err();
+            assert!(err.to_string().contains("TELEGRAM_WEBHOOK_SECRET"), "{err}");
+        }
+        let max = "a".repeat(256);
+        assert!(tg(&[
+            ("TELEGRAM_BOT_TOKEN", "123:abc"),
+            ("TELEGRAM_WEBHOOK_SECRET", max.as_str()),
+        ])
+        .is_ok());
+    }
+
+    #[test]
+    fn telegram_refuses_an_unknown_mode() {
+        let err = tg(&[("TELEGRAM_BOT_TOKEN", "123:abc"), ("TELEGRAM_MODE", "push")]).unwrap_err();
+        assert!(err.to_string().contains("TELEGRAM_MODE"), "{err}");
+    }
+
+    #[test]
+    fn telegram_token_and_secret_never_appear_in_debug_output() {
+        let cfg = TelegramConfig {
+            token: "very-secret-token".into(),
+            mode: TelegramMode::Webhook {
+                secret: "very-secret-hook".into(),
+            },
+        };
+        let shown = format!("{cfg:?}");
+        assert!(!shown.contains("very-secret"), "{shown}");
+        assert!(
+            shown.contains("redacted") && shown.contains("webhook"),
+            "{shown}"
+        );
+    }
+
+    #[test]
+    fn validate_telegram_needs_https_only_in_webhook_mode() {
+        let webhook = TelegramConfig {
+            token: "t".into(),
+            mode: TelegramMode::Webhook { secret: "s".into() },
+        };
+        let polling = TelegramConfig {
+            token: "t".into(),
+            mode: TelegramMode::Polling,
+        };
+        assert!(validate_telegram(Some(&webhook), "https://bot.example.com", &[]).is_ok());
+        let err = validate_telegram(Some(&webhook), "http://bot.example.com", &[]).unwrap_err();
+        assert!(err.to_string().contains("WEB_URL"), "{err}");
+        assert!(validate_telegram(Some(&polling), "http://localhost:8080", &[]).is_ok());
+        assert!(validate_telegram(None, "http://localhost:8080", &[]).is_ok());
+    }
+
+    #[test]
+    fn validate_telegram_refuses_a_malformed_allowlist_entry_by_name() {
+        let ok = vec!["42".to_string(), "987654321".to_string()];
+        assert!(validate_telegram(None, "http://x", &ok).is_ok());
+        let bad = vec!["42".to_string(), "abc".to_string()];
+        let err = validate_telegram(None, "http://x", &bad).unwrap_err();
+        let shown = err.to_string();
+        assert!(
+            shown.contains("abc") && shown.contains("TELEGRAM_ALLOWED_USERS"),
+            "{shown}"
+        );
     }
 }

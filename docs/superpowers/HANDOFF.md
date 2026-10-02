@@ -184,6 +184,22 @@ Final verification (at b4c4bb5 plus the docs commit; docs change no code):
 - `live_postgres`: 3 passed; `cargo build -p matrix-bot --release`: ok; `npm --prefix frontend run build`: ok (frontend unchanged).
 - Not verified (needs a real Discord application, HANDOFF §6): the live checks listed in the plan's *What the user verifies*.
 
+### Sub-project 2 — Plan C (Telegram adapter, `plans/2026-10-02-omnichannel-c-telegram.md`, branch `feat/omnichannel`)
+
+| Task | Scope | State | Commit |
+|---|---|---|---|
+| 1 | `TelegramConfig`/`TelegramMode` (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_MODE`, `TELEGRAM_WEBHOOK_SECRET`), `validate_telegram`, `utils::secure::constant_time_eq` | ✅ | this commit |
+| 2 | `render/telegram_html.rs` (HTML subset → Telegram HTML, message splitting) | ⬜ | |
+| 3 | `teloxide-core`; `telegram/{commands,inbound}.rs`; fixtures | ⬜ | |
+| 4 | Outbound rendering and `send` | ⬜ | |
+| 5 | `TelegramAdapter`: queue, dedupe, workers, progress, polling and webhook registration | ⬜ | |
+| 6 | Webhook endpoint (constant-time secret); the compat shim moves | ⬜ | |
+| 7 | The todo list's "Done" buttons | ⬜ | |
+| 8 | Composition root and boundaries | ⬜ | |
+| 9 | Docs and hand-off (T1–T16 recorded as R102–R117) | ⬜ | |
+
+---
+
 ## 5. How to work
 
 ### Workflow per task

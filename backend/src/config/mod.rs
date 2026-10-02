@@ -3,9 +3,9 @@ use std::collections::HashMap;
 use std::env;
 
 mod channels;
-pub use channels::DiscordConfig;
+pub use channels::{DiscordConfig, TelegramConfig, TelegramMode};
 
-use crate::domain::channels::{Channel, PlatformUserId};
+use crate::domain::channels::Channel;
 
 const DEFAULT_STT_MODEL: &str = "sensevoice-small";
 const DEFAULT_TTS_MODEL: &str = "kokoro";
@@ -204,6 +204,8 @@ pub struct Config {
     pub link_signup_allowlist: HashMap<Channel, Vec<String>>,
     /// The Discord adapter's settings; `None` (no adapter) without `DISCORD_TOKEN`.
     pub discord: Option<DiscordConfig>,
+    /// The Telegram adapter's settings; `None` (no adapter) without `TELEGRAM_BOT_TOKEN`.
+    pub telegram: Option<TelegramConfig>,
     /// Whether OCR image text recognition is enabled.
     pub ocr_enabled: bool,
     /// Base URL of the inference server's OCR endpoint.
@@ -334,6 +336,7 @@ impl Config {
         let link_signup_allowlist =
             channels::parse_link_signup_allowlist(|name| env::var(name).ok());
         let discord = channels::parse_discord(|name| env::var(name).ok())?;
+        let telegram = channels::parse_telegram(|name| env::var(name).ok())?;
 
         let ocr_enabled = env::var("OCR_ENABLED")
             .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
@@ -414,6 +417,7 @@ impl Config {
             web_url,
             link_signup_allowlist,
             discord,
+            telegram,
             ocr_enabled,
             ocr_base_url,
             voice_enabled,
@@ -489,17 +493,17 @@ impl Config {
             );
         }
 
-        // A typo would silently keep that person from signing up (spec D4).
-        for entry in self
-            .link_signup_allowlist
-            .get(&Channel::Discord)
-            .into_iter()
-            .flatten()
-        {
-            if PlatformUserId::parse(Channel::Discord, entry).is_err() {
-                anyhow::bail!("DISCORD_ALLOWED_USERS entry '{entry}' is not a Discord user id");
-            }
-        }
+        let allowed = |channel| {
+            self.link_signup_allowlist
+                .get(&channel)
+                .map_or(&[][..], |v| v)
+        };
+        channels::validate_discord_allowlist(allowed(Channel::Discord))?;
+        channels::validate_telegram(
+            self.telegram.as_ref(),
+            &self.web_url,
+            allowed(Channel::Telegram),
+        )?;
 
         Ok(())
     }
@@ -530,6 +534,7 @@ impl Config {
             web_url: "http://localhost:8080".to_string(),
             link_signup_allowlist: HashMap::new(),
             discord: None,
+            telegram: None,
             ocr_enabled: true,
             ocr_base_url: None,
             voice_enabled: true,
@@ -566,6 +571,23 @@ mod tests {
             .insert(Channel::Discord, vec!["123".into(), "evan#0001".into()]);
         let err = cfg.validate().unwrap_err();
         assert!(err.to_string().contains("evan#0001"), "{err}");
+    }
+
+    #[test]
+    fn validate_refuses_a_malformed_telegram_allowlist_entry_and_an_http_webhook() {
+        let mut cfg = valid_config();
+        cfg.link_signup_allowlist
+            .insert(Channel::Telegram, vec!["42".into(), "abc".into()]);
+        let err = cfg.validate().unwrap_err();
+        assert!(err.to_string().contains("abc"), "{err}");
+
+        let mut cfg = valid_config();
+        cfg.telegram = Some(TelegramConfig {
+            token: "t".into(),
+            mode: TelegramMode::Webhook { secret: "s".into() },
+        });
+        let err = cfg.validate().unwrap_err();
+        assert!(err.to_string().contains("WEB_URL"), "{err}");
     }
 
     #[test]
@@ -640,6 +662,7 @@ mod tests {
             web_url: "http://localhost:8080".to_string(),
             link_signup_allowlist: HashMap::new(),
             discord: None,
+            telegram: None,
             ocr_enabled: true,
             ocr_base_url: None,
             voice_enabled: true,

@@ -395,6 +395,7 @@ mod server_shutdown_tests {
             web_url: "http://localhost:8080".to_string(),
             link_signup_allowlist: Default::default(),
             discord: None,
+            telegram: None,
             ocr_enabled: false,
             ocr_base_url: None,
             voice_enabled: false,
