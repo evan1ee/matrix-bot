@@ -11,7 +11,7 @@ use super::markdown::{collapse_blank_lines, decode_entities};
 /// Telegram's limit per message, in visible characters.
 pub const MESSAGE_MAX: usize = 4096;
 
-/// Module HTML subset → Telegram HTML parse mode: `b strong`→`b`, `i em`→`i`, `u`, `code`,
+/// Module HTML subset → Telegram HTML parse mode: `b strong`→`b`, `i em`→`i`, `u`, `s strike del`→`s`, `code`,
 /// `pre`, `blockquote`, `a href` (http/https/mailto only, else text); `br`→`\n`;
 /// `p`→paragraph separated by a blank line; `ul>li`→`• item`; `ol>li`→`1. item`;
 /// unknown tags dropped keeping their text. Text keeps only `&lt; &gt; &amp; &quot;`
@@ -86,6 +86,7 @@ impl Renderer {
             "b" | "strong" => "b",
             "i" | "em" => "i",
             "u" => "u",
+            "s" | "strike" | "del" => "s",
             "code" => "code",
             "pre" => "pre",
             "blockquote" => "blockquote",
@@ -285,6 +286,10 @@ mod tests {
             ("<b>a</b> <strong>b</strong>", "<b>a</b> <b>b</b>"),
             ("<i>a</i><em>b</em>", "<i>a</i><i>b</i>"),
             ("<u>a</u>", "<u>a</u>"),
+            (
+                "<del>a</del><s>b</s><strike>c</strike>",
+                "<s>a</s><s>b</s><s>c</s>",
+            ),
             ("<code>a</code>", "<code>a</code>"),
             ("<pre>x\ny</pre>", "<pre>x\ny</pre>"),
             ("<pre><code>x</code></pre>", "<pre><code>x</code></pre>"),
@@ -380,6 +385,16 @@ mod tests {
         assert_eq!(parts.len(), 2);
         assert!(parts[0].starts_with("<b><i>") && parts[0].ends_with("</i></b>"));
         assert!(parts[1].starts_with("<b><i>") && parts[1].ends_with("</i></b>"));
+        assert_eq!(visible_text(&parts.concat()), "a".repeat(5_000));
+    }
+
+    #[test]
+    fn strikethrough_open_across_a_split_is_closed_and_reopened() {
+        let input = format!("<s>{}</s>", "a".repeat(5_000));
+        let parts = split_messages(&input);
+        assert_eq!(parts.len(), 2);
+        assert!(parts[0].starts_with("<s>") && parts[0].ends_with("</s>"));
+        assert!(parts[1].starts_with("<s>") && parts[1].ends_with("</s>"));
         assert_eq!(visible_text(&parts.concat()), "a".repeat(5_000));
     }
 
