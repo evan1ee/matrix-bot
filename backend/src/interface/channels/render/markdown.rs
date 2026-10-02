@@ -235,7 +235,7 @@ fn wrap(text: &str, marker: &str) -> String {
 }
 
 /// Runs of three or more newlines become one blank line; the result is trimmed.
-fn collapse_blank_lines(text: &str) -> String {
+pub(super) fn collapse_blank_lines(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut newlines = 0;
     for c in text.chars() {
@@ -254,7 +254,7 @@ fn collapse_blank_lines(text: &str) -> String {
 
 /// Decodes `&lt; &gt; &amp; &quot; &#39; &apos; &nbsp;` and numeric references;
 /// anything else is kept as written.
-fn decode_entities(s: &str) -> String {
+pub(super) fn decode_entities(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let mut rest = s;
     while let Some(at) = rest.find('&') {

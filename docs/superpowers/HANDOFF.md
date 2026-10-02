@@ -188,8 +188,8 @@ Final verification (at b4c4bb5 plus the docs commit; docs change no code):
 
 | Task | Scope | State | Commit |
 |---|---|---|---|
-| 1 | `TelegramConfig`/`TelegramMode` (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_MODE`, `TELEGRAM_WEBHOOK_SECRET`), `validate_telegram`, `utils::secure::constant_time_eq` | ✅ | this commit |
-| 2 | `render/telegram_html.rs` (HTML subset → Telegram HTML, message splitting) | ⬜ | |
+| 1 | `TelegramConfig`/`TelegramMode` (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_MODE`, `TELEGRAM_WEBHOOK_SECRET`), `validate_telegram`, `utils::secure::constant_time_eq` | ✅ | `f5f01bc`, `f39ad44` |
+| 2 | `render/telegram_html.rs` (HTML subset → Telegram HTML, message splitting) | ✅ | this commit |
 | 3 | `teloxide-core`; `telegram/{commands,inbound}.rs`; fixtures | ⬜ | |
 | 4 | Outbound rendering and `send` | ⬜ | |
 | 5 | `TelegramAdapter`: queue, dedupe, workers, progress, polling and webhook registration | ⬜ | |

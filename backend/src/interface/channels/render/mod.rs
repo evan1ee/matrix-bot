@@ -2,3 +2,4 @@
 
 pub mod html;
 pub mod markdown;
+pub mod telegram_html;
