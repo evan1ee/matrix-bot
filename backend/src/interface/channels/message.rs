@@ -39,7 +39,7 @@ pub enum AttachmentKind {
     File,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Attachment {
     pub kind: AttachmentKind,
     pub mime: String,

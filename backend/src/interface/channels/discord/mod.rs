@@ -6,9 +6,13 @@
 //!
 //! - `commands`: the command table, defer mode, option → `InboundText`.
 //! - `inbound`: interaction / DM → `IncomingMessage` (pure).
+//! - `render`: neutral content → embed posts; where an interaction reply goes (pure).
+//! - `outbound`: `send`, the serenity builders, error classification.
 
 pub mod commands;
 pub mod inbound;
+pub mod outbound;
+pub mod render;
 
 #[cfg(test)]
 mod tests {
