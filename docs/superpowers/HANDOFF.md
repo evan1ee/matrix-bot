@@ -251,7 +251,7 @@ Each test gets its own `t<pid>_<n>` schema; the next test process reaps schemas 
 
 ## 7. Next actions (in order)
 
-1. **Write plan C (Telegram)** against the code plans A and B produced (`interface/channels/discord/` is now the second reference adapter), then D (Email). Each needs the user's approval of the plan before code. Plan C must reuse R85 (bare `full_body`), revisit R93 (`ChannelSink::is_ready`) and reuse `front_door_name`'s "Telegram updates".
+1. **Approve or amend plan C (Telegram)** — `plans/2026-10-02-omnichannel-c-telegram.md` (draft 2026-10-02, clarifications T1–T16; T1 takes `teloxide-core`, which adds a third `reqwest` line, 0.12, and the user may choose hand-written Bot API types instead). Implementation starts only after the user's approval; then plan D (Email).
 2. **Live Discord check by the user** (plan B, *What the user verifies*) on a non-production deployment with a test bot token.
 3. **Merge gates (§10)** now include rehearsing migrations 0004–0008 on a production copy (0007 guard, `!link <code>` retirement; runbook §2a). Hand them to the user; merge only on their instruction. If `refactor/outbox` changes before it merges, rebase `feat/omnichannel` onto it.
 4. **Clear the §11 items** that touch the test suite first.
@@ -473,6 +473,7 @@ These need the human. Prepare them; don't perform them.
 | `docs/superpowers/specs/2026-10-01-omnichannel-design.md` | Sub-project 2 design (D1–D8, R-O1/R-O2 = R71/R72), amended to match the code |
 | `docs/superpowers/plans/2026-10-01-omnichannel-a-framework.md` | Sub-project 2 plan A: Tasks 1–12, clarifications A1–A6 (= R73) |
 | `docs/superpowers/plans/2026-10-02-omnichannel-b-discord.md` | Sub-project 2 plan B (Discord adapter): Tasks 1–7, clarifications B1–B16 (= R85–R100) |
+| `docs/superpowers/plans/2026-10-02-omnichannel-c-telegram.md` | Sub-project 2 plan C (Telegram adapter), draft for approval: Tasks 1–9, clarifications T1–T16 |
 | `AGENTS.md` | Rules for agents: architecture, workflow, constraints, verification, Definition of Done |
 | `docs/architecture.md` | Layers, one-capability-many-interfaces, Matrix/accounts/settings design rationale |
 | `docs/database.md` | Schema and SQLx conventions, migrations, test databases |
