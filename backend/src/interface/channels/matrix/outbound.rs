@@ -219,4 +219,25 @@ mod tests {
             matrix_sdk::ruma::events::room::message::MessageType::Text(ref t) if t.formatted.is_none()
         ));
     }
+
+    #[test]
+    fn actions_never_change_what_matrix_sends() {
+        let plain_reply = Reply::html("<b>x</b>");
+        let with =
+            plain_reply
+                .clone()
+                .with_actions(vec![crate::interface::channels::message::Action {
+                    label: "Done #1".into(),
+                    command: "todo done 1".into(),
+                }]);
+        let (a, b) = (
+            text_content(&plain_reply.content),
+            text_content(&with.content),
+        );
+        assert_eq!(a.body(), b.body());
+        assert_eq!(
+            serde_json::to_value(&a).unwrap(),
+            serde_json::to_value(&b).unwrap()
+        );
+    }
 }

@@ -558,4 +558,72 @@ mod tests {
         assert_reply_contains(out, "/link?token=");
         assert_eq!(core::count(&pool).await.unwrap(), before);
     }
+
+    async fn todo_callback(inbound: &Inbound, who: PlatformIdentity, data: &str) -> InboundOutcome {
+        let msg = incoming(
+            Channel::Telegram,
+            ConversationAddress::Telegram(42),
+            who,
+            true,
+        );
+        let (command, args) = data.split_once(' ').unwrap();
+        let text = InboundText::Command {
+            command: command.into(),
+            raw_args: args.into(),
+            full_body: data.into(),
+        };
+        inbound.handle(&msg, text, None).await
+    }
+
+    #[tokio::test]
+    async fn a_done_button_press_completes_the_owners_todo_and_nobody_elses() {
+        let (inbound, pool, _reg) =
+            pipeline_with(crate::interface::chat::todos::TodoModule::new()).await;
+        let owner = create_account(&pool).await;
+        let other = core::create(&pool, "b", STATUS_ACTIVE).await.unwrap();
+        identities::bind(&pool, &owner, &tg("111")).await.unwrap();
+        identities::bind(&pool, &other, &tg("222")).await.unwrap();
+
+        let todos = inbound.services.todos.clone();
+        let (item, _) = todos
+            .create(
+                &owner,
+                crate::domain::todos::NewTodo {
+                    room_id: "!r:x".into(),
+                    sender_name: "a".into(),
+                    text: "buy milk".into(),
+                    priority: crate::domain::todos::TodoPriority::Medium,
+                    due_at: None,
+                    remind_before_minutes: None,
+                    remind_room_id: None,
+                },
+            )
+            .await
+            .unwrap();
+        let command = format!("todo done {}", item.id);
+
+        // Given a button pressed by a different linked account
+        let out = todo_callback(&inbound, tg("222"), &command).await;
+        assert_reply_contains(out, "not found");
+        assert!(
+            !todos
+                .find_owned(&owner, item.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .completed
+        );
+
+        // When the owner presses it
+        let out = todo_callback(&inbound, tg("111"), &command).await;
+        assert_reply_contains(out, "as completed");
+        assert!(
+            todos
+                .find_owned(&owner, item.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .completed
+        );
+    }
 }

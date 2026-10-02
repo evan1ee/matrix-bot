@@ -82,9 +82,7 @@ impl BotModule for TodoModule {
         services: &crate::application::AppServices,
         _db: &Database,
     ) -> Option<Reply> {
-        handler::handle_todo_command(&services.todos, &services.settings, ctx)
-            .await
-            .map(Reply::from)
+        handler::handle_todo_command(&services.todos, &services.settings, ctx).await
     }
 }
 
@@ -260,5 +258,40 @@ mod tests {
             vec!["TodoCreated"],
             "dispatching through the module must write the creation to the outbox"
         );
+    }
+
+    #[tokio::test]
+    async fn test_the_list_reply_carries_one_done_action_per_open_task() {
+        let module = TodoModule::new();
+        let (db, services) = setup_services().await;
+        for text in ["one", "two"] {
+            module
+                .handle_command(&ctx(&format!("!todo add {text}")), &services, &db)
+                .await
+                .unwrap();
+        }
+        module
+            .handle_command(&ctx("!todo done 1"), &services, &db)
+            .await
+            .unwrap();
+
+        for body in ["!todo", "!todo list"] {
+            let reply = module
+                .handle_command(&ctx(body), &services, &db)
+                .await
+                .unwrap();
+            let commands: Vec<_> = reply
+                .content
+                .actions
+                .iter()
+                .map(|a| a.command.as_str())
+                .collect();
+            assert_eq!(commands, vec!["todo done 2"], "for {body}");
+        }
+        let added = module
+            .handle_command(&ctx("!todo add three"), &services, &db)
+            .await
+            .unwrap();
+        assert!(added.content.actions.is_empty(), "only lists carry buttons");
     }
 }
