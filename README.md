@@ -177,6 +177,10 @@ WEBAUTHN_ORIGIN=http://localhost:8080
 # TELEGRAM_ALLOWED_USERS=123456789
 # EMAIL_ALLOWED_SENDERS=me@example.com
 
+# Discord (Optional) — the adapter starts only when DISCORD_TOKEN is set.
+# DISCORD_TOKEN=
+# DISCORD_GUILD_ID=123456789012345678   # register commands to one server (instant updates)
+
 # AI Assistant & Live Web Search (Optional)
 AI_ENDPOINT=https://api.x.ai/v1
 AI_API_KEY=xai-...
@@ -198,6 +202,15 @@ TAVILY_API_KEY=tvly-...                # Live Web Search (fallback to DuckDuckGo
 > Changing it invalidates existing passkeys. If deploying to production (e.g. `bot.example.com`), set `WEBAUTHN_RP_ID=bot.example.com` and `WEBAUTHN_ORIGIN=https://bot.example.com` before creating passkeys.
 
 ---
+
+### Enabling Discord (optional)
+
+1. Create an application in the Discord developer portal, add a bot, and copy its token into `DISCORD_TOKEN`. No privileged gateway intent is needed (the bot uses `GUILDS` and `DIRECT_MESSAGES`).
+2. Invite the bot with the scopes `bot` and `applications.commands` and the permissions *Send Messages*, *Embed Links*, *Attach Files* and *Read Message History*.
+3. Optionally set `DISCORD_GUILD_ID` to one server's id while testing: commands registered there update instantly, global ones can take up to an hour to appear.
+4. People link their Discord account by sending `/link` to the bot in a direct message and opening the link it returns. List someone in `DISCORD_ALLOWED_USERS` to let them create a new account from that link; anyone else signs in to an existing one.
+
+The bot answers `/todo`, `/expense`, `/portfolio`, `/ask`, `/link` and `/help` (each with one `args` text, e.g. `/todo args:add buy milk`; `/ask` takes a `prompt`), and talks to the assistant when you write to it in a direct message. In a server, every reply except `/help` is visible only to you.
 
 ### Option 1: Standalone Single Binary (Recommended)
 

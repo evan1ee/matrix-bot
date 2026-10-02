@@ -3,7 +3,7 @@
 > **Version:** 2.4.0  
 > **Status:** Roadmap specification. Sub-project 1 (phases 1–3) is designed in [`docs/superpowers/specs/2026-09-24-postgres-foundation-design.md`](docs/superpowers/specs/2026-09-24-postgres-foundation-design.md); later phases each get their own design before implementation.  
 > **Target Database:** PostgreSQL 18+ is the only application database (SQLite removed). The Matrix SDK's own end-to-end-encryption store remains an SDK-managed SQLite file — see §2.3.  
-> **Interaction Interfaces:** Matrix E2EE (Active / Implemented), Discord & Telegram ([TODO] Planned Features — Extensible Channel Framework), Web UI (React 19 SPA), MCP (Model Context Protocol), External Agents (Cursor, Claude Desktop)  
+> **Interaction Interfaces:** Matrix E2EE (Active / Implemented), Discord (Implemented), Telegram ([TODO] Planned Feature — Extensible Channel Framework), Web UI (React 19 SPA), MCP (Model Context Protocol), External Agents (Cursor, Claude Desktop)\
 > **Agent Execution Scope:** Scheduled Specific Tasks Exclusively ([TODO] Planned Feature — Extensible Task Plugin Architecture); Live User Input Handled Exclusively by Direct LLM + Tool Calling  
 
 ---
@@ -35,7 +35,7 @@ To maintain engineering discipline and prevent scope creep, system capabilities 
 | Subsystem / Feature | Implementation Status | Implementation Architecture | Target Milestone | Extensibility Model |
 |---|---|---|---|---|
 | **Matrix Channel (E2EE)** | **Active / Implemented** | Native `matrix-sdk` with crypto store | Shipped; refactor to `ChannelAdapter` in Phase 4 | Native driver for `ChannelAdapter` |
-| **Discord Channel** | **[TODO] Planned Feature** | `serenity` Gateway + Slash Commands | Phase 4 (Omnichannel milestone) | Pluggable `ChannelAdapter` plugin |
+| **Discord Channel** | **Implemented** (plan B) | `serenity` Gateway + Slash Commands | Phase 4 (Omnichannel milestone) | `DiscordAdapter: ChannelAdapter` |
 | **Telegram Channel** | **[TODO] Planned Feature** | `teloxide` Axum Webhook + Bot API | Phase 4 (Omnichannel milestone) | Pluggable `ChannelAdapter` plugin |
 | **Web Console (React 19)** | **Active / Implemented** | Axum REST + Server-Sent Events (SSE) | Shipped; align with outbox events in Phase 6 | Modular React 19 micro-views |
 | **MCP Server** | **Active / Implemented** | Stdio & SSE JSON-RPC protocol | Shipped; align with Tool Registry in Phase 4 | Tool Registry schema provider |
@@ -912,34 +912,30 @@ Specified in `docs/superpowers/specs/2026-10-01-omnichannel-design.md` (§3 doma
 
 ---
 
-### 9.3 Discord Adapter Specification ([TODO Feature] — Planned Extension)
+### 9.3 Discord Adapter Specification (Implemented — plan B)
 
-> **[TODO Feature — Phase 4 Roadmap]**  
-> Discord support is a **planned extension feature** to be built on top of the `ChannelAdapter` interface after SQLite removal, domain extraction, and the durable job queue are complete. The specification below defines its target architecture, slash command registry, and interaction model.
+> **Implemented** in `backend/src/interface/channels/discord/` (plan `docs/superpowers/plans/2026-10-02-omnichannel-b-discord.md`, rulings in `docs/superpowers/HANDOFF.md`). Where this section and the omnichannel design (`docs/superpowers/specs/2026-10-01-omnichannel-design.md` §8.2) or the plan disagree, the design and the plan win. Components, modals, typed options and a per-severity colour palette (§9.3.3–9.3.4) remain later improvements.
 
-The Discord integration provides deep native Discord features, turning the bot into a first-class Discord Application using **`serenity`** and Discord Gateway / REST APIs.
+The Discord integration is a `ChannelAdapter` built on **`serenity`** 0.12 (gateway + REST), registered only when `DISCORD_TOKEN` is set.
 
 #### 9.3.1 Discord Client & Gateway Architecture
-* **Crate:** `serenity` with `tokio` async runtime.
-* **Gateway Intents:** `GatewayIntents::GUILD_MESSAGES | GatewayIntents::DIRECT_MESSAGES | GatewayIntents::MESSAGE_CONTENT | GatewayIntents::GUILD_MESSAGE_REACTIONS`.
-* **Connection Lifecycle:** Runs in a background Tokio task supervised by the main daemon with automatic reconnection, session resumption, and exponential backoff on disconnect.
+* **Crate:** `serenity` with the `tokio` runtime; no cache or framework features.
+* **Gateway Intents:** `GatewayIntents::GUILDS | GatewayIntents::DIRECT_MESSAGES` — slash commands need no `MESSAGE_CONTENT`, and DM content arrives without it.
+* **Connection Lifecycle:** supervised with every other front door; serenity resumes sessions itself, the adapter rebuilds the client with exponential backoff (capped at 5 minutes), and an invalid token or disallowed intents stop the process.
 
 #### 9.3.2 Slash Commands (Application Commands)
-The bot registers global Application Commands (or guild-scoped commands during development for immediate updates):
+Registered on every gateway ready: to `DISCORD_GUILD_ID` when set (instant updates), otherwise globally. Each command takes **one string** (design D6), parsed by the shared module registry exactly as the Matrix text after the command:
 
-| Slash Command | Options / Arguments | Description |
+| Slash Command | Option | Runs |
 |---|---|---|
-| `/todo add` | `title: String`, `due: Option<String>`, `priority: Option<Integer>` | Create a new task |
-| `/todo list` | `filter: Option<Choice['all', 'pending', 'done']>` | View task list |
-| `/todo done` | `task_id: String` (Autocomplete) | Complete a task |
-| `/expense add` | `amount: Number`, `category: String` (Autocomplete), `description: String` | Log an expense |
-| `/expense summary` | `period: Option<Choice['today', 'month', 'year']>` | View spending summary |
-| `/portfolio list` | *None* (Enforces ephemeral or DM response) | View investment holdings & P&L |
-| `/portfolio buy` | `symbol: String`, `quantity: Number`, `price: Number` | Execute a stock/crypto buy |
-| `/remind` | `time: String`, `message: String` | Set a reminder |
-| `/say` | `text: String`, `voice: Option<String>` | Synthesize voice audio |
-| `/ask` | `prompt: String` | Ask conversational LLM |
-| `/link` | *None* (DM Only) | Initiate WebAuthn account linking |
+| `/todo` | `args` (optional, ≤ 500 chars) | `todo …` |
+| `/expense` | `args` | `expense …` |
+| `/portfolio` | `args` | `portfolio …` |
+| `/ask` | `prompt` (required, ≤ 4000 chars) | the AI assistant |
+| `/link` | `args` (ignored; DM only) | chat-initiated account linking |
+| `/help` | `args` | the shared help text |
+
+Text sent to the bot in a direct message goes to the AI assistant.
 
 #### 9.3.3 Interactive Message Components & Modals
 * **Buttons (ActionRow):**
@@ -955,7 +951,7 @@ The bot registers global Application Commands (or guild-scoped commands during d
   * **Stat Strips:** Summary metrics rendered as inline embed fields (`grid-like`).
 
 #### 9.3.5 Channel Privacy Gating
-* **Public Guild Channels:** Sensitive financial operations (`/portfolio`, `/expense list`) are either automatically set to `ephemeral: true` (only visible to the command invoker) or refused with a prompt to use Direct Messages.
+* **Public Guild Channels:** every command except `/help` is answered ephemerally (only visible to the invoker), and a reply marked private is never posted on a public response. `/link` is refused outside a DM.
 * **Direct Messages (DMs):** Unrestricted access to all personal workspace features, continuous conversational LLM interaction with direct tool calling, and receipt photo uploads.
 
 ---

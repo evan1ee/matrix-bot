@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Status:** draft, awaiting the user's approval (HANDOFF §7.1). No code before approval.
+**Status:** approved 2026-10-02; implemented (Tasks 1–7, HANDOFF §4 Plan B, rulings R85–R101).
 
 **Goal:** Discord becomes the second `ChannelAdapter`. A linked Discord user runs `/todo`, `/expense`, `/portfolio`, `/ask`, `/link` and `/help` (and talks to the agent in a DM) against the same `BotModule` registry, services and account as on Matrix. Reminders and the link confirmation come back to the Discord conversation they started in. An unlinked Discord user can only `/help` and `/link`. Nothing outside `interface/channels/discord/`, the Markdown renderer, configuration and the composition root changes.
 

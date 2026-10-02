@@ -13,6 +13,13 @@
 - Linking: `claim` also merges the account an identity was last unlinked from when it still holds data, and there is no separate confirm-merge step (R82); signup is `LinkService::sign_up_with_passkey` / `claim_for_new_account`, and `/link/signup/finish` takes `{ceremony_id, token, credential, label?}` (R83); `register_finish` became atomic too (R83).
 - The web `/link` page is chosen by pathname, the SPA having no router (R84).
 
+**Amended after implementation (plan B, Discord, 2026-10-02)** — rulings R85–R100 (= plan clarifications B1–B16):
+
+- A slash command reaches the registry as the bare `<command> <args>` modules parse (R85); guild interactions are ephemeral except `/help`, and a `Private` reply is never posted on a public response (R86); DM text goes to the agent (R87).
+- Embeds carry no title and no colour (R88); `Content.actions` are not rendered on Discord (R89); the adapter holds no `AppServices` (R90).
+- `run` rebuilds the gateway client with capped exponential backoff and returns an error only for an invalid token or disallowed intents (R91); work runs on a bounded queue with four workers (R92); the supervisor watches every adapter (R97).
+- `ChannelSink::is_ready` still means "any adapter connected" (R93); `/help` shows the shared `!`-prefixed text (R94); attachments are files capped at 10 MiB (R98); option limits are 500 / 4000 characters, re-checked server side (R99); the outbox key becomes Discord's nonce when it fits (R100).
+
 ## 1. Goal
 
 One application and domain, many interfaces. Matrix, Discord, Telegram and Email become protocol adapters that turn platform traffic into normalized messages, call the same application services and `BotModule`s, and render normalized replies back into platform-native form.
@@ -311,7 +318,7 @@ Each adapter maps its client errors (`matrix_sdk::Error`, `serenity::Error`, `te
 | Plan | Scope | Written |
 |---|---|---|
 | **A** `plans/2026-10-01-omnichannel-a-framework.md` | domain/channels; message/adapter/registry; neutral `CommandContext`/`Reply`; agent decoupled; migrations 0006–0008; `IdentityService`/`LinkService`; link HTTP + web page; Matrix onto `MatrixAdapter`; registry replaces `Delivery` and `MatrixRoomSink`; docs | now |
-| **B** Discord | §8.2 | when A is merged into the branch |
+| **B** Discord `plans/2026-10-02-omnichannel-b-discord.md` | §8.2 | done (2026-10-02) |
 | **C** Telegram | §8.3 | after B |
 | **D** Email | §8.4 | after C |
 
