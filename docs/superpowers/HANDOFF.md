@@ -32,7 +32,7 @@ Do not reopen a settled decision without new evidence and the user's agreement.
 | Sub-project | Phases | Scope | State |
 |---|---|---|---|
 | **1 — PostgreSQL Foundation** | 1–3 | PostgreSQL-only; versioned migrations; compile-checked SQL; layer-first architecture for **every backend feature**; account UUIDs; durable job queue; transactional outbox | **In progress** (designed, partly implemented) |
-| 2 — Omnichannel | 4 | `ChannelAdapter` / `ChannelRegistry`; Matrix refactored onto it; Discord (`serenity`), Telegram (`teloxide`) and Email (IMAP/SMTP) adapters; `platform_identities`; chat-initiated linking | **In progress: plan A done (B–D pending).** Design `specs/2026-10-01-omnichannel-design.md` (approved 2026-10-01, amended after implementation); plan A (`plans/2026-10-01-omnichannel-a-framework.md`, framework, Matrix on `ChannelAdapter`, chat-initiated linking) implemented, final verification pending (§4 Plan A); plans B (Discord), C (Telegram), D (Email) not yet written; branch `feat/omnichannel`, stacked on `refactor/outbox` by user decision |
+| 2 — Omnichannel | 4 | `ChannelAdapter` / `ChannelRegistry`; Matrix refactored onto it; Discord (`serenity`), Telegram (`teloxide`) and Email (IMAP/SMTP) adapters; `platform_identities`; chat-initiated linking | **In progress: plan A done (B–D pending).** Design `specs/2026-10-01-omnichannel-design.md` (approved 2026-10-01, amended after implementation); plan A (`plans/2026-10-01-omnichannel-a-framework.md`, framework, Matrix on `ChannelAdapter`, chat-initiated linking) implemented and verified (§4 Plan A); plans B (Discord), C (Telegram), D (Email) not yet written; branch `feat/omnichannel`, stacked on `refactor/outbox` by user decision |
 | 3 — Scheduled agent & storage | 5 | `ScheduledAgentTask` runtime (`scheduled_agent_tasks`, `agent_runs`, `agent_steps`); `StorageService` (local / S3); HTTP contracts between the backend and inference crates standardised | Not designed |
 | 4 — Web polish | 6 | Regenerated TypeScript client; live UI through the unified SSE stream; UI for linked identities and notification routing | Not designed |
 
@@ -232,11 +232,10 @@ Each test gets its own `t<pid>_<n>` schema; the next test process reaps schemas 
 
 ## 7. Next actions (in order)
 
-1. **Final verification of plan A** (orchestrator): the full gate plus release build, `npm --prefix frontend run build`, the Playwright suite and the `live_postgres` tests; record the results under §4 Plan A.
-2. **Write plan B (Discord)** against the code plan A produced (`interface/channels/{adapter,registry,inbound}.rs`, the `MatrixAdapter` as the reference adapter), then C (Telegram) and D (Email). Each needs the user's approval of the plan before code.
-3. **Merge gates (§10)** now include rehearsing migrations 0004–0008 on a production copy (0007 guard, `!link <code>` retirement; runbook §2a). Hand them to the user; merge only on their instruction. If `refactor/outbox` changes before it merges, rebase `feat/omnichannel` onto it.
-4. **Clear the §11 items** that touch the test suite first.
-5. Sub-projects 3 and 4 start with a design and the user's approval.
+1. **Write plan B (Discord)** against the code plan A produced (`interface/channels/{adapter,registry,inbound}.rs`, the `MatrixAdapter` as the reference adapter), then C (Telegram) and D (Email). Each needs the user's approval of the plan before code.
+2. **Merge gates (§10)** now include rehearsing migrations 0004–0008 on a production copy (0007 guard, `!link <code>` retirement; runbook §2a). Hand them to the user; merge only on their instruction. If `refactor/outbox` changes before it merges, rebase `feat/omnichannel` onto it.
+3. **Clear the §11 items** that touch the test suite first.
+4. Sub-projects 3 and 4 start with a design and the user's approval.
 
 ## 8. Feature template (established by Task 1, rooms)
 
