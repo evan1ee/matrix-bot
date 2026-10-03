@@ -21,6 +21,7 @@ use crate::db::Database;
 use crate::domain::channels::Channel;
 use crate::interface::channels::adapter::ChannelAdapter;
 use crate::interface::channels::discord::adapter::DiscordAdapter;
+use crate::interface::channels::email::EmailAdapter;
 use crate::interface::channels::inbound::Inbound;
 use crate::interface::channels::matrix::adapter::MatrixAdapter;
 use crate::interface::channels::matrix::handles::BotHandles;
@@ -202,9 +203,21 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         .map(|c| TelegramAdapter::new(c, config.web_url.clone()))
         .transpose()?
         .map(Arc::new);
+    let email = config
+        .email
+        .clone()
+        .map(|c| {
+            EmailAdapter::new(
+                c,
+                config.link_signup_allowlist.get(&Channel::Email).cloned(),
+            )
+        })
+        .transpose()?
+        .map(Arc::new);
     let mut configured = vec![Channel::Matrix];
     configured.extend(discord.as_ref().map(|_| Channel::Discord));
     configured.extend(telegram.as_ref().map(|_| Channel::Telegram));
+    configured.extend(email.as_ref().map(|_| Channel::Email));
     check_unique(&configured)?;
     let matrix = Arc::new(MatrixAdapter::new(
         config.clone(),
@@ -231,6 +244,10 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         if let Some(telegram) = &telegram {
             telegram.attach_inbound(Arc::clone(&inbound));
             adapters.push(telegram.clone() as Arc<dyn ChannelAdapter>);
+        }
+        if let Some(email) = &email {
+            email.attach_inbound(Arc::clone(&inbound));
+            adapters.push(email.clone() as Arc<dyn ChannelAdapter>);
         }
         ChannelRegistry::from_unique(adapters)
     });
@@ -722,6 +739,39 @@ mod tests {
             supervise_front_doors(&shutdown, &mut api, &mut adapters, &mut jobs, &mut events).await;
 
         assert_eq!(ended, Some("Telegram updates"));
+        assert!(shutdown.is_cancelled());
+        let started = Instant::now();
+        let laggards = stop_remaining(
+            started + Duration::from_secs(15),
+            tasks_of(api, adapters, jobs, events),
+            ended,
+        )
+        .await;
+        assert!(laggards.is_empty(), "{laggards:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_email_adapter_task_ending_unrequested_stops_the_process() {
+        let shutdown = CancellationToken::new();
+        let waiter = |s: CancellationToken| tokio::spawn(async move { s.cancelled().await });
+        let mut api = waiter(shutdown.clone());
+        let mut jobs = waiter(shutdown.clone());
+        let mut events = waiter(shutdown.clone());
+        let mut adapters = vec![
+            AdapterTask {
+                name: front_door_name(Channel::Matrix),
+                handle: waiter(shutdown.clone()),
+            },
+            AdapterTask {
+                name: front_door_name(Channel::Email),
+                handle: tokio::spawn(async {}), // ends immediately, unrequested
+            },
+        ];
+
+        let ended =
+            supervise_front_doors(&shutdown, &mut api, &mut adapters, &mut jobs, &mut events).await;
+
+        assert_eq!(ended, Some("Email poller"));
         assert!(shutdown.is_cancelled());
         let started = Instant::now();
         let laggards = stop_remaining(

@@ -800,7 +800,14 @@ fn the_agent_knows_no_channel() {
 fn chat_modules_know_no_platform_sdk() {
     let hits = production_violations(
         "interface/chat",
-        &["matrix_sdk", "serenity", "teloxide", "lettre", "async_imap"],
+        &[
+            "matrix_sdk",
+            "serenity",
+            "teloxide",
+            "lettre",
+            "async_imap",
+            "mail_parser",
+        ],
     );
     assert!(hits.is_empty(), "{}", hits.join("\n"));
 }
@@ -813,6 +820,7 @@ fn only_the_composition_root_builds_adapters_and_the_registry() {
         "MatrixAdapter::new(",
         "DiscordAdapter::new(",
         "TelegramAdapter::new(",
+        "EmailAdapter::new(",
         "ChannelRegistry::new(",
         "ChannelRegistry::from_unique(",
     ] {
@@ -897,6 +905,29 @@ fn teloxide_stays_inside_the_telegram_adapter() {
     assert!(
         hits.is_empty(),
         "teloxide outside interface/channels/telegram:\n{}",
+        hits.join("\n")
+    );
+}
+
+/// lettre, async_imap and mail_parser are the Email adapter's private dependencies:
+/// nothing else may name them, so swapping or upgrading them touches one directory.
+#[test]
+fn email_crates_stay_inside_the_email_adapter() {
+    let hits: Vec<_> = rust_files(&src(""))
+        .into_iter()
+        .filter(|f| !relative_to_src(f).starts_with("interface/channels/email/"))
+        .flat_map(|f| {
+            let text = fs::read_to_string(&f).expect("readable source file");
+            let rel = relative_to_src(&f);
+            production_hits(&text, &["lettre", "async_imap", "mail_parser"])
+                .into_iter()
+                .map(move |(n, l)| format!("{rel}:{n}: {l}"))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert!(
+        hits.is_empty(),
+        "email crates outside interface/channels/email:\n{}",
         hits.join("\n")
     );
 }
