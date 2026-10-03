@@ -31,7 +31,7 @@ use crate::interface::http::reminders::{RecurrencePattern, Reminder, ReminderSta
 use crate::interface::http::todos::{TodoItem, TodoPriority};
 use crate::interface::http::webhooks::{TelegramMessageResult, TelegramQuery, TelegramResponse};
 use crate::interface::http::{
-    account, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_categories,
+    account, agent, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_categories,
     finance_net_worth, footprints, habits, health, identities, life, life_activity, link, mcp, ocr,
     portfolio, portfolio_alerts, portfolio_cash, portfolio_history, portfolio_prices,
     recurring_bills, reminders, rooms, settings, sse, storage, todos, voice, webhooks,
@@ -180,10 +180,27 @@ use crate::interface::http::{
         life::delete_day,
         life_activity::get_day_activity,
         webhooks::telegram_compat::telegram_send_message_get,
-        webhooks::telegram_compat::telegram_send_message_post
+        webhooks::telegram_compat::telegram_send_message_post,
+        agent::start_run,
+        agent::list_runs,
+        agent::get_run,
+        agent::cancel_run,
+        agent::list_pending_approvals,
+        agent::approve_action,
+        agent::reject_action,
+        agent::list_tasks,
+        agent::schedule_task,
     ),
     components(
         schemas(
+            agent::AgentRunResponse,
+            agent::AgentStepResponse,
+            agent::AgentRunDetailResponse,
+            agent::ApprovalRequestResponse,
+            agent::ScheduledTaskResponse,
+            agent::StartAgentRunRequest,
+            agent::RejectActionRequest,
+            agent::ScheduleTaskRequest,
             ApiErrorResponse,
             health::LiveResponse,
             health::ReadyResponse,

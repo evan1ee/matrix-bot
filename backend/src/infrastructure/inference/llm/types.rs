@@ -83,6 +83,18 @@ pub struct ChatCompletionResponse {
     pub id: Option<String>,
     pub model: Option<String>,
     pub choices: Vec<ChatCompletionChoice>,
+    #[serde(default)]
+    pub usage: Option<ChatUsage>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct ChatUsage {
+    #[serde(default)]
+    pub prompt_tokens: i32,
+    #[serde(default)]
+    pub completion_tokens: i32,
+    #[serde(default)]
+    pub total_tokens: i32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

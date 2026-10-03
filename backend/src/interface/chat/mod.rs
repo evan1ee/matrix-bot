@@ -4,6 +4,7 @@
 //! (`tests/architecture.rs`).
 
 pub mod account;
+pub mod agent;
 pub mod bookmarks;
 pub mod briefing;
 pub mod core;

@@ -35,15 +35,17 @@ pub enum JobType {
     PortfolioCheckAlerts,
     PortfolioRefreshPrices,
     MediaProcessReceipt,
+    AgentExecuteRun,
 }
 
 impl JobType {
-    pub const ALL: [JobType; 5] = [
+    pub const ALL: [JobType; 6] = [
         JobType::ReminderFire,
         JobType::BriefingSend,
         JobType::PortfolioCheckAlerts,
         JobType::PortfolioRefreshPrices,
         JobType::MediaProcessReceipt,
+        JobType::AgentExecuteRun,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -53,6 +55,7 @@ impl JobType {
             JobType::PortfolioCheckAlerts => "portfolio.check_alerts",
             JobType::PortfolioRefreshPrices => "portfolio.refresh_prices",
             JobType::MediaProcessReceipt => "media.process_receipt",
+            JobType::AgentExecuteRun => "agent.execute_run",
         }
     }
 
@@ -119,11 +122,18 @@ pub struct ProcessReceiptPayload {
     pub caption: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentExecutePayload {
+    pub run_id: uuid::Uuid,
+    pub origin_conversation: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JobPayload {
     ReminderFire(ReminderFirePayload),
     BriefingSend(BriefingSendPayload),
     MediaProcessReceipt(ProcessReceiptPayload),
+    AgentExecute(AgentExecutePayload),
     /// `{}` — the job's type and account say everything.
     Empty,
 }
@@ -232,6 +242,26 @@ impl NewJob {
             payload,
             3,
             60,
+            dedupe_key,
+        )
+    }
+
+    pub fn agent_execute(
+        owner: AccountId,
+        run_id: uuid::Uuid,
+        origin_conversation: Option<String>,
+    ) -> Self {
+        let dedupe_key = format!("agent:{run_id}:{}", uuid::Uuid::new_v4());
+        let payload = JobPayload::AgentExecute(AgentExecutePayload {
+            run_id,
+            origin_conversation,
+        });
+        Self::new(
+            JobType::AgentExecuteRun,
+            Some(owner),
+            payload,
+            3,
+            30,
             dedupe_key,
         )
     }

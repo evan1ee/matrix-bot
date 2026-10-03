@@ -16,6 +16,7 @@ use crate::interface::channels::message::{Content, OutgoingMessage, Reply, Targe
 use crate::interface::channels::registry::ChannelRegistry;
 use crate::jobs::{JobError, JobHandler};
 
+pub mod agent;
 pub mod briefing;
 pub mod media;
 pub mod portfolio;
@@ -49,9 +50,12 @@ impl Outbound for ChannelRegistry {
 /// Every job handler.
 pub fn handlers(
     services: &AppServices,
+    pool: crate::db::DbPool,
     outbound: Arc<dyn Outbound>,
     ocr: crate::infrastructure::inference::ocr::OcrClient,
+    ai_env_config: crate::config::AiEnvConfig,
 ) -> Vec<Arc<dyn JobHandler>> {
+    let agent_engine = crate::llm::agent::ReActEngine::from_proxy(ai_env_config.proxy.as_deref());
     vec![
         Arc::new(reminders::ReminderFireHandler::new(
             services.clone(),
@@ -68,8 +72,15 @@ pub fn handlers(
         Arc::new(portfolio::RefreshPricesHandler::new(services.clone())),
         Arc::new(media::ProcessReceiptHandler::new(
             services.clone(),
-            outbound,
+            outbound.clone(),
             ocr,
+        )),
+        Arc::new(agent::AgentExecuteRunHandler::new(
+            services.clone(),
+            pool,
+            outbound,
+            agent_engine,
+            ai_env_config,
         )),
     ]
 }

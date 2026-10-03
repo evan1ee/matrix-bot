@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE scheduled_agent_tasks\n        SET\n            last_run_at = $2,\n            next_run_at = $3,\n            updated_at = $4\n        WHERE id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "43d03327dd1a1447f88d3bdb226c82dfedf52c66f147b159bb7234f163cfc777"
+}

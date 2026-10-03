@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE agent_approvals\n        SET\n            status = $2,\n            resolved_at = $3\n        WHERE id = $1 AND status = 'pending'\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "ca0e4117f3f6eed2e58d056fdc0a3f351491aa6ea1b8038e92d8d649081038a7"
+}

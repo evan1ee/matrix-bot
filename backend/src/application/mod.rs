@@ -5,6 +5,7 @@
 //! (`tests/architecture.rs`).
 
 pub mod accounts;
+pub mod agent;
 pub mod bookmarks;
 pub mod briefing;
 pub mod finance;
@@ -29,6 +30,7 @@ use sqlx::PgPool;
 use crate::infrastructure::storage::StorageService;
 
 use self::accounts::AccountService;
+use self::agent::AgentService;
 use self::bookmarks::BookmarkService;
 use self::briefing::BriefingService;
 use self::finance::FinanceService;
@@ -94,6 +96,7 @@ impl From<&'static str> for AppError {
 #[derive(Clone)]
 pub struct AppServices {
     pub accounts: AccountService,
+    pub agent: AgentService,
     pub bookmarks: BookmarkService,
     pub briefing: BriefingService,
     pub finance: FinanceService,
@@ -120,6 +123,7 @@ impl AppServices {
     /// event plumbing is passed in.
     pub fn new(pool: &PgPool) -> Self {
         let accounts = AccountService::new(pool.clone());
+        let agent = AgentService::new(pool.clone());
         let bookmarks = BookmarkService::new(pool.clone());
         let settings = SettingsService::new(pool.clone());
         let briefing = BriefingService::new(pool.clone(), settings.clone(), accounts.clone());
@@ -159,6 +163,7 @@ impl AppServices {
         });
         Self {
             accounts,
+            agent,
             bookmarks,
             briefing,
             finance,

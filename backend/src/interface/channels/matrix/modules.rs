@@ -41,6 +41,7 @@ pub async fn build_modules(config: &Config) -> Arc<ModuleRegistry> {
     registry.register(BriefingModule::new());
     registry.register(WebhookModule::new());
     registry.register(crate::interface::chat::mcp::McpModule::new());
+    registry.register(crate::interface::chat::agent::AgentModule::new());
     // Must precede LlmModule: `LlmModule::handle_command` claims any
     // non-empty text sent as (or mentioning it in) a direct message, not
     // just `!ai` — see `interface/chat/llm.rs`.
@@ -79,6 +80,6 @@ mod tests {
         let ai = position("AI Assistant");
         assert!(tts.is_some() && ai.is_some(), "{names:?}");
         assert!(tts < ai, "TTS must precede the AI catch-all: {names:?}");
-        assert_eq!(names.len(), 18, "{names:?}");
+        assert_eq!(names.len(), 19, "{names:?}");
     }
 }

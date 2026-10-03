@@ -33,7 +33,7 @@ Do not reopen a settled decision without new evidence and the user's agreement.
 |---|---|---|---|
 | **1 — PostgreSQL Foundation** | 1–3 | PostgreSQL-only; versioned migrations; compile-checked SQL; layer-first architecture for **every backend feature**; account UUIDs; durable job queue; transactional outbox | **In progress** (designed, partly implemented) |
 | 2 — Omnichannel | 4 | `ChannelAdapter` / `ChannelRegistry`; Matrix refactored onto it; Discord (`serenity`), Telegram (`teloxide`) and Email (IMAP/SMTP) adapters; `platform_identities`; chat-initiated linking | **Complete: plans A, B, C, and D implemented and verified.** Design `specs/2026-10-01-omnichannel-design.md`; plan A (`plans/2026-10-01-omnichannel-a-framework.md`); plan B (Discord, `plans/2026-10-02-omnichannel-b-discord.md`); plan C (Telegram, `plans/2026-10-02-omnichannel-c-telegram.md`); plan D (Email, `plans/2026-10-03-omnichannel-d-email.md`); branch `feat/omnichannel` |
-| 3 — Scheduled agent & storage | 5 | Storage decoupling (`StorageService`, local/S3, presigned streaming, durable `media.process_receipt` job, chat image ingestion); `ScheduledAgentTask` runtime | **Storage decoupling complete** (plan `plans/2026-10-03-storage-decoupling.md`); ScheduledAgentTask pending |
+| 3 — Scheduled agent & storage | 5 | Storage decoupling (`StorageService`, local/S3, presigned streaming, durable `media.process_receipt` job, chat image ingestion); `ScheduledAgentTask` runtime | **Complete: storage decoupling and autonomous agent runtime implemented and verified.** Plans `plans/2026-10-03-storage-decoupling.md` and `plans/2026-10-03-agent-runtime.md`; branch `feat/agent-runtime` |
 | 4 — Web polish | 6 | Regenerated TypeScript client; live UI through the unified SSE stream; UI for linked identities and notification routing | Not designed |
 
 The order is strict. Each sub-project builds on the previous one: channels need the layers and the tool registry, the agent needs the job queue, and the web UI needs the outbox events. **Do not start sub-project 2 until sub-project 1 is merged**, unless the user says otherwise.
@@ -248,9 +248,34 @@ Final verification (orchestrator, at `8418b25` plus the docs commit; docs change
 | 6 | Durable background job: `media.process_receipt` (`interface/jobs/media.rs`), OCR extraction, expense record, outbox notifications | ✅ | `475c92b` |
 | 7 | HTTP storage endpoint: `GET /api/v1/storage/*key` (`interface/http/storage.rs`), owner verification, HMAC token check | ✅ | `76c4186` |
 | 8 | Inbound chat attachment ingestion: `interface/channels/matrix/attachments.rs` saves to storage, enqueues job, replies immediate acknowledgment | ✅ | `5d470d4` |
-| 9 | Architecture boundary tests & documentation: `storage_crates_stay_inside_the_storage_infrastructure`, README, docs, HANDOFF | ✅ | this commit |
+| 9 | Architecture boundary tests & documentation: `storage_crates_stay_inside_the_storage_infrastructure`, README, docs, HANDOFF | ✅ | `7e1a3bc` |
+
+### Sub-project 3 — Autonomous Agent Runtime (`plans/2026-10-03-agent-runtime.md`, branch `feat/agent-runtime`)
+
+| Task | Scope | State | Commit |
+|---|---|---|---|
+| 1 | Database schema & domain models (`backend/migrations/0010_agent_runtime.sql`, `domain/agent/mod.rs`) | ✅ | this PR |
+| 2 | PostgreSQL repository (`infrastructure/postgres/repositories/agent.rs`), offline `.sqlx` cache | ✅ | this PR |
+| 3 | Application service (`application/agent/mod.rs`), outbox events, jobs integration | ✅ | this PR |
+| 4 | ReAct execution engine, sandbox & prompts (`llm/agent/{prompts,sandbox,engine}.rs`) | ✅ | this PR |
+| 5 | Background job handler & scheduler sweep (`interface/jobs/agent.rs`, `jobs/schedule.rs`) | ✅ | this PR |
+| 6 | Chat & REST interfaces (`interface/chat/agent.rs`, `interface/http/agent.rs`, OpenAPI spec) | ✅ | this PR |
+| 7 | Extensible plugin foundation (`ScheduledAgentTask` trait, built-in task TODOs) | ✅ | this PR |
+| 8 | Full verification & documentation (clippy, fmt, sqlx check, full test suite, architecture) | ✅ | this PR |
+
+Final verification (orchestrator, on `feat/agent-runtime`):
+- `cargo fmt --all -- --check`: clean.
+- `cargo check -p matrix-bot --all-targets`: clean, no warnings.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean (zero warnings).
+- `cargo sqlx prepare --workspace --check -- -p matrix-bot --all-targets`: clean (zero drift).
+- `cargo run --bin generate-openapi && git diff --exit-code backend/openapi.json`: byte-identical.
+- `cargo test -p matrix-bot --test architecture`: 33 passed / 0 failed.
+- `cargo test -p matrix-bot -- --test-threads=4`: 1298 passed / 0 failed / 7 ignored; `main.rs` 2 passed.
+- `cargo test -p matrix-bot-inference`: 71 passed / 0 failed / 2 ignored.
+- `npm --prefix frontend run build`: clean (1722 modules transformed, 0 errors).
 
 ---
+
 
 ## 5. How to work
 
@@ -523,6 +548,7 @@ These need the human. Prepare them; don't perform them.
 - Discord has no buttons (R89), no typed slash options and no media ingestion (spec §14).
 - Telegram outbox deliveries are at-least-once (no Bot API idempotency keys; T14). A re-claimed outbox delivery could deliver twice.
 - Telegram `/help` prints the shared help text with Matrix's `!` prefixes (same as Discord B10).
+- Built-in task plugins implementation: the 5 planned tasks (`WeeklyBookmarkDigestTask`, `MonthlyFinancialAuditTask`, `PortfolioRebalanceAlertTask`, `BillDueDigestTask`, `HabitConsistencyReviewTask`) are stubbed with domain schemas and goals as TODO extensions in `domain/agent/task.rs`; execution of custom user goals and custom scheduled crons is fully functional.
 
 ## 12. Document map
 
@@ -543,6 +569,8 @@ These need the human. Prepare them; don't perform them.
 | `docs/superpowers/plans/2026-10-01-omnichannel-a-framework.md` | Sub-project 2 plan A: Tasks 1–12, clarifications A1–A6 (= R73) |
 | `docs/superpowers/plans/2026-10-02-omnichannel-b-discord.md` | Sub-project 2 plan B (Discord adapter): Tasks 1–7, clarifications B1–B16 (= R85–R100) |
 | `docs/superpowers/plans/2026-10-02-omnichannel-c-telegram.md` | Sub-project 2 plan C (Telegram adapter), draft for approval: Tasks 1–9, clarifications T1–T16 |
+| `docs/superpowers/specs/2026-10-03-agent-design.md` | Sub-project 3 design (Autonomous Agent Runtime, ReAct loop, durable jobs, approvals) |
+| `docs/superpowers/plans/2026-10-03-agent-runtime.md` | Sub-project 3 plan (Tasks 1–8: schema, domain, engine, jobs, chat/HTTP, plugins) |
 | `AGENTS.md` | Rules for agents: architecture, workflow, constraints, verification, Definition of Done |
 | `docs/architecture.md` | Layers, one-capability-many-interfaces, Matrix/accounts/settings design rationale |
 | `docs/database.md` | Schema and SQLx conventions, migrations, test databases |
@@ -634,5 +662,9 @@ These need the human. Prepare them; don't perform them.
 - **R150 (Pool starvation check):** `Config::validate` enforces `job_workers < db_max_connections as usize` — ensures background job workers cannot saturate the connection pool and starve API handlers, sync loops, and transactional queries — cost if wrong: connection starvation under peak job concurrency.
 - **R151 (Job listener silent reconnect):** `JobNotifications::next` uses `self.listener.try_recv().await?` and maps `Ok(None)` (silent reconnect in sqlx 0.9) to waking idle workers via `Ok(())` — prevents missed notifications during network hiccups without relying solely on polling interval — cost if wrong: jobs delayed until next periodic sweep when listener reconnects.
 - **R152 (Bounded reminder sweep):** `get_due_reminders` takes `limit: i64` (`LIMIT $3`); `ReminderService::enqueue_due` passes `MAX_ENQUEUE_DUE_BATCH = 100` — bounds memory and lock contention during large reminder backlogs — cost if wrong: unbounded query loading thousands of reminders simultaneously during recovery.
+- **R153 (A1 — Autonomous Agent Runtime Schema & Jobs):** Migration 0010 adds `agent_runs`, `agent_steps`, `agent_approvals`, and `scheduled_agent_tasks` (all owner-keyed, added to `ACCOUNT_ID_FOLLOWS`). Run execution is handled asynchronously via the durable job runtime (`agent.execute_run`) with worker heartbeats (`update_heartbeat`), lease management, and cancellation support — cost: none.
+- **R154 (A2 — ReAct Engine & Sensitive Action Interception):** Single-step ReAct loop with pure prompt formatting, thought extraction, and tool whitelist sandboxing. Tools designated sensitive (`is_sensitive == true`) are intercepted into `agent_approvals`, pausing run execution as `waiting_approval` with transactional outbox notification. Approval or rejection resumes or skips the action via dedicated chat commands (`!agent confirm`/`!agent reject`) or REST endpoints — cost: none.
+- **R155 (A3 — Extensible Plugin Foundation & Domain Purity):** `ScheduledAgentTask` trait and `ScheduledTaskRegistry` in `domain/agent/task.rs` remain completely pure and synchronous (no async, no external dependencies outside domain rules). 5 built-in task types (`WeeklyBookmarkDigestTask`, `MonthlyFinancialAuditTask`, `PortfolioRebalanceAlertTask`, `BillDueDigestTask`, `HabitConsistencyReviewTask`) stubbed as TODO extensions per directive — cost: built-in task logic deferred to future extension PRs.
+
 
 

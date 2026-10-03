@@ -34,6 +34,10 @@ fn portfolio_refresh(s: &AppServices, now: DateTime<Utc>) -> TickFuture<'_> {
     Box::pin(s.portfolio.enqueue_price_refresh(now))
 }
 
+fn agent_scheduled_tasks(s: &AppServices, _now: DateTime<Utc>) -> TickFuture<'_> {
+    Box::pin(s.agent.enqueue_due_scheduled_tasks())
+}
+
 pub fn default_ticks() -> Vec<Tick> {
     vec![
         Tick {
@@ -56,6 +60,11 @@ pub fn default_ticks() -> Vec<Tick> {
             every: Duration::from_secs(3_600),
             fire: portfolio_refresh,
         },
+        Tick {
+            name: "agent_scheduled_tasks",
+            every: Duration::from_secs(60),
+            fire: agent_scheduled_tasks,
+        },
     ]
 }
 
@@ -75,7 +84,8 @@ mod tests {
                 ("reminders", 5),
                 ("briefing", 30),
                 ("portfolio_alerts", 120),
-                ("portfolio_refresh", 3_600)
+                ("portfolio_refresh", 3_600),
+                ("agent_scheduled_tasks", 60),
             ]
         );
     }

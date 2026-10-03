@@ -18,6 +18,7 @@ use crate::config::Config;
 use crate::db::Database;
 
 pub mod account;
+pub mod agent;
 pub mod ai;
 pub mod app_error;
 pub mod auth;

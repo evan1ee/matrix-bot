@@ -258,8 +258,10 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
     let ocr = crate::infrastructure::inference::ocr::OcrClient::new(config.ocr_base_url.clone());
     let registry = jobs::Registry::new(crate::interface::jobs::handlers(
         &services,
+        db.pool.clone(),
         channels.clone() as Arc<dyn Outbound>,
         ocr,
+        config.ai.clone(),
     ))?;
     let runtime = jobs::JobRuntime::new(
         db.pool.clone(),

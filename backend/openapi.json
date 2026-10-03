@@ -712,6 +712,369 @@
         ]
       }
     },
+    "/api/v1/agent/approvals": {
+      "get": {
+        "tags": [
+          "agent"
+        ],
+        "operationId": "list_pending_approvals",
+        "responses": {
+          "200": {
+            "description": "List pending approval requests",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ApprovalRequestResponse"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/agent/approvals/{id}/approve": {
+      "post": {
+        "tags": [
+          "agent"
+        ],
+        "operationId": "approve_action",
+        "responses": {
+          "200": {
+            "description": "Action approved and execution resumed"
+          },
+          "404": {
+            "description": "Approval not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/agent/approvals/{id}/reject": {
+      "post": {
+        "tags": [
+          "agent"
+        ],
+        "operationId": "reject_action",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RejectActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Action rejected and recorded"
+          },
+          "404": {
+            "description": "Approval not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/agent/runs": {
+      "get": {
+        "tags": [
+          "agent"
+        ],
+        "operationId": "list_runs",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List recent agent runs",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AgentRunResponse"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "agent"
+        ],
+        "operationId": "start_run",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartAgentRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Agent run started",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRunResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Validation error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Active run already running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/agent/runs/{id}": {
+      "get": {
+        "tags": [
+          "agent"
+        ],
+        "operationId": "get_run",
+        "responses": {
+          "200": {
+            "description": "Agent run details with steps",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentRunDetailResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Run not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/agent/runs/{id}/cancel": {
+      "post": {
+        "tags": [
+          "agent"
+        ],
+        "operationId": "cancel_run",
+        "responses": {
+          "200": {
+            "description": "Agent run cancelled"
+          },
+          "404": {
+            "description": "Run not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/agent/tasks": {
+      "get": {
+        "tags": [
+          "agent"
+        ],
+        "operationId": "list_tasks",
+        "responses": {
+          "200": {
+            "description": "List scheduled agent tasks",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ScheduledTaskResponse"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/agent/tasks/{id}": {
+      "put": {
+        "tags": [
+          "agent"
+        ],
+        "operationId": "schedule_task",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScheduleTaskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Scheduled task upserted",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScheduledTaskResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid task ID or cron expression",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/ai/chat": {
       "post": {
         "tags": [
@@ -6727,6 +7090,137 @@
           }
         }
       },
+      "AgentRunDetailResponse": {
+        "type": "object",
+        "required": [
+          "run",
+          "steps"
+        ],
+        "properties": {
+          "run": {
+            "$ref": "#/components/schemas/AgentRunResponse"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/AgentStepResponse"
+            }
+          }
+        }
+      },
+      "AgentRunResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "account_id",
+          "task_name",
+          "goal",
+          "status",
+          "max_steps",
+          "current_step",
+          "total_tokens",
+          "started_at",
+          "updated_at"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "completed_at": {
+            "type": "string",
+            "nullable": true
+          },
+          "current_step": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "error": {
+            "type": "string",
+            "nullable": true
+          },
+          "goal": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "max_steps": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "origin_conversation": {
+            "type": "string",
+            "nullable": true
+          },
+          "scheduled_task_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "started_at": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "task_name": {
+            "type": "string"
+          },
+          "total_tokens": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
+      "AgentStepResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "run_id",
+          "step_number",
+          "status",
+          "tokens_used",
+          "created_at"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "step_number": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "thought": {
+            "type": "string",
+            "nullable": true
+          },
+          "tokens_used": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "tool_input": {
+            "nullable": true
+          },
+          "tool_name": {
+            "type": "string",
+            "nullable": true
+          },
+          "tool_output": {
+            "nullable": true
+          }
+        }
+      },
       "AiChatRequest": {
         "type": "object",
         "required": [
@@ -6920,6 +7414,47 @@
             "minimum": 0
           },
           "error": {
+            "type": "string"
+          }
+        }
+      },
+      "ApprovalRequestResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "run_id",
+          "account_id",
+          "tool_name",
+          "tool_input",
+          "status",
+          "expires_at",
+          "created_at"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string"
+          },
+          "expires_at": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "resolved_at": {
+            "type": "string",
+            "nullable": true
+          },
+          "run_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "tool_input": {},
+          "tool_name": {
             "type": "string"
           }
         }
@@ -9694,6 +10229,15 @@
           }
         }
       },
+      "RejectActionRequest": {
+        "type": "object",
+        "properties": {
+          "reason": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
       "Reminder": {
         "type": "object",
         "description": "A reminder stored in the database.",
@@ -9833,6 +10377,65 @@
         ],
         "properties": {
           "label": {
+            "type": "string"
+          }
+        }
+      },
+      "ScheduleTaskRequest": {
+        "type": "object",
+        "required": [
+          "cron_expression"
+        ],
+        "properties": {
+          "config": {
+            "nullable": true
+          },
+          "cron_expression": {
+            "type": "string"
+          }
+        }
+      },
+      "ScheduledTaskResponse": {
+        "type": "object",
+        "required": [
+          "id",
+          "account_id",
+          "task_id",
+          "cron_expression",
+          "enabled",
+          "config",
+          "next_run_at",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "account_id": {
+            "type": "string"
+          },
+          "config": {},
+          "created_at": {
+            "type": "string"
+          },
+          "cron_expression": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string"
+          },
+          "last_run_at": {
+            "type": "string",
+            "nullable": true
+          },
+          "next_run_at": {
+            "type": "string"
+          },
+          "task_id": {
+            "type": "string"
+          },
+          "updated_at": {
             "type": "string"
           }
         }
@@ -9980,6 +10583,26 @@
             "type": "boolean"
           },
           "title": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "StartAgentRunRequest": {
+        "type": "object",
+        "required": [
+          "goal"
+        ],
+        "properties": {
+          "goal": {
+            "type": "string"
+          },
+          "max_steps": {
+            "type": "integer",
+            "format": "int32",
+            "nullable": true
+          },
+          "origin_conversation": {
             "type": "string",
             "nullable": true
           }

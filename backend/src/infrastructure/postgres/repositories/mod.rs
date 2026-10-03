@@ -3,6 +3,7 @@
 //! mapped into domain types before they leave the file.
 
 pub mod accounts;
+pub mod agent;
 pub mod bookmarks;
 pub mod finance;
 pub mod footprints;

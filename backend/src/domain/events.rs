@@ -159,6 +159,34 @@ pub enum SystemEvent {
         /// Storage-form address of the conversation that started the link.
         conversation: String,
     },
+    AgentRunStarted {
+        owner_id: AccountId,
+        run_id: String,
+        task_name: String,
+        goal: String,
+    },
+    AgentStepCompleted {
+        owner_id: AccountId,
+        run_id: String,
+        step_number: i32,
+        thought: Option<String>,
+        tool_name: Option<String>,
+        status: String,
+    },
+    AgentApprovalRequired {
+        owner_id: AccountId,
+        run_id: String,
+        approval_id: String,
+        tool_name: String,
+        tool_input: serde_json::Value,
+    },
+    AgentRunCompleted {
+        owner_id: AccountId,
+        run_id: String,
+        status: String,
+        total_tokens: i32,
+        error: Option<String>,
+    },
 }
 
 impl SystemEvent {
@@ -219,6 +247,10 @@ impl SystemEvent {
             SystemEvent::BookmarkDeleted { owner_id, .. } => owner_id,
             SystemEvent::MorningBriefingSent { owner_id, .. } => owner_id,
             SystemEvent::IdentityLinked { owner_id, .. } => owner_id,
+            SystemEvent::AgentRunStarted { owner_id, .. } => owner_id,
+            SystemEvent::AgentStepCompleted { owner_id, .. } => owner_id,
+            SystemEvent::AgentApprovalRequired { owner_id, .. } => owner_id,
+            SystemEvent::AgentRunCompleted { owner_id, .. } => owner_id,
         }
     }
 
@@ -275,6 +307,10 @@ impl SystemEvent {
             SystemEvent::BookmarkDeleted { .. } => "BookmarkDeleted",
             SystemEvent::MorningBriefingSent { .. } => "MorningBriefingSent",
             SystemEvent::IdentityLinked { .. } => "IdentityLinked",
+            SystemEvent::AgentRunStarted { .. } => "AgentRunStarted",
+            SystemEvent::AgentStepCompleted { .. } => "AgentStepCompleted",
+            SystemEvent::AgentApprovalRequired { .. } => "AgentApprovalRequired",
+            SystemEvent::AgentRunCompleted { .. } => "AgentRunCompleted",
         }
     }
 

@@ -4,7 +4,7 @@ use axum::{
 };
 
 use super::{
-    account, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_categories,
+    account, agent, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_categories,
     finance_net_worth, footprints, habits, identities, life, life_activity, link, mcp, ocr,
     openapi, portfolio, portfolio_alerts, portfolio_cash, portfolio_history, portfolio_prices,
     recurring_bills, reminders, rooms, settings, sse, storage, todos, voice, webhooks,
@@ -23,6 +23,7 @@ pub fn api_routes() -> Router<auth::ApiState> {
         .merge(routes_portfolio())
         .merge(routes_life())
         .merge(routes_ai_and_webhooks())
+        .merge(routes_agent())
 }
 
 fn routes_core() -> Router<auth::ApiState> {
@@ -353,4 +354,16 @@ fn routes_ai_and_webhooks() -> Router<auth::ApiState> {
         .route("/ocr/scan", post(ocr::scan_image))
         .route("/voice/transcribe", post(voice::transcribe_voice))
         .nest("/mcp", mcp::mcp_routes())
+}
+
+fn routes_agent() -> Router<auth::ApiState> {
+    Router::new()
+        .route("/agent/runs", get(agent::list_runs).post(agent::start_run))
+        .route("/agent/runs/:id", get(agent::get_run))
+        .route("/agent/runs/:id/cancel", post(agent::cancel_run))
+        .route("/agent/approvals", get(agent::list_pending_approvals))
+        .route("/agent/approvals/:id/approve", post(agent::approve_action))
+        .route("/agent/approvals/:id/reject", post(agent::reject_action))
+        .route("/agent/tasks", get(agent::list_tasks))
+        .route("/agent/tasks/:id", put(agent::schedule_task))
 }

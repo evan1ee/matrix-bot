@@ -299,6 +299,134 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/agent/approvals": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_pending_approvals"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent/approvals/{id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["approve_action"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent/approvals/{id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["reject_action"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_runs"];
+        put?: never;
+        post: operations["start_run"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent/runs/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_run"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent/runs/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["cancel_run"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_tasks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/agent/tasks/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["schedule_task"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ai/chat": {
         parameters: {
             query?: never;
@@ -1666,6 +1794,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/storage/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Retrieves stored binary asset for a given canonical storage key.
+         * @description Access is granted if:
+         *     1. The caller is authenticated as the account owning the key (`key.account_id() == user.account_id`), OR
+         *     2. An unexpired HMAC token matching the key is provided in the query string (`sig` and `exp`).
+         */
+        get: operations["get_storage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/todos": {
         parameters: {
             query?: never;
@@ -1830,6 +1980,43 @@ export interface components {
             todos_due: number;
             total_events: number;
         };
+        AgentRunDetailResponse: {
+            run: components["schemas"]["AgentRunResponse"];
+            steps: components["schemas"]["AgentStepResponse"][];
+        };
+        AgentRunResponse: {
+            account_id: string;
+            completed_at?: string | null;
+            /** Format: int32 */
+            current_step: number;
+            error?: string | null;
+            goal: string;
+            id: string;
+            /** Format: int32 */
+            max_steps: number;
+            origin_conversation?: string | null;
+            scheduled_task_id?: string | null;
+            started_at: string;
+            status: string;
+            task_name: string;
+            /** Format: int32 */
+            total_tokens: number;
+            updated_at: string;
+        };
+        AgentStepResponse: {
+            created_at: string;
+            id: string;
+            run_id: string;
+            status: string;
+            /** Format: int32 */
+            step_number: number;
+            thought?: string | null;
+            /** Format: int32 */
+            tokens_used: number;
+            tool_input?: unknown;
+            tool_name?: string | null;
+            tool_output?: unknown;
+        };
         AiChatRequest: {
             conversation_id?: string | null;
             prompt: string;
@@ -1887,6 +2074,17 @@ export interface components {
             /** Format: int32 */
             code: number;
             error: string;
+        };
+        ApprovalRequestResponse: {
+            account_id: string;
+            created_at: string;
+            expires_at: string;
+            id: string;
+            resolved_at?: string | null;
+            run_id: string;
+            status: string;
+            tool_input: unknown;
+            tool_name: string;
         };
         AuditVerificationResult: {
             /** Format: int64 */
@@ -2829,6 +3027,9 @@ export interface components {
             /** @description The invite secret, when the deployment requires one. */
             invite?: string | null;
         };
+        RejectActionRequest: {
+            reason?: string | null;
+        };
         /** @description A reminder stored in the database. */
         Reminder: {
             /** Format: date-time */
@@ -2888,6 +3089,22 @@ export interface components {
         RenamePasskeyRequest: {
             label: string;
         };
+        ScheduleTaskRequest: {
+            config?: unknown;
+            cron_expression: string;
+        };
+        ScheduledTaskResponse: {
+            account_id: string;
+            config: unknown;
+            created_at: string;
+            cron_expression: string;
+            enabled: boolean;
+            id: string;
+            last_run_at?: string | null;
+            next_run_at: string;
+            task_id: string;
+            updated_at: string;
+        };
         SecurityEvent: {
             /** Format: date-time */
             created_at?: string | null;
@@ -2938,6 +3155,12 @@ export interface components {
         ShareRequest: {
             is_enabled: boolean;
             title?: string | null;
+        };
+        StartAgentRunRequest: {
+            goal: string;
+            /** Format: int32 */
+            max_steps?: number | null;
+            origin_conversation?: string | null;
         };
         StatusResponse: {
             success: boolean;
@@ -3917,6 +4140,286 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InboundAcceptedResponse"];
+                };
+            };
+        };
+    };
+    list_pending_approvals: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List pending approval requests */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApprovalRequestResponse"][];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    approve_action: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Action approved and execution resumed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Approval not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    reject_action: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RejectActionRequest"];
+            };
+        };
+        responses: {
+            /** @description Action rejected and recorded */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Approval not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    list_runs: {
+        parameters: {
+            query?: {
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List recent agent runs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRunResponse"][];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    start_run: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StartAgentRunRequest"];
+            };
+        };
+        responses: {
+            /** @description Agent run started */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRunResponse"];
+                };
+            };
+            /** @description Validation error */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Active run already running */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    get_run: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Agent run details with steps */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentRunDetailResponse"];
+                };
+            };
+            /** @description Run not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    cancel_run: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Agent run cancelled */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Run not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    list_tasks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List scheduled agent tasks */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduledTaskResponse"][];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    schedule_task: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ScheduleTaskRequest"];
+            };
+        };
+        responses: {
+            /** @description Scheduled task upserted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScheduledTaskResponse"];
+                };
+            };
+            /** @description Invalid task ID or cron expression */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
                 };
             };
         };
@@ -7772,6 +8275,68 @@ export interface operations {
             };
             /** @description Unauthorized */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    get_storage: {
+        parameters: {
+            query?: {
+                /** @description HMAC-SHA256 signature for presigned temporary access. */
+                sig?: string | null;
+                /** @description Expiration timestamp in seconds since Unix epoch. */
+                exp?: number | null;
+            };
+            header?: never;
+            path: {
+                /** @description Canonical storage key */
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Storage media binary stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Invalid storage key */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized: not logged in and no signature */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Forbidden: cross-account access or expired signature */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Storage object not found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
