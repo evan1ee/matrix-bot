@@ -3,7 +3,7 @@
 > **Version:** 2.4.0  
 > **Status:** Roadmap specification. Sub-project 1 (phases 1–3) is designed in [`docs/superpowers/specs/2026-09-24-postgres-foundation-design.md`](docs/superpowers/specs/2026-09-24-postgres-foundation-design.md); later phases each get their own design before implementation.  
 > **Target Database:** PostgreSQL 18+ is the only application database (SQLite removed). The Matrix SDK's own end-to-end-encryption store remains an SDK-managed SQLite file — see §2.3.  
-> **Interaction Interfaces:** Matrix E2EE (Active / Implemented), Discord (Implemented), Telegram ([TODO] Planned Feature — Extensible Channel Framework), Web UI (React 19 SPA), MCP (Model Context Protocol), External Agents (Cursor, Claude Desktop)\
+> **Interaction Interfaces:** Matrix E2EE (Active / Implemented), Discord (Implemented), Telegram (Implemented), Email (Implemented), Web UI (React 19 SPA), MCP (Model Context Protocol), External Agents (Cursor, Claude Desktop)\
 > **Agent Execution Scope:** Scheduled Specific Tasks Exclusively ([TODO] Planned Feature — Extensible Task Plugin Architecture); Live User Input Handled Exclusively by Direct LLM + Tool Calling  
 
 ---
@@ -36,7 +36,8 @@ To maintain engineering discipline and prevent scope creep, system capabilities 
 |---|---|---|---|---|
 | **Matrix Channel (E2EE)** | **Active / Implemented** | Native `matrix-sdk` with crypto store | Shipped; refactor to `ChannelAdapter` in Phase 4 | Native driver for `ChannelAdapter` |
 | **Discord Channel** | **Implemented** (plan B) | `serenity` Gateway + Slash Commands | Phase 4 (Omnichannel milestone) | `DiscordAdapter: ChannelAdapter` |
-| **Telegram Channel** | **[TODO] Planned Feature** | `teloxide` Axum Webhook + Bot API | Phase 4 (Omnichannel milestone) | Pluggable `ChannelAdapter` plugin |
+| **Telegram Channel** | **Implemented** (plan C) | `teloxide` Axum Webhook / Polling | Phase 4 (Omnichannel milestone) | `TelegramAdapter: ChannelAdapter` |
+| **Email Channel** | **Implemented** (plan D) | `async-imap` + `lettre` SMTP | Phase 4 (Omnichannel milestone) | `EmailAdapter: ChannelAdapter` |
 | **Web Console (React 19)** | **Active / Implemented** | Axum REST + Server-Sent Events (SSE) | Shipped; align with outbox events in Phase 6 | Modular React 19 micro-views |
 | **MCP Server** | **Active / Implemented** | Stdio & SSE JSON-RPC protocol | Shipped; align with Tool Registry in Phase 4 | Tool Registry schema provider |
 | **User Input Gateway** | **Active / Implemented** | Deterministic CLI + Direct LLM + Tools | Phase 2 (Refactored domain services) | Dynamic `ToolDefinition` registry |
@@ -1002,13 +1003,37 @@ The Telegram integration is a `ChannelAdapter` built on **`teloxide-core`** 0.13
 
 ---
 
-### 9.5 Omnichannel Account Linking Ceremony (`/link`)
+### 9.5 Email Adapter Specification (Implemented — plan D)
+
+> **Implemented** in `backend/src/interface/channels/email/` (plan `docs/superpowers/plans/2026-10-03-omnichannel-d-email.md`, rulings in `docs/superpowers/HANDOFF.md`).
+
+The Email integration is a `ChannelAdapter` built on **`async-imap`** and **`lettre`**, registered only when `EMAIL_IMAP_URL` is set.
+
+#### 9.5.1 Inbound Architecture & IMAP Polling
+* **Protocol & Security:** Inbound messages are polled periodically via IMAPS (`imaps://`, port 993 default) using `tokio-rustls` with Mozilla webpki roots. Plain unencrypted IMAP is rejected.
+* **Polling Interval:** Configured by `EMAIL_POLL_SECONDS` (default: 60 s, minimum: 5 s).
+* **Deduplication:** Tracked via `RecentMessages` (bounded 1024-entry sliding window on standard RFC 5322 `Message-ID`).
+* **DMARC Enforcement (Invariant 8):** Inbound emails MUST contain an `Authentication-Results` header with `dmarc=pass` matching the configured `EMAIL_AUTHSERV_ID`. Messages that fail DMARC or lack an authentication header are dropped silently with no bounce or response to prevent backscatter spam.
+* **Loop Prevention:** Automated messages (headers `Auto-Submitted`, `X-Auto-Response-Suppress`, `Precedence: bulk|junk|list`, or bounced/mailer-daemon senders) are dropped silently.
+* **Message Ingestion & Parsing:** Handled via `mail_parser`. Bodies prefer plain text (converted from HTML when only HTML is provided), trailing quotes (`> quote`, `On ... wrote:`, Outlook splitters) and email signatures are stripped before submission to the shared `InboundPipeline`.
+* **Mailbox State:** Processed messages are marked `\Seen`. If `EMAIL_PROCESSED_FOLDER` is configured, messages are copied/moved to that folder.
+
+#### 9.5.2 Outbound Delivery & Formatting
+* **SMTP Transport:** Built on `lettre::AsyncSmtpTransport` supporting `smtps://` (TLS) or `smtp://` (STARTTLS), bounded by a 30 s delivery timeout.
+* **MIME Formatting:** Rendered as `multipart/alternative` containing both clean plain-text fallback and sanitized HTML.
+* **Actions Rendering:** Interactive actions in `Content.actions` are rendered as a bulleted text list with action labels and commands.
+* **Subject & Threading:** Inbound message replies preserve subject threading (`Re: <original>` if not already present) and populate `In-Reply-To` and `References` headers. Unsolicited outbound messages derive subject lines from the first line of content (capped at 60 characters).
+* **Error Classification:** SMTP 5xx responses map to `ChannelError::Rejected` (permanent failure); SMTP 4xx and connection/timeout errors map to `ChannelError::Transient` (retryable).
+
+---
+
+### 9.6 Omnichannel Account Linking Ceremony (`/link`)
 
 One account (`accounts.id`) holds the Matrix, Discord, Telegram and Email identities of one person. Linking is chat-initiated on every channel: `link` (`!link` on Matrix, `/link` elsewhere) in a direct conversation mints a single-use token that lives 10 minutes and is stored only as its SHA-256 (`link_tokens`); the reply carries `<WEB_URL>/link?token=…`; the web landing page shows what claiming would do and the claim itself needs a fresh passkey assertion. The direct conversation proves the chat identity, the passkey proves the account. A claim binds the identity to `platform_identities` (merging an unclaimed, auto-provisioned account when one holds it) and the bot confirms in the conversation that asked, through the outbox. An identity on the deployment's signup allowlist may create a new account with a passkey from the same page. The ceremony, its states and its security rules are specified in `docs/superpowers/specs/2026-10-01-omnichannel-design.md` §7 and amended at R73, R82 and R83 in `docs/superpowers/HANDOFF.md`; the HTTP half is in `docs/api.md`.
 
 ---
 
-### 9.6 Cross-Platform Format Normalization & Media Bridge
+### 9.7 Cross-Platform Format Normalization & Media Bridge
 
 To ensure domain services write output once and render beautifully everywhere, the system utilizes a **Format Normalization Engine**:
 
@@ -1023,7 +1048,7 @@ To ensure domain services write output once and render beautifully everywhere, t
 
 ---
 
-### 9.7 Web REST & SSE API (Axum)
+### 9.8 Web REST & SSE API (Axum)
 
 * **Endpoints:** Full REST API under `/api/*` for todos, expenses, portfolio, bookmarks, habits, journal, footprints, LLM chat, and jobs.
 * **Real-Time Streaming:** `/api/events` provides a per-account SSE stream for live UI synchronization.
@@ -1031,7 +1056,7 @@ To ensure domain services write output once and render beautifully everywhere, t
 
 ---
 
-### 9.8 MCP Server (Model Context Protocol)
+### 9.9 MCP Server (Model Context Protocol)
 
 * **Transports:** `stdio` mode for Cursor / Claude Desktop and HTTP/SSE for remote agents.
 * **Authentication:** Authenticated via Personal Access Tokens (`mb_mcp_` prefix) mapped to an `account_id`.

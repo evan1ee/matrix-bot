@@ -61,7 +61,7 @@ Every todo, reminder, transaction, bill, habit, bookmark and holding belongs to 
 
 - **Sign-in:** passkeys only (WebAuthn), one button, no username or password. Sessions are server-side; only the SHA-256 of the cookie is stored. Programmatic clients send `Authorization: Bearer <token>`, and MCP clients use a personal access token (`mb_mcp_…`).
 - **Passkeys:** attach several per account. `!passkey add` (alias `!web`) in a DM mints a 10-minute enrollment link for an account with no passkey yet; `!passkeys` lists them.
-- **Linking:** send `!link` (Matrix) or `/link` (Discord, Telegram) to the bot **in a direct message**; it answers with a link that expires in 10 minutes and works once. Open it in the browser and confirm with a passkey. The direct message proves you own the chat identity and the passkey proves you own the account, so nothing is typed into either side. Linking an identity that already has data shows what will be merged before you confirm, and the bot confirms in the chat afterwards. An identity on a signup allowlist (below) may instead create a new account from that link. The old web-minted `!link <code>` is gone.
+- **Linking:** send `!link` (Matrix, Email) or `/link` (Discord, Telegram, Email) to the bot **in a direct message**; it answers with a link that expires in 10 minutes and works once. Open it in the browser and confirm with a passkey. The direct message proves you own the chat identity and the passkey proves you own the account, so nothing is typed into either side. Linking an identity that already has data shows what will be merged before you confirm, and the bot confirms in the chat afterwards. An identity on a signup allowlist (below) may instead create a new account from that link. The old web-minted `!link <code>` is gone.
 - **Step-up:** sensitive actions (managing passkeys, unlinking, signing out other devices, recovery codes) need a passkey assertion from the last 5 minutes.
 - **Recovery:** ten single-use codes, or `!recover` from a linked Matrix account, which is announced immediately, waits 24 hours, can be cancelled from any signed-in device, and then grants a restricted session for 72 hours.
 - **Audit:** every sensitive action is logged per account and sent as a DM to each linked identity.
@@ -91,7 +91,7 @@ Every feature module exposes intuitive chat commands formatted in HTML for rich 
 | **AI Assistant** | `!ai <prompt>` or `@bot <prompt>`<br>↳ *Or quote reply:* `@bot fact check` / `true?` / `verify`<br>`!ai reset`<br>`!ai model [name]`<br>`!ai config`<br>`!ai retro` | Conversational LLM assistant, live web search & fact-checking (Tavily/DDG), quoted message analysis, model switching, and weekly retrospectives |
 | **Voice (TTS)** | `!say <text>` | Speaks the text into the room as a native Matrix voice message; voice chosen per user |
 | **Settings** | `!settings`<br>`!settings timezone <IANA zone>`<br>`!settings currency <CODE>`<br>`!settings voice <voice\|none>` | Configure per-user timezone, default currency, and the voice `!say` speaks in (in whatever the configured TTS provider calls it), applied across all modules |
-| **Account** | `!link` (`/link` on Discord and Telegram)<br>`!recover` | Get a 10-minute, single-use link that connects this chat account to your web identity (direct messages only), initiate delayed recovery |
+| **Account** | `!link` (`/link` on Discord, Telegram, and Email)<br>`!recover` | Get a 10-minute, single-use link that connects this chat account to your web identity (direct messages only), initiate delayed recovery |
 
 `!export`, `!sessions`, `!recoverycodes`, `!unlink` and `!passkey rm` are
 deliberately refused on Matrix and point at the web app (see *Accounts and security*).
@@ -186,6 +186,16 @@ WEBAUTHN_ORIGIN=http://localhost:8080
 # TELEGRAM_MODE=polling                  # polling (default) or webhook
 # TELEGRAM_WEBHOOK_SECRET=               # required in webhook mode (alphanumeric, -, _)
 
+# Email (Optional) — the adapter starts only when EMAIL_IMAP_URL is set.
+# EMAIL_IMAP_URL=imaps://mail.example.com:993
+# EMAIL_SMTP_URL=smtps://mail.example.com:465
+# EMAIL_USERNAME=bot@example.com
+# EMAIL_PASSWORD=app_password_here
+# EMAIL_FROM=bot@example.com
+# EMAIL_AUTHSERV_ID=mail.example.com
+# EMAIL_POLL_SECONDS=60                  # Polling interval in seconds (default 60, min 5)
+# EMAIL_PROCESSED_FOLDER=Archive        # Optional folder to move processed emails to
+
 # AI Assistant & Live Web Search (Optional)
 AI_ENDPOINT=https://api.x.ai/v1
 AI_API_KEY=xai-...
@@ -229,6 +239,20 @@ The bot answers `/todo`, `/expense`, `/portfolio`, `/ask`, `/link` and `/help` (
 4. People link their Telegram account by sending `/link` to the bot in a direct chat and opening the link it returns. List someone's numeric Telegram user ID in `TELEGRAM_ALLOWED_USERS` (comma-separated) to let them create a new account from that link; anyone else signs in to an existing one.
 
 The bot advertises `/todo`, `/expense`, `/portfolio`, `/ask`, `/link`, and `/help` in Telegram's menu via `setMyCommands`. Direct messages route free-text to the AI assistant with typing indicators and status updates. In groups, commands are supported with `@botname` mentions, while private responses (e.g. portfolio/finance) are refused with a prompt to message the bot directly. The `/todo` task list includes interactive inline "Done" buttons to quickly complete tasks.
+
+---
+
+### Enabling Email (optional)
+
+1. Configure a dedicated email account for the bot on your mail server.
+2. Set `EMAIL_IMAP_URL` (must use `imaps://` for TLS) and `EMAIL_SMTP_URL` (`smtps://` or `smtp://`), along with credentials `EMAIL_USERNAME`, `EMAIL_PASSWORD`, and `EMAIL_FROM`.
+3. Set `EMAIL_AUTHSERV_ID` to the hostname of your receiving MTA as reported in incoming `Authentication-Results` headers (e.g. `mail.example.com`). **Security invariant**: Only emails with a verified `dmarc=pass` matching this authserv-id are accepted. Unverified or failing emails are silently dropped with no bounce or response to prevent backscatter spam.
+4. Optionally configure `EMAIL_POLL_SECONDS` (default: 60, minimum: 5) and `EMAIL_PROCESSED_FOLDER` (to move processed messages out of the inbox).
+5. People link their email address by emailing `/link` or `!link` to the bot and opening the link returned in the response. List an email address in `EMAIL_ALLOWED_SENDERS` (comma-separated) to allow them to create a new account from that link; anyone else signs in to an existing one.
+
+Email bodies are parsed with quote and signature stripping. Commands can be run with standard `!` or `/` syntax, or free text will route to the AI assistant. Responses are sent as clean multipart (plain text and HTML) replies preserving email threading headers (`In-Reply-To`, `References`).
+
+---
 
 ### Option 1: Standalone Single Binary (Recommended)
 

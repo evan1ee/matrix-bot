@@ -32,7 +32,7 @@ Do not reopen a settled decision without new evidence and the user's agreement.
 | Sub-project | Phases | Scope | State |
 |---|---|---|---|
 | **1 — PostgreSQL Foundation** | 1–3 | PostgreSQL-only; versioned migrations; compile-checked SQL; layer-first architecture for **every backend feature**; account UUIDs; durable job queue; transactional outbox | **In progress** (designed, partly implemented) |
-| 2 — Omnichannel | 4 | `ChannelAdapter` / `ChannelRegistry`; Matrix refactored onto it; Discord (`serenity`), Telegram (`teloxide`) and Email (IMAP/SMTP) adapters; `platform_identities`; chat-initiated linking | **In progress: plans A, B, and C done (D pending).** Design `specs/2026-10-01-omnichannel-design.md` (approved 2026-10-01, amended after implementation); plan A (`plans/2026-10-01-omnichannel-a-framework.md`) implemented and verified; plan B (Discord, `plans/2026-10-02-omnichannel-b-discord.md`) implemented and verified; plan C (Telegram, `plans/2026-10-02-omnichannel-c-telegram.md`) implemented and verified (§4 Plan C); plan D (Email) pending; branch `feat/omnichannel`, stacked on `refactor/outbox` by user decision |
+| 2 — Omnichannel | 4 | `ChannelAdapter` / `ChannelRegistry`; Matrix refactored onto it; Discord (`serenity`), Telegram (`teloxide`) and Email (IMAP/SMTP) adapters; `platform_identities`; chat-initiated linking | **Complete: plans A, B, C, and D implemented and verified.** Design `specs/2026-10-01-omnichannel-design.md`; plan A (`plans/2026-10-01-omnichannel-a-framework.md`); plan B (Discord, `plans/2026-10-02-omnichannel-b-discord.md`); plan C (Telegram, `plans/2026-10-02-omnichannel-c-telegram.md`); plan D (Email, `plans/2026-10-03-omnichannel-d-email.md`); branch `feat/omnichannel` |
 | 3 — Scheduled agent & storage | 5 | `ScheduledAgentTask` runtime (`scheduled_agent_tasks`, `agent_runs`, `agent_steps`); `StorageService` (local / S3); HTTP contracts between the backend and inference crates standardised | Not designed |
 | 4 — Web polish | 6 | Regenerated TypeScript client; live UI through the unified SSE stream; UI for linked identities and notification routing | Not designed |
 
@@ -211,6 +211,31 @@ Final verification (orchestrator, at `045e30f` plus the docs commit; docs change
 - `npm --prefix frontend run build`: ok (frontend unchanged, verified).
 - Not verified (needs a real Telegram bot from @BotFather, HANDOFF §6): the live checks listed in the plan's *What the user verifies*.
 
+### Sub-project 2 — Plan D (Email adapter, `plans/2026-10-03-omnichannel-d-email.md`, branch `feat/omnichannel`)
+
+| Task | Scope | State | Commit |
+|---|---|---|---|
+| 1 | Dependencies and Email configuration (`EmailConfig`, `parse_email`, `validate_email`, `validate_email_allowlist`) | ✅ | `3d2767f` |
+| 2 | Inbound normalization & DMARC authentication (`inbound.rs`, fixtures `email_*.eml`) | ✅ | `6dd6c52` |
+| 3 | Outbound formatting & SMTP send (`outbound.rs`, `lettre` sender, error classification) | ✅ | `e700eab` |
+| 4 | IMAP client & polling runtime (`imap.rs`, `tokio-rustls`, message search, move/seen) | ✅ | `a25c697` |
+| 5 | `EmailAdapter` implementing `ChannelAdapter` trait, deduplication window | ✅ | `c42ff10` |
+| 6 | Wire into composition root (`app.rs`), supervisor test, architecture boundary assertions | ✅ | `8418b25` |
+| 7 | Docs (`architecture.md`, `README.md`, `.env.example`, `SPEC.md`, `HANDOFF.md`), hand-off (E1–E14 recorded as R125–R138) | ✅ | this commit |
+
+Final verification (orchestrator, at `8418b25` plus the docs commit; docs change no code):
+- `cargo fmt --check`: clean.
+- `cargo check -p matrix-bot --all-targets`: clean, no warnings.
+- `cargo test -p matrix-bot --lib`: 1245 passed / 0 failed / 7 ignored.
+- `cargo test -p matrix-bot --test architecture`: 31 passed / 0 failed / 0 ignored.
+- `cargo test -p matrix-bot live_postgres`: 3 passed / 0 failed.
+- `cargo clippy -p matrix-bot --all-targets -- -D warnings`: clean (zero warnings).
+- `cargo sqlx prepare --check`: clean.
+- `openapi.json` byte-identical after every task; `git diff --check` clean.
+- `cargo build -p matrix-bot --release`: ok (compiled cleanly in release profile).
+- `npm --prefix frontend run build`: ok (frontend unchanged, verified).
+- Not verified (needs a real mail server, HANDOFF §6): the live checks listed in the plan's *What the user verifies*.
+
 ---
 
 ## 5. How to work
@@ -280,11 +305,10 @@ Each test gets its own `t<pid>_<n>` schema; the next test process reaps schemas 
 
 ## 7. Next actions (in order)
 
-1. **Write and approve plan D (Email)** — `plans/2026-10-xx-omnichannel-d-email.md` (spec §8.4: IMAP inbound, DMARC-gated, SMTP outbound via lettre, `EMAIL_ALLOWED_SENDERS`). Implementation starts only after the user's approval.
-2. **Live Discord and Telegram check by the user** (plan B and plan C, *What the user verifies*) on a non-production deployment with test bot credentials.
-3. **Merge gates (§10)** now include rehearsing migrations 0004–0008 on a production copy (0007 guard, `!link <code>` retirement; runbook §2a). Hand them to the user; merge only on their instruction. If `refactor/outbox` changes before it merges, rebase `feat/omnichannel` onto it.
-4. **Clear the §11 items** that touch the test suite first.
-5. Sub-projects 3 and 4 start with a design and the user's approval.
+1. **Live Discord, Telegram, and Email check by the user** (plan B, plan C, and plan D *What the user verifies*) on a non-production deployment with test credentials.
+2. **Merge gates (§10)** now include rehearsing migrations 0004–0008 on a production copy (0007 guard, `!link <code>` retirement; runbook §2a). Hand them to the user; merge only on their instruction. If `refactor/outbox` changes before it merges, rebase `feat/omnichannel` onto it.
+3. **Clear the §11 items** that touch the test suite first.
+4. Sub-projects 3 and 4 start with a design and the user's approval.
 
 ## 8. Feature template (established by Task 1, rooms)
 
@@ -568,3 +592,17 @@ These need the human. Prepare them; don't perform them.
 - **R122 (plan C, Task 7):** (1) `handle_todo_command` and the list handlers now return `Option<Reply>` (the plan said only "the list call sites"): a `Reply` is the only carrier for `actions`, and the other sub-handlers wrap their `String` with `Reply::from`. The list HTML is `format_todo_list` unchanged (pinned by a literal-string test); Matrix sends only `plain`/`html` (`matrix/outbound.rs::text_content`, pinned) and Discord drops actions (B5), so no other channel changes. (2) Buttons are built only for open items owned by the viewer (plan: "at most 10 shown items"): a room list also shows other members' tasks and `todo done` is owner-scoped, so a button on them would only answer "not found"; label is `Done #<id>` as the plan says, not a title. (3) The press goes through `Inbound::handle` as the presser, so ownership is the pipeline's account resolution plus `TodoService::set_completed(owner, id)`; a pipeline test proves a different linked account gets "not found" and the todo stays open. — cost if wrong: a list longer than 10 open items only offers buttons for the first 10 (the rest stay `!todo done <id>`).
 - **R123 (plan C, Task 8):** `app.rs` registers `TelegramAdapter::new(c, config.web_url.clone())` in `Arc::new`, adds to `check_unique`, attaches the shared inbound pipeline via `new_cyclic`, builds `ChannelRegistry::from_unique` including Telegram, and supervises its updates loop under `front_door_name` "Telegram updates" (early exit cancels the root token, tested); `telegram.as_ref().and_then(|t| t.ingress())` is passed to `start_api_server` and stored in `ApiState.telegram`; `start_api_server` takes 8 arguments with `#[allow(clippy::too_many_arguments)]` matching project convention; `log_registration_mode` logs whether Telegram is enabled and its mode (never the token or secret); architecture tests verify `teloxide_stays_inside_the_telegram_adapter` and `only_the_composition_root_builds_adapters_and_the_registry` includes `TelegramAdapter::new(`.
 - **R124 (plan C, Task 9):** all documentation updated (`architecture.md`, `api.md`, `README.md`, `.env.example`, `SPEC.md`, `specs/2026-10-01-omnichannel-design.md`, `HANDOFF.md`); Plan C tasks 1–9 complete; final verification gate passed with all gates green.
+- **R125 (E1 — dependencies):** `mail-parser` 0.11 for MIME parsing, `lettre` 0.11 (`default-features = false, features = ["smtp-transport", "tokio1-rustls-tls", "builder", "tracing"]`) for SMTP, `async-imap` 0.12 (`default-features = false, features = ["runtime-tokio", "tokio"]`) for IMAP, and `tokio-rustls` 0.26 / `webpki-roots` 0.26 with explicit `ring` provider for IMAPS TLS — cost: none.
+- **R126 (E2 — inbound text extraction):** Body extracted from first `text/plain` part (falls back to `text/html` converted to text). Quotes (`> ...`, `On ... wrote:`, `-----Original Message-----`, Outlook splitters) and signatures (`-- `) stripped. If body is empty after stripping, falls back to `Subject`. Commands can be typed with `/`, `!`, or bare command name matching registry — cost: none.
+- **R127 (E3 — inbound authentication, DMARC pass rule, Invariant 8):** The adapter parses all `Authentication-Results` headers. Only the header whose authserv-id matches `EMAIL_AUTHSERV_ID` is trusted. It must contain `dmarc=pass` for the `From` domain. Anything else is logged with `warn!` and dropped without a reply to prevent backscatter spam — cost: unauthenticated emails are silently dropped.
+- **R128 (E4 — auto-reply drop):** Messages with `Auto-Submitted` != "no", `X-Auto-Response-Suppress`, `Precedence: bulk/list/junk`, or `From` starting with `mailer-daemon`, `postmaster`, `noreply`, `no-reply` are dropped silently without reply — cost: none.
+- **R129 (E5 — identity & conversation mapping):** Sender is `PlatformIdentity(Channel::Email, PlatformUserId::parse(Channel::Email, addr)?)` with display name from `From`. Conversation is `ConversationAddress::Email(addr)`. `is_direct = true`, `is_mentioned = true` — cost: none.
+- **R130 (E6 — outbound threading & subject):** Outgoing replies set `In-Reply-To` and `References` to the incoming `Message-ID`. Subject is `Re: <subject>` (preserves existing `Re:`). Unsolicited messages derive subject from first line of text capped at 60 chars or `"Matrix Bot"` — cost: none.
+- **R131 (E7 — outbound multipart & action rendering):** Messages are sent as multipart/alternative (`text/plain` + `text/html`). `Content.actions` render as a text list at the bottom: "Reply to this email with: • <command>" in plain text and HTML list — cost: none.
+- **R132 (E8 — linking):** `/link` sends the token URL to the `From` address. Claiming the link publishes `IdentityLinked` which triggers an outbox confirmation email "✓ linked" back to `email:<address>` — cost: none.
+- **R133 (E9 — IMAP polling & stream draining):** Polling loop connects to `EMAIL_IMAP_URL` (IMAPS, port 993 default) via `tokio-rustls` with `ring` crypto provider, logs in with `EMAIL_USERNAME`/`EMAIL_PASSWORD`, selects `INBOX`, searches `UNSEEN`, fetches at most 20 messages per poll, marks `\Seen` and properly drains the async stream via `pin_mut!`, and optionally moves to `EMAIL_PROCESSED_FOLDER` — cost: none.
+- **R134 (E10 — SMTP transport):** Lettre `AsyncSmtpTransport` with STARTTLS or implicit TLS. Timeouts capped at 30 s. Errors mapped to `ChannelError::Transient` (temporary 4xx or connection loss) or `ChannelError::Rejected` (permanent 5xx) — cost: none.
+- **R135 (E11 — progress sink):** Email uses `llm::progress::NoProgress` (no-op; intermediate tool calls are not emailed) — cost: none.
+- **R136 (E12 — config validation):** Registered only when `EMAIL_IMAP_URL` is set. When set, `EMAIL_SMTP_URL`, `EMAIL_USERNAME`, `EMAIL_PASSWORD`, `EMAIL_FROM`, and `EMAIL_AUTHSERV_ID` are required. `EMAIL_ALLOWED_SENDERS` validated as email addresses. `EMAIL_POLL_SECONDS` defaults to 60 (minimum 5) — cost: invalid config fails at boot.
+- **R137 (E13 — deduplication):** Inbound messages deduplicated by `Message-ID` in a 1024-entry sliding window (`RecentMessages`). Outbox deliveries to email are at-least-once — cost: none.
+- **R138 (E14 — architecture isolation):** Architecture test verifies `lettre`, `async_imap`, and `mail_parser` are isolated inside `interface/channels/email/` (`email_crates_stay_inside_the_email_adapter`) and composition root builds `EmailAdapter::new(` — cost: none.
