@@ -421,6 +421,14 @@ impl Config {
             );
         }
 
+        if self.job_workers >= self.db_max_connections as usize {
+            anyhow::bail!(
+                "JOB_WORKERS ({}) must be strictly less than DATABASE_MAX_CONNECTIONS ({}) to prevent pool starvation",
+                self.job_workers,
+                self.db_max_connections
+            );
+        }
+
         let is_prod = is_production();
 
         // A production deployment still on the development Relying Party would
@@ -569,7 +577,10 @@ mod tests {
 
     #[test]
     fn test_job_workers_must_be_between_1_and_32() {
-        let base = valid_config();
+        let base = Config {
+            db_max_connections: 50,
+            ..valid_config()
+        };
         for bad in [0, 33] {
             assert!(
                 Config {
@@ -592,6 +603,33 @@ mod tests {
                 "{good}"
             );
         }
+    }
+
+    #[test]
+    fn test_job_workers_must_be_less_than_db_max_connections() {
+        let base = valid_config(); // db_max_connections = 5
+        let err = Config {
+            job_workers: 5,
+            ..base.clone()
+        }
+        .validate()
+        .unwrap_err();
+        assert!(err.to_string().contains("pool starvation"));
+
+        let err = Config {
+            job_workers: 6,
+            ..base.clone()
+        }
+        .validate()
+        .unwrap_err();
+        assert!(err.to_string().contains("pool starvation"));
+
+        assert!(Config {
+            job_workers: 4,
+            ..base
+        }
+        .validate()
+        .is_ok());
     }
 
     #[test]

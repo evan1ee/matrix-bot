@@ -486,9 +486,9 @@ These need the human. Prepare them; don't perform them.
 
 - Clippy is not yet a CI job (workspace is at zero warnings).
 - `statement_timeout` is unset (R7).
-- The AI repository has a TTL timezone issue.
+- ~~The AI repository has a TTL timezone issue.~~ — resolved by R148 (timestamptz comparison against `DateTime<Utc>` cutoff and ISO 8601 UTC storage in `repositories/llm.rs`).
 - `SyncHealth`: if the timestamp fails to parse, it reads as "never synced" (theoretical).
-- The AI tool `update_my_settings` advertises `dev_room_id` and `max_history_turns` but ignores them. This is an existing bug and needs a separate fix.
+- ~~The AI tool `update_my_settings` advertises `dev_room_id` and `max_history_turns` but ignores them.~~ — resolved by R149 (parsed and updated in `llm/tools/settings.rs`).
 - Historical plan and review docs still mention the removed `/api/v1/health`. This is intentional.
 - The architecture-test scanner cuts each line at `//`, so a URL literal hides the rest of the line. Task 14 makes it strip string literals.
 - Resolved in the step 8 final fix wave: the `interface::http::auth::matrix` tests no longer reach the network (`test_state()` pre-fills `resolved_homeserver` with a closed loopback port and the client has a 500 ms timeout), so no test needs `--skip` any more.
@@ -507,10 +507,10 @@ These need the human. Prepare them; don't perform them.
 - A recurring reminder is marked `failed` if the send succeeded but advancing it hit a database error on the last attempt.
 - The HTTP recovery path reaches `interface::chat::redeem_matured_recovery`, whose `if let Ok` turns a database error into a 401.
 - Pre-existing re-link merge offer in `repositories/accounts/linking.rs:129-159`: an MXID removed from account A can pull A's data into a new account. Needs its own ticket.
-- `JOB_WORKERS` is not validated against `DATABASE_MAX_CONNECTIONS` (too many workers can starve the pool).
+- ~~`JOB_WORKERS` is not validated against `DATABASE_MAX_CONNECTIONS`~~ — resolved by R150 (`Config::validate` enforces `job_workers < db_max_connections`).
 - ~~Hub replay uses the oldest 500 events when `last_seen = 0`~~ — resolved by R65 (newest rows, seeded floor).
-- The jobs listener (`infrastructure/postgres/job_notifications.rs`) still uses `PgListener::recv()`, which hides a silent sqlx reconnect (R63); workers stay correct through their poll, so a missed wake only costs latency.
-- `ReminderService::enqueue_due` is unbounded (one pass enqueues every due reminder).
+- ~~The jobs listener (`infrastructure/postgres/job_notifications.rs`) still uses `PgListener::recv()`~~ — resolved by R151 (uses `try_recv()` and wakes idle workers on silent reconnect `Ok(None)`).
+- ~~`ReminderService::enqueue_due` is unbounded~~ — resolved by R152 (bounded by `MAX_ENQUEUE_DUE_BATCH = 100` via `LIMIT` in `get_due_reminders`).
 
 - Plan A e2e gaps: the link page's sign-in then re-inspect round trip (`sign_in_required` and "I already have an account") and the 403 step-up retry on `POST /link/claim` are covered only by unit-level and API tests, not end to end in Playwright.
 - `ChannelSink::is_ready` means "any adapter connected" (R81): with a second destination channel a delivery whose own channel is down is claimed, fails as not connected and backs off, costing attempts. Revisit when Discord or Telegram can be a delivery destination.
@@ -629,4 +629,10 @@ These need the human. Prepare them; don't perform them.
 - **R145 (S6 — Pure domain receipt parsing):** `domain::finance::receipt::extract_receipt_fields` is pure and synchronous; HTTP OCR endpoint and background job delegate to it — cost: none.
 - **R146 (S7 — Authenticated storage streaming endpoint):** `GET /api/v1/storage/*key` validates `AuthUser` ownership (`key.account_id() == user.account_id`) or valid unexpired HMAC signature, streaming with appropriate Content-Type — cost: none.
 - **R147 (S8 — Crate isolation):** `aws-sdk-s3` and `aws-config` are strictly private to `infrastructure/storage/`, asserted by `storage_crates_stay_inside_the_storage_infrastructure` in `backend/tests/architecture.rs` — cost: none.
+- **R148 (AI conversation TTL timezone fix):** `get_or_create_conversation` queries `updated_at::timestamptz >= $3 ORDER BY updated_at::timestamptz DESC` binding `cutoff` as `DateTime<Utc>`, and timestamps are stored via `TO_CHAR(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')` — prevents string comparison failures across varied timezone formats and ISO 8601 offsets — cost if wrong: conversations expiring prematurely or staying active across sessions.
+- **R149 (`update_my_settings` options):** `update_my_settings` tool parses and applies `dev_room_id` (trimmed, clearing to `None` on `"none"` or empty) and `max_history_turns` (via `domain::settings::parse_max_history_turns` clamped to 1..=100) — aligns AI tool execution with advertised schema parameters — cost if wrong: silent omission of settings changes requested via AI.
+- **R150 (Pool starvation check):** `Config::validate` enforces `job_workers < db_max_connections as usize` — ensures background job workers cannot saturate the connection pool and starve API handlers, sync loops, and transactional queries — cost if wrong: connection starvation under peak job concurrency.
+- **R151 (Job listener silent reconnect):** `JobNotifications::next` uses `self.listener.try_recv().await?` and maps `Ok(None)` (silent reconnect in sqlx 0.9) to waking idle workers via `Ok(())` — prevents missed notifications during network hiccups without relying solely on polling interval — cost if wrong: jobs delayed until next periodic sweep when listener reconnects.
+- **R152 (Bounded reminder sweep):** `get_due_reminders` takes `limit: i64` (`LIMIT $3`); `ReminderService::enqueue_due` passes `MAX_ENQUEUE_DUE_BATCH = 100` — bounds memory and lock contention during large reminder backlogs — cost if wrong: unbounded query loading thousands of reminders simultaneously during recovery.
+
 

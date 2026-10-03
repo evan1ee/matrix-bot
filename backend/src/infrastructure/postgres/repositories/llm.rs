@@ -49,7 +49,7 @@ pub async fn upsert_user_config(
         INSERT INTO ai_user_configs (
             owner_id, api_base_url, api_key, model_name, system_prompt, temperature, max_tokens, updated_at
         )
-        VALUES ($1, $2, $3, $4, $5, $6, $7, CAST(CURRENT_TIMESTAMP AS TEXT))
+        VALUES ($1, $2, $3, $4, $5, $6, $7, TO_CHAR(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'))
         ON CONFLICT(owner_id) DO UPDATE SET
             api_base_url = COALESCE(excluded.api_base_url, ai_user_configs.api_base_url),
             api_key = CASE
@@ -61,7 +61,7 @@ pub async fn upsert_user_config(
             system_prompt = COALESCE(excluded.system_prompt, ai_user_configs.system_prompt),
             temperature = COALESCE(excluded.temperature, ai_user_configs.temperature),
             max_tokens = COALESCE(excluded.max_tokens, ai_user_configs.max_tokens),
-            updated_at = CAST(CURRENT_TIMESTAMP AS TEXT)
+            updated_at = TO_CHAR(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
         "#,
         owner_id.as_uuid(),
         input.api_base_url,
@@ -85,16 +85,14 @@ pub async fn get_or_create_conversation(
     room_id: &str,
     max_age_seconds: i64,
 ) -> Result<AiConversation, sqlx::Error> {
-    let cutoff = (chrono::Utc::now() - chrono::Duration::seconds(max_age_seconds))
-        .format("%Y-%m-%d %H:%M:%S")
-        .to_string();
+    let cutoff = chrono::Utc::now() - chrono::Duration::seconds(max_age_seconds);
 
     let existing = sqlx::query!(
         r#"
         SELECT id, owner_id, room_id, created_at, updated_at
         FROM ai_conversations
-        WHERE owner_id = $1 AND room_id = $2 AND updated_at >= $3
-        ORDER BY updated_at DESC
+        WHERE owner_id = $1 AND room_id = $2 AND updated_at::timestamptz >= $3
+        ORDER BY updated_at::timestamptz DESC
         LIMIT 1
         "#,
         owner_id.as_uuid(),
@@ -118,7 +116,11 @@ pub async fn get_or_create_conversation(
     sqlx::query!(
         r#"
         INSERT INTO ai_conversations (id, owner_id, room_id, created_at, updated_at)
-        VALUES ($1, $2, $3, CAST(CURRENT_TIMESTAMP AS TEXT), CAST(CURRENT_TIMESTAMP AS TEXT))
+        VALUES (
+            $1, $2, $3,
+            TO_CHAR(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+            TO_CHAR(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
+        )
         "#,
         id,
         owner_id.as_uuid(),
@@ -215,7 +217,7 @@ pub async fn touch_conversation(
     sqlx::query!(
         r#"
         UPDATE ai_conversations
-        SET updated_at = CAST(CURRENT_TIMESTAMP AS TEXT)
+        SET updated_at = TO_CHAR(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
         WHERE id = $1
         "#,
         id
@@ -468,5 +470,60 @@ mod tests {
 
         let deleted = delete_conversation(&pool, &conv.id, &owner).await.unwrap();
         assert!(deleted);
+    }
+
+    #[tokio::test]
+    async fn test_conversation_ttl_timezone_and_touch() {
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+
+        let owner =
+            crate::infrastructure::postgres::repositories::identities::resolve_or_provision(
+                &pool,
+                &crate::domain::channels::PlatformIdentity::matrix("@tester2:mbm.one").unwrap(),
+            )
+            .await
+            .unwrap();
+
+        // Seed a conversation with an explicit non-UTC offset in updated_at (e.g. -04:00)
+        // that is 10 minutes ago in real time.
+        let ten_mins_ago = chrono::Utc::now() - chrono::Duration::minutes(10);
+        let conv_id = "conv_tz_test";
+        let offset_str = ten_mins_ago
+            .with_timezone(&chrono::FixedOffset::west_opt(4 * 3600).unwrap())
+            .to_rfc3339();
+
+        sqlx::query!(
+            r#"
+            INSERT INTO ai_conversations (id, owner_id, room_id, created_at, updated_at)
+            VALUES ($1, $2, '!room:tz', $3, $3)
+            "#,
+            conv_id,
+            owner.as_uuid(),
+            offset_str
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Looking up with max_age of 3600s (1h) must find it even though offset string differs.
+        let conv = get_or_create_conversation(&pool, &owner, "!room:tz", 3600)
+            .await
+            .unwrap();
+        assert_eq!(conv.id, conv_id);
+
+        // Looking up with max_age of 60s (1m) must NOT find it, returning a newly created one.
+        let new_conv = get_or_create_conversation(&pool, &owner, "!room:tz", 60)
+            .await
+            .unwrap();
+        assert_ne!(new_conv.id, conv_id);
+
+        // Touch the new conversation and verify its updated_at is refreshed with UTC Z.
+        touch_conversation(&pool, &new_conv.id).await.unwrap();
+        let fetched = get_conversation(&pool, &new_conv.id, &owner)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(fetched.updated_at.ends_with('Z'));
     }
 }

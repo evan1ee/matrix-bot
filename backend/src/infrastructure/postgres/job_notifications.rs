@@ -21,8 +21,15 @@ impl JobNotifications {
     }
 
     /// Waits for the next notification (its payload is unused).
+    ///
+    /// Uses `try_recv()` instead of `recv()` so that a silent reconnect
+    /// (`Ok(None)`) returns `Ok(())` to wake idle workers immediately to check
+    /// for any jobs enqueued during the disconnect window.
     pub async fn next(&mut self) -> sqlx::Result<()> {
-        self.listener.recv().await.map(|_| ())
+        let Some(_) = self.listener.try_recv().await? else {
+            return Ok(());
+        };
+        Ok(())
     }
 }
 
@@ -90,6 +97,37 @@ mod tests {
             .unwrap();
         let extra = tokio::time::timeout(Duration::from_millis(500), listener.next()).await;
         assert!(extra.is_err(), "the skipped duplicate must not notify");
+        drop(listener);
+        crate::db::pool::drop_private_database(pool, db).await;
+    }
+
+    /// Given a listener whose connection is killed server-side, When it is
+    /// polled, Then it returns Ok(()) (waking workers), and notifications sent
+    /// afterwards still arrive.
+    #[tokio::test]
+    async fn a_lost_connection_wakes_workers_and_the_listener_keeps_working() {
+        let db = format!("job_notify_reconnect_{}", std::process::id());
+        let db = db.as_str();
+        let pool = crate::db::pool::test_pool_private_database(db, 4).await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let mut listener = JobNotifications::connect(&pool).await.unwrap();
+
+        let killed = crate::infrastructure::postgres::advisory::terminate_other_backends(&pool)
+            .await
+            .unwrap();
+        assert!(killed >= 1, "the listener's backend is among the others");
+        tokio::time::timeout(Duration::from_secs(5), listener.next())
+            .await
+            .expect("the loss is reported within 5 s as a wake-up")
+            .unwrap();
+
+        let job = NewJob::test_job(JobType::PortfolioCheckAlerts, Some("after_reconnect"));
+        enqueue(&pool, &job).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), listener.next())
+            .await
+            .expect("the subsequent notification arrives within 5 s")
+            .unwrap();
+
         drop(listener);
         crate::db::pool::drop_private_database(pool, db).await;
     }

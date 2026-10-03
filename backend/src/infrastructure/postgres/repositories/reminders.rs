@@ -176,6 +176,7 @@ pub async fn count_user_pending<'e>(
 pub async fn get_due_reminders<'e>(
     conn: impl PgExecutor<'e>,
     now: DateTime<Utc>,
+    limit: i64,
 ) -> Result<Vec<Reminder>, sqlx::Error> {
     let rows = sqlx::query_as!(
         ReminderRow,
@@ -186,9 +187,11 @@ pub async fn get_due_reminders<'e>(
         FROM reminders
         WHERE status = 'pending' AND trigger_at <= $1 AND retry_count < $2
         ORDER BY trigger_at ASC
+        LIMIT $3
         "#,
         now,
-        MAX_DELIVERY_ATTEMPTS
+        MAX_DELIVERY_ATTEMPTS,
+        limit
     )
     .fetch_all(conn)
     .await?;
@@ -622,5 +625,28 @@ mod tests {
         let found = find_by_id(&pool, created.id).await.unwrap().unwrap();
         assert_eq!(found.owner_id, owner);
         assert!(find_by_id(&pool, i64::MAX).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn get_due_reminders_respects_limit() {
+        let pool = setup_test_db().await;
+        let owner = AccountId::from_seed("acct_due_limit");
+        crate::db::pool::seed_account(&pool, &owner).await;
+        let now = now_at_storage_precision();
+
+        for i in 0..5 {
+            let mut reminder = new_reminder(now);
+            reminder.trigger_at = now - Duration::minutes(10 - i);
+            create(&pool, &owner, &reminder).await.unwrap();
+        }
+
+        let due_all = get_due_reminders(&pool, now, 10).await.unwrap();
+        assert_eq!(due_all.len(), 5);
+
+        let due_limited = get_due_reminders(&pool, now, 2).await.unwrap();
+        assert_eq!(due_limited.len(), 2);
+        // Ordered by trigger_at ASC (oldest first)
+        assert_eq!(due_limited[0].id, due_all[0].id);
+        assert_eq!(due_limited[1].id, due_all[1].id);
     }
 }

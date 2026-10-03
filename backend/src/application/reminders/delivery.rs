@@ -11,11 +11,20 @@ use crate::domain::jobs::{JobStatus, NewJob};
 use crate::domain::reminders::{next_occurrence, Reminder};
 use crate::infrastructure::postgres::repositories::{self, outbox};
 
+/// Maximum number of due reminders enqueued in one scheduler tick.
+///
+/// Bounding the batch prevents a large backlog from consuming excessive
+/// memory or connection resources in a single tick; remaining due reminders
+/// are picked up on the next 5-second tick.
+pub const MAX_ENQUEUE_DUE_BATCH: i64 = 100;
+
 impl ReminderService {
     /// Enqueues a `reminder.fire` job for every pending reminder due by `now`.
     /// Idempotent: the dedupe key is `<id>:<trigger_at>` (R19).
     pub async fn enqueue_due(&self, now: DateTime<Utc>) -> Result<usize, AppError> {
-        let due = repositories::reminders::get_due_reminders(&self.pool, now).await?;
+        let due =
+            repositories::reminders::get_due_reminders(&self.pool, now, MAX_ENQUEUE_DUE_BATCH)
+                .await?;
         let mut enqueued = 0;
         for r in &due {
             let job = NewJob::reminder_fire(r.owner_id, r.id, r.trigger_at);
