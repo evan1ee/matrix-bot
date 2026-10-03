@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT owner_id AS \"owner_id: uuid::Uuid\" FROM portfolio_audit_log WHERE action = 'deposit'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "owner_id: uuid::Uuid",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "portfolio_audit_log",
+            "name": "owner_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "99da4bd6755068aa98c716776ac14be91d2e1fa10fce4acc59e6a9e9b8846287"
+}

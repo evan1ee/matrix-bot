@@ -71,6 +71,12 @@ impl Drop for TypingGuard {
 pub struct StageReporter {
     room: Option<Room>,
     event_id: Option<OwnedEventId>,
+    /// The streaming buffer behind `ProgressSink::push_delta`. Shared by clones
+    /// so every holder of this reporter feeds the same edit cadence.
+    stream: Arc<tokio::sync::Mutex<Option<StreamThrottler>>>,
+    /// Counts `report` calls, so a test can prove an operation sent no edit.
+    #[cfg(test)]
+    reports: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 impl std::fmt::Debug for StageReporter {
@@ -92,10 +98,16 @@ impl StageReporter {
         Self {
             room: None,
             event_id: None,
+            stream: Arc::default(),
+            #[cfg(test)]
+            reports: Arc::default(),
         }
     }
 
     pub async fn report(&self, plain_text: &str, html_text: &str) {
+        #[cfg(test)]
+        self.reports
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if let (Some(room), Some(target_id)) = (&self.room, &self.event_id) {
             let metadata = ReplacementMetadata::new(target_id.clone(), None);
             let content = RoomMessageEventContent::text_html(plain_text, html_text)
@@ -127,7 +139,45 @@ impl StageReporter {
 
     /// Creates a throttled streaming buffer for in-place token replacement.
     pub fn throttler(&self) -> StreamThrottler {
-        StreamThrottler::new(self.clone())
+        // A clone with its own empty buffer: the throttler must not hold the
+        // buffer that holds it (an `Arc` cycle that would never be freed).
+        StreamThrottler::new(Self {
+            room: self.room.clone(),
+            event_id: self.event_id.clone(),
+            stream: Arc::default(),
+            #[cfg(test)]
+            reports: self.reports.clone(),
+        })
+    }
+}
+
+#[async_trait::async_trait]
+impl crate::llm::progress::ProgressSink for StageReporter {
+    async fn report_stage(&self, text: &str) {
+        StageReporter::report_stage(self, text).await;
+    }
+
+    async fn report_tool_call(&self, tool_name: &str) {
+        StageReporter::report_tool_call(self, tool_name).await;
+    }
+
+    async fn push_delta(&self, delta: &str) {
+        let mut stream = self.stream.lock().await;
+        stream
+            .get_or_insert_with(|| self.throttler())
+            .push_delta(delta)
+            .await;
+    }
+
+    /// Marks the end of one streamed reply. Matrix discards the buffer without
+    /// sending it: the next stage or the final reply replaces the message anyway,
+    /// and an extra edit would cost a homeserver request per streamed round.
+    async fn flush(&self) {
+        self.stream.lock().await.take();
+    }
+
+    fn message_ref(&self) -> Option<String> {
+        self.event_id.as_ref().map(|id| id.to_string())
     }
 }
 
@@ -228,6 +278,9 @@ impl StageIndicator {
         StageReporter {
             room: Some(self.room.clone()),
             event_id: self.event_id.clone(),
+            stream: Arc::default(),
+            #[cfg(test)]
+            reports: Arc::default(),
         }
     }
 
@@ -337,6 +390,39 @@ mod tests {
             .make_replacement(metadata);
 
         assert!(content.relates_to.is_some());
+    }
+
+    #[tokio::test]
+    async fn flush_ends_a_streamed_reply_without_sending_an_edit() {
+        use crate::llm::progress::ProgressSink;
+        let reporter = StageReporter::noop();
+        reporter.push_delta("Hello").await;
+        reporter.flush().await;
+        assert_eq!(
+            reporter.reports.load(std::sync::atomic::Ordering::Relaxed),
+            0
+        );
+        assert!(reporter.stream.lock().await.is_none());
+    }
+
+    #[tokio::test]
+    async fn the_reporter_streams_through_the_progress_sink_and_starts_fresh_after_a_flush() {
+        use crate::llm::progress::ProgressSink;
+        let reporter = StageReporter::noop();
+        let sink: &dyn ProgressSink = &reporter;
+        sink.push_delta("Hello").await;
+        assert_eq!(
+            reporter
+                .stream
+                .lock()
+                .await
+                .as_ref()
+                .map(|t| t.accumulated().to_string()),
+            Some("Hello".to_string())
+        );
+        sink.flush().await;
+        assert!(reporter.stream.lock().await.is_none());
+        assert_eq!(sink.message_ref(), None);
     }
 
     #[tokio::test]

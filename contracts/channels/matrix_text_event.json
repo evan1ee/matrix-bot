@@ -1,0 +1,13 @@
+{
+  "type": "m.room.message",
+  "event_id": "$ev1:example.org",
+  "sender": "@alice:example.org",
+  "origin_server_ts": 1700000000000,
+  "content": {
+    "msgtype": "m.text",
+    "body": "!todo add milk",
+    "m.relates_to": {
+      "m.in_reply_to": { "event_id": "$orig:example.org" }
+    }
+  }
+}

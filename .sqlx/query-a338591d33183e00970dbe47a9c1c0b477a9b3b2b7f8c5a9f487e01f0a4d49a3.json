@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE sessions SET last_verified_at = $1 WHERE account_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a338591d33183e00970dbe47a9c1c0b477a9b3b2b7f8c5a9f487e01f0a4d49a3"
+}

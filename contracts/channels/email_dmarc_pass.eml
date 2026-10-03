@@ -1,0 +1,12 @@
+Authentication-Results: mx.example.com;
+    dkim=pass header.i=@example.com header.s=20230601;
+    spf=pass (example.com: domain of alice@example.com designates 192.0.2.1 as permitted sender) smtp.mailfrom=alice@example.com;
+    dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=example.com
+From: Alice User <alice@example.com>
+To: bot@example.com
+Subject: /todo add Buy organic milk
+Message-ID: <msg-pass-1234@example.com>
+Date: Fri, 03 Oct 2026 10:00:00 +0000
+Content-Type: text/plain; charset=utf-8
+
+Please add this todo item.

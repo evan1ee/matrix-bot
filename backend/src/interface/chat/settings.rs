@@ -3,6 +3,8 @@
 
 use async_trait::async_trait;
 
+use crate::interface::channels::message::Reply;
+
 use crate::application::settings::SettingsService;
 use crate::application::AppServices;
 use crate::db::Database;
@@ -10,8 +12,7 @@ use crate::domain::settings::{
     parse_currency, parse_max_history_turns, parse_timezone, parse_tts_voice, UserSettings,
     MAX_MAX_HISTORY_TURNS, MIN_MAX_HISTORY_TURNS,
 };
-use crate::events::EventBroadcaster;
-use crate::modules::{BotModule, CommandContext, CommandHelp};
+use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 use crate::utils::{format_datetime, html_escape};
 
 /// A few well-known zones, so `!settings timezone` is answerable without leaving
@@ -83,9 +84,10 @@ impl BotModule for SettingsModule {
         ctx: &CommandContext,
         services: &AppServices,
         _db: &Database,
-        _broadcaster: Option<&EventBroadcaster>,
-    ) -> Option<String> {
-        handle_settings_command(&services.settings, &ctx.owner_id, &ctx.full_body).await
+    ) -> Option<Reply> {
+        handle_settings_command(&services.settings, &ctx.owner_id, &ctx.full_body)
+            .await
+            .map(Reply::private)
     }
 }
 
@@ -347,16 +349,30 @@ async fn modify(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::{EventBroadcaster, SystemEvent};
+    use crate::infrastructure::postgres::repositories::outbox;
 
-    async fn service() -> SettingsService {
+    async fn service_and_pool() -> (SettingsService, sqlx::PgPool) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        SettingsService::new(pool, EventBroadcaster::default())
+        crate::db::pool::seed_accounts(&pool, &["@alice:a"]).await;
+        (SettingsService::new(pool.clone()), pool)
+    }
+
+    async fn service() -> SettingsService {
+        service_and_pool().await.0
+    }
+
+    async fn settings_events(pool: &sqlx::PgPool) -> usize {
+        outbox::event_types_for(pool, &alice())
+            .await
+            .unwrap()
+            .iter()
+            .filter(|t| *t == "SettingsUpdated")
+            .count()
     }
 
     fn alice() -> AccountId {
-        AccountId::from("@alice:a")
+        AccountId::from_seed("@alice:a")
     }
 
     async fn run(settings: &SettingsService, body: &str) -> String {
@@ -467,24 +483,24 @@ mod tests {
     /// An open web client formats every timestamp against these settings, so a
     /// change made over Matrix has to reach the SSE stream.
     #[tokio::test]
-    async fn test_broadcasts_the_change_to_the_owner() {
-        let settings = service().await;
-        let mut rx = settings.subscribe();
+    async fn test_publishes_the_change_to_the_owner() {
+        let (settings, pool) = service_and_pool().await;
 
         handle_settings_command(&settings, &alice(), "!settings tz Asia/Tokyo")
             .await
             .unwrap();
 
-        let event = rx.try_recv().expect("a settings change must be broadcast");
-        assert_eq!(event.owner_id(), "@alice:a");
-        assert!(matches!(event, SystemEvent::SettingsUpdated { .. }));
+        assert_eq!(
+            settings_events(&pool).await,
+            1,
+            "a settings change must be published"
+        );
     }
 
     /// A rejected value changed nothing, so it must not announce a change either.
     #[tokio::test]
-    async fn test_does_not_broadcast_when_nothing_was_saved() {
-        let settings = service().await;
-        let mut rx = settings.subscribe();
+    async fn test_does_not_publish_when_nothing_was_saved() {
+        let (settings, pool) = service_and_pool().await;
 
         handle_settings_command(&settings, &alice(), "!settings tz Mars/Olympus")
             .await
@@ -493,9 +509,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(
-            rx.try_recv().is_err(),
-            "a read or a rejection must not broadcast"
+        assert_eq!(
+            settings_events(&pool).await,
+            0,
+            "a read or a rejection must not publish"
         );
     }
 
@@ -609,22 +626,25 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_voice_broadcasts_on_success_and_not_on_rejection() {
-        let settings = service().await;
-        let mut rx = settings.subscribe();
+    async fn test_voice_publishes_on_success_and_not_on_rejection() {
+        let (settings, pool) = service_and_pool().await;
 
         handle_settings_command(&settings, &alice(), "!settings voice alloy")
             .await
             .unwrap();
-        let event = rx.try_recv().expect("a valid voice change must broadcast");
-        assert!(matches!(event, SystemEvent::SettingsUpdated { .. }));
+        assert_eq!(
+            settings_events(&pool).await,
+            1,
+            "a valid voice change must publish"
+        );
 
         handle_settings_command(&settings, &alice(), "!settings voice a/b")
             .await
             .unwrap();
-        assert!(
-            rx.try_recv().is_err(),
-            "a rejected voice must not broadcast"
+        assert_eq!(
+            settings_events(&pool).await,
+            1,
+            "a rejected voice must not publish"
         );
     }
 
@@ -657,10 +677,11 @@ mod tests {
 
     fn ctx(body: &str) -> CommandContext {
         CommandContext {
-            room_id: "!room:a".to_string(),
-            sender_mxid: "@tester:x".to_string(),
+            conversation: crate::domain::channels::ConversationAddress::Matrix(
+                "!room:a".to_string(),
+            ),
             owner_id: alice(),
-            sender_name: "alice".to_string(),
+            sender: crate::interface::chat::test_support::sender("@tester:x", "alice"),
             command: body
                 .split_whitespace()
                 .next()
@@ -672,13 +693,15 @@ mod tests {
             is_direct: true,
             is_mentioned: false,
             quoted: None,
-            stage_reporter: None,
+            progress: None,
+            outbound: None,
         }
     }
 
     async fn db() -> Database {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["@alice:a"]).await;
         Database { pool }
     }
 
@@ -703,11 +726,11 @@ mod tests {
         let db = db().await;
 
         assert!(module
-            .handle_command(&ctx("!settings"), &AppServices::new(&db.pool), &db, None)
+            .handle_command(&ctx("!settings"), &AppServices::new(&db.pool), &db)
             .await
             .is_some());
         assert!(module
-            .handle_command(&ctx("!todo list"), &AppServices::new(&db.pool), &db, None)
+            .handle_command(&ctx("!todo list"), &AppServices::new(&db.pool), &db)
             .await
             .is_none());
     }
@@ -721,37 +744,28 @@ mod tests {
         let settings = SettingsModule::new();
         let todo = TodoModule::new();
 
-        todo.handle_command(
-            &ctx("!todo add ship it"),
-            &AppServices::new(&db.pool),
-            &db,
-            None,
-        )
-        .await
-        .unwrap();
-        todo.handle_command(
-            &ctx("!todo due 1 2d"),
-            &AppServices::new(&db.pool),
-            &db,
-            None,
-        )
-        .await
-        .unwrap();
+        todo.handle_command(&ctx("!todo add ship it"), &AppServices::new(&db.pool), &db)
+            .await
+            .unwrap();
+        todo.handle_command(&ctx("!todo due 1 2d"), &AppServices::new(&db.pool), &db)
+            .await
+            .unwrap();
 
         settings
             .handle_command(
                 &ctx("!settings timezone Asia/Tokyo"),
                 &AppServices::new(&db.pool),
                 &db,
-                None,
             )
             .await
             .unwrap();
 
         let listed = todo
-            .handle_command(&ctx("!todo list"), &AppServices::new(&db.pool), &db, None)
+            .handle_command(&ctx("!todo list"), &AppServices::new(&db.pool), &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(
             listed.contains("JST"),
             "the todo list must follow the setting: {listed}"

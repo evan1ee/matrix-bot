@@ -324,7 +324,7 @@ fn find_decimal_in_line(line: &str) -> Option<f64> {
 fn find_date_in_line(line: &str) -> Option<String> {
     for part in line.split_whitespace() {
         let p = part.trim_matches(|c: char| !c.is_ascii_digit());
-        let normalized = p.replace('/', "-").replace('.', "-");
+        let normalized = p.replace(['/', '.'], "-");
         let segments: Vec<&str> = normalized.split('-').collect();
         if segments.len() == 3 {
             // YYYY-MM-DD

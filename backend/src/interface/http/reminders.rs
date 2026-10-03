@@ -100,7 +100,7 @@ impl From<crate::domain::reminders::Reminder> for Reminder {
         Self {
             id: r.id,
             room_id: r.room_id,
-            owner_id: r.owner_id.into_inner(),
+            owner_id: r.owner_id.to_string(),
             sender_name: r.sender_name,
             message: r.message,
             trigger_at: r.trigger_at,
@@ -360,21 +360,20 @@ pub async fn clear_reminder_history(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::EventBroadcaster;
 
     #[tokio::test]
     async fn test_reminder_api_crud_and_isolation() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["acct_alice", "acct_bob"]).await;
         let state = ApiState::new(
-            crate::db::Database { pool: pool },
-            EventBroadcaster::default(),
+            crate::db::Database { pool },
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
-        let alice = AuthUser::named("alice", "acct_alice");
-        let bob = AuthUser::named("bob", "acct_bob");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
+        let bob = AuthUser::named_seed("bob", "acct_bob");
 
         // Alice creates reminder
         let req = CreateReminderRequest {
@@ -417,15 +416,15 @@ mod tests {
     async fn test_update_reminder_is_owner_scoped_and_validated() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["acct_alice", "acct_bob"]).await;
         let state = ApiState::new(
-            crate::db::Database { pool: pool },
-            EventBroadcaster::default(),
+            crate::db::Database { pool },
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
-        let alice = AuthUser::named("alice", "acct_alice");
-        let bob = AuthUser::named("bob", "acct_bob");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
+        let bob = AuthUser::named_seed("bob", "acct_bob");
 
         let created = create_reminder(
             State(state.clone()),
@@ -495,14 +494,14 @@ mod tests {
     async fn test_reminder_history_api() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["acct_alice", "acct_bob"]).await;
         let state = ApiState::new(
-            crate::db::Database { pool: pool },
-            EventBroadcaster::default(),
+            crate::db::Database { pool },
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
-        let alice = AuthUser::named("alice", "acct_alice");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
 
         // Create 2 reminders
         let r1 = create_reminder(

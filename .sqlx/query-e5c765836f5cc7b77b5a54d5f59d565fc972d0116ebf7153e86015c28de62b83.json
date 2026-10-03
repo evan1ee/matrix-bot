@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE jobs SET\n            status       = CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'pending' END,\n            available_at = CASE WHEN attempts >= max_attempts THEN available_at\n                                ELSE NOW() + make_interval(secs => $4::float8) END,\n            completed_at = CASE WHEN attempts >= max_attempts THEN NOW() END,\n            error = $3, locked_at = NULL, locked_by = NULL, heartbeat_at = NULL, updated_at = NOW()\n        WHERE id = $1 AND locked_by = $2 AND status = 'running'\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Text",
+        "Text",
+        "Float8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e5c765836f5cc7b77b5a54d5f59d565fc972d0116ebf7153e86015c28de62b83"
+}

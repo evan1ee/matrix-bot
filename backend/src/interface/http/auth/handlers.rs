@@ -4,7 +4,7 @@ use axum::{
 };
 use serde::Deserialize;
 
-use crate::accounts::{AccountRepository, SessionRepository};
+use crate::domain::channels::Channel;
 use crate::error::ApiError;
 use crate::interface::http::auth::matrix::{get_bot_matrix_access_token, resolved_homeserver};
 use crate::interface::http::auth::types::{
@@ -24,7 +24,10 @@ pub async fn logout(
     // Revoked server-side as well as cleared client-side. Clearing the cookie
     // alone would leave a token that still resolves, so anyone holding a copy
     // would stay signed in — which is exactly the gap a stateless JWT had.
-    SessionRepository::revoke(&state.db.pool, &user.session_id_hash)
+    state
+        .services
+        .accounts
+        .end_session(&user.session_id_hash)
         .await
         .map_err(|err| ApiError::internal(format!("could not sign out: {err}")))?;
 
@@ -50,7 +53,10 @@ pub async fn get_current_user(
     // An account can have several linked Matrix identities, so there is no
     // single "the" MXID any more. The first link supplies the avatar, purely
     // so the UI has a picture to show; nothing here decides anything.
-    let linked = AccountRepository::linked_mxids(&state.db.pool, &auth_user.account_id)
+    let linked = state
+        .services
+        .identity
+        .user_ids(&auth_user.account_id, Channel::Matrix)
         .await
         .unwrap_or_default();
 
@@ -278,13 +284,12 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let state = ApiState::new(
-            crate::db::Database { pool: pool },
-            crate::events::EventBroadcaster::default(),
+            crate::db::Database { pool },
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
-        let user = AuthUser::named("alice", "acct_alice");
+        let user = AuthUser::named_seed("alice", "acct_alice");
 
         let err = media_proxy(
             State(state.clone()),

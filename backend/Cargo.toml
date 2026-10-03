@@ -21,9 +21,17 @@ matrix-sdk = { version = "0.18", features = ["e2e-encryption", "bundled-sqlite"]
 # matrix-sdk 0.16 dropped its `crypto` re-export; `bot/media.rs` decrypts
 # attachments with `AttachmentDecryptor` directly. Keep in lockstep with matrix-sdk.
 matrix-sdk-crypto = "0.18"
+# Discord gateway + REST (plan B). No cache/framework: the adapter reads everything from the event.
+serenity = { version = "0.12.5", default-features = false, features = ["builder", "client", "gateway", "http", "model", "rustls_backend", "chrono"] }
+teloxide-core = { version = "0.13", default-features = false, features = ["rustls"] }
+# Email MIME parsing, SMTP transport and IMAP polling (plan D).
+mail-parser = "0.11"
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "tokio1-rustls-tls", "builder", "tracing"] }
+async-imap = { version = "0.12", default-features = false, features = ["runtime-tokio", "tokio"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring"] }
+webpki-roots = "0.26"
 sha2 = "0.10"
 tokio = { version = "1", features = ["full"] }
-tokio-stream = "0.1"
 # CancellationToken: the one shutdown tree `app.rs` owns.
 tokio-util = "0.7"
 futures-util = "0.3"
@@ -44,7 +52,7 @@ tower-http = { version = "0.5", features = ["cors", "trace", "fs", "timeout", "l
 reqwest = { version = "0.11", default-features = false, features = ["json", "rustls-tls-webpki-roots", "multipart", "stream"] }
 utoipa = { version = "4.2", features = ["axum_extras", "chrono"] }
 webauthn-rs = { version = "0.5.5", features = ["conditional-ui"] }
-uuid = "1.24.0"
+uuid = { version = "1.24.0", features = ["v4", "v5"] }
 base64 = "0.23.1"
 bcrypt = "0.19.3"
 ogg = "0.9"

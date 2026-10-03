@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE recovery_requests SET valid_after = $1, expires_at = $2 WHERE account_id = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Timestamptz",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "59d6e768fd83d718c1c1e9ff527cd859bff2006e48d73af493c4c72a64ddf1fa"
+}

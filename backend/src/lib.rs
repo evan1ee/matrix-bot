@@ -9,7 +9,6 @@
 // suggestion.
 #![recursion_limit = "256"]
 
-pub mod accounts;
 pub mod app;
 pub mod application;
 pub mod config;
@@ -19,5 +18,6 @@ pub mod error;
 pub mod events;
 pub mod infrastructure;
 pub mod interface;
-pub mod modules;
+pub mod jobs;
+pub mod llm;
 pub mod utils;

@@ -3,7 +3,7 @@
 > **Version:** 2.4.0  
 > **Status:** Roadmap specification. Sub-project 1 (phases 1–3) is designed in [`docs/superpowers/specs/2026-09-24-postgres-foundation-design.md`](docs/superpowers/specs/2026-09-24-postgres-foundation-design.md); later phases each get their own design before implementation.  
 > **Target Database:** PostgreSQL 18+ is the only application database (SQLite removed). The Matrix SDK's own end-to-end-encryption store remains an SDK-managed SQLite file — see §2.3.  
-> **Interaction Interfaces:** Matrix E2EE (Active / Implemented), Discord & Telegram ([TODO] Planned Features — Extensible Channel Framework), Web UI (React 19 SPA), MCP (Model Context Protocol), External Agents (Cursor, Claude Desktop)  
+> **Interaction Interfaces:** Matrix E2EE (Active / Implemented), Discord (Implemented), Telegram (Implemented), Email (Implemented), Web UI (React 19 SPA), MCP (Model Context Protocol), External Agents (Cursor, Claude Desktop)\
 > **Agent Execution Scope:** Scheduled Specific Tasks Exclusively ([TODO] Planned Feature — Extensible Task Plugin Architecture); Live User Input Handled Exclusively by Direct LLM + Tool Calling  
 
 ---
@@ -35,8 +35,9 @@ To maintain engineering discipline and prevent scope creep, system capabilities 
 | Subsystem / Feature | Implementation Status | Implementation Architecture | Target Milestone | Extensibility Model |
 |---|---|---|---|---|
 | **Matrix Channel (E2EE)** | **Active / Implemented** | Native `matrix-sdk` with crypto store | Shipped; refactor to `ChannelAdapter` in Phase 4 | Native driver for `ChannelAdapter` |
-| **Discord Channel** | **[TODO] Planned Feature** | `serenity` Gateway + Slash Commands | Phase 4 (Omnichannel milestone) | Pluggable `ChannelAdapter` plugin |
-| **Telegram Channel** | **[TODO] Planned Feature** | `teloxide` Axum Webhook + Bot API | Phase 4 (Omnichannel milestone) | Pluggable `ChannelAdapter` plugin |
+| **Discord Channel** | **Implemented** (plan B) | `serenity` Gateway + Slash Commands | Phase 4 (Omnichannel milestone) | `DiscordAdapter: ChannelAdapter` |
+| **Telegram Channel** | **Implemented** (plan C) | `teloxide` Axum Webhook / Polling | Phase 4 (Omnichannel milestone) | `TelegramAdapter: ChannelAdapter` |
+| **Email Channel** | **Implemented** (plan D) | `async-imap` + `lettre` SMTP | Phase 4 (Omnichannel milestone) | `EmailAdapter: ChannelAdapter` |
 | **Web Console (React 19)** | **Active / Implemented** | Axum REST + Server-Sent Events (SSE) | Shipped; align with outbox events in Phase 6 | Modular React 19 micro-views |
 | **MCP Server** | **Active / Implemented** | Stdio & SSE JSON-RPC protocol | Shipped; align with Tool Registry in Phase 4 | Tool Registry schema provider |
 | **User Input Gateway** | **Active / Implemented** | Deterministic CLI + Direct LLM + Tools | Phase 2 (Refactored domain services) | Dynamic `ToolDefinition` registry |
@@ -353,7 +354,7 @@ All relational, unstructured (JSONB), and queuing state resides in PostgreSQL 18
 
 | Domain | Tables | Notes |
 |---|---|---|
-| Accounts & auth | `accounts`, `matrix_links`, `matrix_link_challenges`, `webauthn_credentials`, `sessions`, `passkey_enrollment_tokens`, `recovery_codes`, `recovery_requests`, `security_events`, `web_users` | Session cookies stored as SHA-256 only; `matrix_links` generalises to `platform_identities` in Phase 4 |
+| Accounts & auth | `accounts`, `platform_identities`, `link_tokens`, `webauthn_credentials`, `sessions`, `passkey_enrollment_tokens`, `recovery_codes`, `recovery_requests`, `security_events`, `web_users` | Session cookies stored as SHA-256 only; `platform_identities` (migration 0006) replaced `matrix_links` and `link_tokens` replaced `matrix_link_challenges` |
 | Settings | `user_settings` | Missing row means defaults |
 | Rooms & chat state | `account_rooms`, `bot_message_targets` | Room resolution lives only in the rooms repository |
 | Todos & reminders | `todos`, `reminders` | Reminders become `reminder.fire` jobs (§5) |
@@ -894,89 +895,13 @@ The Interface Layer is fully decoupled from the core business logic using an **O
 
 ### 9.1 Unified Chat Channel Contract
 
-All chat platforms implement a common abstraction in `src/interface/channels/`:
-
-```rust
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ChatPlatform {
-    Matrix,
-    Discord,
-    Telegram,
-    Slack,
-}
-
-#[derive(Clone, Debug)]
-pub struct IncomingMessage {
-    pub platform: ChatPlatform,
-    pub platform_user_id: String,     // MXID, Discord Snowflake, Telegram User ID
-    pub channel_id: String,          // Room ID, Guild/DM Channel ID, Chat ID
-    pub message_id: String,
-    pub content: String,
-    pub sender_display_name: Option<String>,
-    pub is_direct_message: bool,
-    pub is_bot_mentioned: bool,
-    pub quoted_message: Option<QuotedContext>,
-    pub attachments: Vec<MediaAttachment>,
-}
-
-#[derive(Clone, Debug)]
-pub struct OutgoingMessage {
-    pub text: String,
-    pub formatted_html: Option<String>,
-    pub discord_embed: Option<DiscordEmbedPayload>,
-    pub telegram_parse_mode: Option<TelegramParseMode>,
-    pub reply_to_message_id: Option<String>,
-    pub attachments: Vec<MediaAttachment>,
-    pub interactive_components: Vec<ComponentRow>,
-}
-
-#[async_trait::async_trait]
-pub trait ChannelAdapter: Send + Sync {
-    fn platform(&self) -> ChatPlatform;
-    async fn start(&self, shutdown: tokio::sync::broadcast::Receiver<()>) -> Result<(), ChannelError>;
-    async fn send_message(&self, channel_id: &str, message: OutgoingMessage) -> Result<String, ChannelError>;
-    async fn send_voice(&self, channel_id: &str, voice_payload: VoicePayload) -> Result<String, ChannelError>;
-    async fn edit_message(&self, channel_id: &str, message_id: &str, message: OutgoingMessage) -> Result<(), ChannelError>;
-    async fn delete_message(&self, channel_id: &str, message_id: &str) -> Result<(), ChannelError>;
-}
-
-/// Extensible Channel Registry: dynamic registration of chat adapters
-pub struct ChannelRegistry {
-    adapters: HashMap<ChatPlatform, Arc<dyn ChannelAdapter>>,
-}
-
-impl ChannelRegistry {
-    pub fn new() -> Self {
-        Self { adapters: HashMap::new() }
-    }
-
-    pub fn register(&mut self, adapter: Arc<dyn ChannelAdapter>) {
-        self.adapters.insert(adapter.platform(), adapter);
-    }
-
-    pub fn get(&self, platform: &ChatPlatform) -> Option<Arc<dyn ChannelAdapter>> {
-        self.adapters.get(platform).cloned()
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = &Arc<dyn ChannelAdapter>> {
-        self.adapters.values()
-    }
-}
-```
-
-#### 9.1.1 Extensible Channel Plugin Architecture
-The system treats every chat platform as an independent, modular plugin:
-* Adding a new platform (e.g. Discord, Telegram, Slack, WhatsApp, Signal) requires only:
-  1. Defining the platform in `ChatPlatform`.
-  2. Implementing the `ChannelAdapter` trait.
-  3. Registering the adapter into `ChannelRegistry` at boot.
-* **Invariants:** Zero changes to Application Services, Domain entities, or existing Channel Adapters. All platform-specific network quirks, rate limits, authentication handshakes, and UI presentation details stay strictly encapsulated inside each adapter.
+Specified in `docs/superpowers/specs/2026-10-01-omnichannel-design.md` (§3 domain types and message model, §4 `ChannelAdapter` and `ChannelRegistry`, §5 the shared inbound pipeline) and implemented in `backend/src/domain/channels/` and `backend/src/interface/channels/`; the code and `docs/architecture.md#chat-channels` are the current truth, amended where noted in the spec. In brief: every platform is a `ChannelAdapter` (`channel`, `is_connected`, `run`, `send`, plus the optional `authorize_delivery` and `find_conversation_by_name`) held in one `ChannelRegistry`. An adapter parses its platform's syntax into an `IncomingMessage`, the channel-neutral `Inbound` pipeline resolves the sender to an account and dispatches one shared `ModuleRegistry`, and replies and outbound deliveries (jobs, outbox) are `OutgoingMessage`s the registry routes by the target's channel. Adding a platform means one new `ChannelAdapter` plus a `Channel` variant; application services, the domain and the other adapters do not change.
 
 ---
 
 ### 9.2 Matrix Adapter Specification (Active / Current Implementation)
 
-* **Status:** **Active / Currently Implemented** (refactoring to `ChannelAdapter` in Phase 4).
+* **Status:** **Active / Currently Implemented**, on `ChannelAdapter` (`MatrixAdapter`, Phase 4 plan A).
 * **Engine:** `matrix-sdk` with its crypto state in the SDK-managed SQLite store under `data/` (not the application database). Never kept across a fresh login; never pinned to a device ID.
 * **Core Capabilities:**
   * **End-to-End Encryption (E2EE):** Megolm / Olm session management, device verification, cross-signing auto-verification via recovery key.
@@ -988,34 +913,30 @@ The system treats every chat platform as an independent, modular plugin:
 
 ---
 
-### 9.3 Discord Adapter Specification ([TODO Feature] — Planned Extension)
+### 9.3 Discord Adapter Specification (Implemented — plan B)
 
-> **[TODO Feature — Phase 4 Roadmap]**  
-> Discord support is a **planned extension feature** to be built on top of the `ChannelAdapter` interface after SQLite removal, domain extraction, and the durable job queue are complete. The specification below defines its target architecture, slash command registry, and interaction model.
+> **Implemented** in `backend/src/interface/channels/discord/` (plan `docs/superpowers/plans/2026-10-02-omnichannel-b-discord.md`, rulings in `docs/superpowers/HANDOFF.md`). Where this section and the omnichannel design (`docs/superpowers/specs/2026-10-01-omnichannel-design.md` §8.2) or the plan disagree, the design and the plan win. Components, modals, typed options and a per-severity colour palette (§9.3.3–9.3.4) remain later improvements.
 
-The Discord integration provides deep native Discord features, turning the bot into a first-class Discord Application using **`serenity`** and Discord Gateway / REST APIs.
+The Discord integration is a `ChannelAdapter` built on **`serenity`** 0.12 (gateway + REST), registered only when `DISCORD_TOKEN` is set.
 
 #### 9.3.1 Discord Client & Gateway Architecture
-* **Crate:** `serenity` with `tokio` async runtime.
-* **Gateway Intents:** `GatewayIntents::GUILD_MESSAGES | GatewayIntents::DIRECT_MESSAGES | GatewayIntents::MESSAGE_CONTENT | GatewayIntents::GUILD_MESSAGE_REACTIONS`.
-* **Connection Lifecycle:** Runs in a background Tokio task supervised by the main daemon with automatic reconnection, session resumption, and exponential backoff on disconnect.
+* **Crate:** `serenity` with the `tokio` runtime; no cache or framework features.
+* **Gateway Intents:** `GatewayIntents::GUILDS | GatewayIntents::DIRECT_MESSAGES` — slash commands need no `MESSAGE_CONTENT`, and DM content arrives without it.
+* **Connection Lifecycle:** supervised with every other front door; serenity resumes sessions itself, the adapter rebuilds the client with exponential backoff (capped at 5 minutes), and an invalid token or disallowed intents stop the process.
 
 #### 9.3.2 Slash Commands (Application Commands)
-The bot registers global Application Commands (or guild-scoped commands during development for immediate updates):
+Registered on every gateway ready: to `DISCORD_GUILD_ID` when set (instant updates), otherwise globally. Each command takes **one string** (design D6), parsed by the shared module registry exactly as the Matrix text after the command:
 
-| Slash Command | Options / Arguments | Description |
+| Slash Command | Option | Runs |
 |---|---|---|
-| `/todo add` | `title: String`, `due: Option<String>`, `priority: Option<Integer>` | Create a new task |
-| `/todo list` | `filter: Option<Choice['all', 'pending', 'done']>` | View task list |
-| `/todo done` | `task_id: String` (Autocomplete) | Complete a task |
-| `/expense add` | `amount: Number`, `category: String` (Autocomplete), `description: String` | Log an expense |
-| `/expense summary` | `period: Option<Choice['today', 'month', 'year']>` | View spending summary |
-| `/portfolio list` | *None* (Enforces ephemeral or DM response) | View investment holdings & P&L |
-| `/portfolio buy` | `symbol: String`, `quantity: Number`, `price: Number` | Execute a stock/crypto buy |
-| `/remind` | `time: String`, `message: String` | Set a reminder |
-| `/say` | `text: String`, `voice: Option<String>` | Synthesize voice audio |
-| `/ask` | `prompt: String` | Ask conversational LLM |
-| `/link` | *None* (DM Only) | Initiate WebAuthn account linking |
+| `/todo` | `args` (optional, ≤ 500 chars) | `todo …` |
+| `/expense` | `args` | `expense …` |
+| `/portfolio` | `args` | `portfolio …` |
+| `/ask` | `prompt` (required, ≤ 4000 chars) | the AI assistant |
+| `/link` | `args` (ignored; DM only) | chat-initiated account linking |
+| `/help` | `args` | the shared help text |
+
+Text sent to the bot in a direct message goes to the AI assistant.
 
 #### 9.3.3 Interactive Message Components & Modals
 * **Buttons (ActionRow):**
@@ -1031,101 +952,88 @@ The bot registers global Application Commands (or guild-scoped commands during d
   * **Stat Strips:** Summary metrics rendered as inline embed fields (`grid-like`).
 
 #### 9.3.5 Channel Privacy Gating
-* **Public Guild Channels:** Sensitive financial operations (`/portfolio`, `/expense list`) are either automatically set to `ephemeral: true` (only visible to the command invoker) or refused with a prompt to use Direct Messages.
+* **Public Guild Channels:** every command except `/help` is answered ephemerally (only visible to the invoker), and a reply marked private is never posted on a public response. `/link` is refused outside a DM.
 * **Direct Messages (DMs):** Unrestricted access to all personal workspace features, continuous conversational LLM interaction with direct tool calling, and receipt photo uploads.
 
 ---
 
-### 9.4 Telegram Adapter Specification ([TODO Feature] — Planned Extension)
+### 9.4 Telegram Adapter Specification (Implemented — plan C)
 
-> **[TODO Feature — Phase 4 Roadmap]**  
-> Telegram support is a **planned extension feature** to be built in Phase 4 alongside Discord. The specification below defines its webhook architecture, command bindings, inline keyboard interaction, and media ingestion pipeline.
+> **Implemented** in `backend/src/interface/channels/telegram/` (plan `docs/superpowers/plans/2026-10-02-omnichannel-c-telegram.md`, rulings in `docs/superpowers/HANDOFF.md`). Where this section and the omnichannel design (`docs/superpowers/specs/2026-10-01-omnichannel-design.md` §8.3) or the plan disagree, the design and the plan win. Media ingestion and object storage (§9.4.4) remain Phase 5 / Sub-project 3 work.
 
-The Telegram integration supports both modern cloud serverless webhooks and local development polling using **`teloxide`**.
+The Telegram integration is a `ChannelAdapter` built on **`teloxide-core`** 0.13 types and `Bot`, registered only when `TELEGRAM_BOT_TOKEN` is set.
 
 #### 9.4.1 Client Architecture & Deployment Modes
 * **Production Mode (Axum Webhook):**
-  * Telegram sends updates via HTTPS `POST` to `/api/webhooks/telegram`.
-  * Verified using the `X-Telegram-Bot-Api-Secret-Token` header.
-  * Zero long-polling overhead, instant execution, and seamless integration with the existing Axum reverse-proxy (Caddy).
+  * Configured via `TELEGRAM_MODE=webhook` (requires `TELEGRAM_WEBHOOK_SECRET` and HTTPS `WEB_URL`).
+  * `TelegramAdapter::run` registers the webhook URL with Telegram via `setWebhook` at startup with exponential backoff (1 s to 300 s).
+  * Telegram sends updates via HTTPS `POST` to `/api/webhooks/telegram` (mounted outside `/api/v1`).
+  * Rate-limited per IP (120 req / 60 s); secret header `X-Telegram-Bot-Api-Secret-Token` checked in constant time before reading the body.
+  * Acknowledges `200 OK` immediately upon enqueuing into a bounded channel (capacity 32) drained by 4 worker tasks (`503` if full).
 * **Development Mode (Long Polling):**
-  * Standalone `teloxide::dispatching::Dispatcher` for local testing without public IP or ngrok tunnels.
+  * Configured via `TELEGRAM_MODE=polling` (default; suitable for development behind NAT).
+  * Standalone long-polling loop calling `getUpdates` (timeout 50 s) inside `TelegramAdapter::run`.
+* **Deduplication:**
+  * Both modes feed into `RecentUpdates` (1024-id sliding window) to eliminate duplicate updates.
 
 #### 9.4.2 Bot Commands & Menu Integration
-* Commands are registered with Telegram via `setMyCommands` API:
-  * `/start` — Welcome message, account link status, and getting started guide.
+* Commands are registered with Telegram via `setMyCommands` API at boot:
+  * `/start` — Welcome message, account link status, or help redirect.
+  * `/help` — Command cheatsheet and documentation.
   * `/todo` — Task management (add, list, check off).
   * `/expense` — Personal finance logging and summaries.
   * `/portfolio` — Asset holdings, cash balances, and trades.
-  * `/remind` — Natural language reminders.
-  * `/say` — Voice message synthesis.
   * `/link` — Secure web console account linking ceremony.
-  * `/help` — Command cheatsheet and documentation.
+* Any typed command `/name ...` is parsed and forwarded to the shared `ModuleRegistry`.
+* Direct messages route non-command text to the AI assistant with typing action indicators and live status message editing (`TelegramProgress`).
 
 #### 9.4.3 Inline Keyboards & Callback Queries
-* **Callback Query Dispatcher:** Handles interactive button presses without sending new chat messages.
-  * Interactive Todo Checklists: Users tap `[✓ Done]` directly under a task item.
-  * Trade Confirmation Prompts: `[Confirm Buy]` / `[Cancel]` buttons for high-value actions.
-  * Pagination Controls: `[◄ Prev]` / `[Next ►]` for browsing transaction history.
+* **Inline Keyboards:** Rendered from `Content.actions` (`InlineKeyboardMarkup`, max 8 rows of 1 button, callback data ≤ 64 bytes).
+* **Interactive Todo List:** `/todo` list outputs "Done #<id>" buttons for at most 10 open tasks owned by the viewer.
+* **Callback Query Dispatcher:** Callback queries are answered immediately (`answerCallbackQuery`), parsed without leading `/`, and executed through `Inbound::handle` **under the identity of the presser** (not the message author; invariant 9).
 
-#### 9.4.4 Media Ingestion & Native Voice Notes
-* **Voice Notes:** Text-to-speech replies are delivered via Telegram's `sendVoice` API, rendering as interactive audio bubbles with waveform visualization.
-* **Photo Receipt Ingestion:**
-  * When a user sends a photo or document receipt in Telegram DM:
-  * Bot downloads the highest resolution `PhotoSize` via `getFile`.
-  * Streams binary to Object Storage (`StorageService`).
-  * Enqueues an OCR parsing job in PostgreSQL.
-  * Sends an immediate acknowledgement: *"Receipt received. Processing with OCR..."*
-  * Once parsed, edits the message or sends confirmation with parsed merchant and amount.
+#### 9.4.4 Outbound & Audio Delivery
+* **Voice Notes:** Ogg Opus audio is sent via `sendVoice` as native voice notes. Other audio uses `sendAudio`, photos use `sendPhoto`, and documents use `sendDocument`. Files over 50 MB produce a descriptive warning notice.
+* **Photo Receipt Ingestion:** Planned for Phase 5 / Sub-project 3 with object storage.
 
 #### 9.4.5 Group vs Private Chat Context
-* **Private Chat (1-on-1):** Full conversational workspace mode. Interactive requests execute directly via deterministic CLI or LLM + Tool Calling (bounded tool loop).
-* **Group Chats:** Privacy mode enabled. The bot ignores background room traffic and only activates when explicitly mentioned (`@bot_username`) or when a reply targets one of its previous messages.
+* **Private Chat (1-on-1):** Full workspace access; free text reaches the AI assistant.
+* **Group Chats:** Privacy mode stays enabled. The bot receives only slash commands (with optional `@bot` mentions), direct mentions, and replies to its own messages.
+* **Privacy Enforcement:** Replies with `Visibility::Private` are refused with `PRIVATE_IN_GROUP` text ("That answer is private — message me directly.") and never posted to public groups (invariant 10).
 
 ---
 
-### 9.5 Omnichannel Account Linking Ceremony (`/link`)
+### 9.5 Email Adapter Specification (Implemented — plan D)
 
-A core strength of the architecture is that **one user account (`accounts.id`) links their Matrix, Discord, and Telegram identities** into a single personal workspace:
+> **Implemented** in `backend/src/interface/channels/email/` (plan `docs/superpowers/plans/2026-10-03-omnichannel-d-email.md`, rulings in `docs/superpowers/HANDOFF.md`).
 
-```text
-User on Discord or Telegram sends: /link (in private DM)
-  │
-  ▼
-1. Bot verifies interaction is in a private Direct Message:
-   - If in public room: Reject immediately & burn token!
-  │
-  ▼
-2. System mints single-use cryptographic token:
-   Token: mb_link_7f8a9b2c3d4e (TTL: 10 minutes)
-   Stored hashed in PostgreSQL (generalised from matrix_link_challenges)
-  │
-  ▼
-3. Bot replies with secure link:
-   "Click here to link this account to your Personal Life Workspace:
-    https://mybot.domain/link?code=mb_link_7f8a9b2c3d4e"
-  │
-  ▼
-4. User clicks link and opens Web Console in browser:
-   - Browser prompts for WebAuthn passkey assertion.
-   - User verifies biometrics (TouchID / FaceID / YubiKey).
-  │
-  ▼
-5. Server binds identity in PostgreSQL:
-   INSERT INTO platform_identities (
-     account_id, platform, platform_user_id, display_name
-   ) VALUES (
-     $auth_account_id, 'telegram', '987654321', 'Alice'
-   );
-  │
-  ▼
-6. Bot sends confirmation message back on Telegram/Discord:
-   "✓ Telegram account successfully linked! Your workspace is synchronized."
-```
+The Email integration is a `ChannelAdapter` built on **`async-imap`** and **`lettre`**, registered only when `EMAIL_IMAP_URL` is set.
+
+#### 9.5.1 Inbound Architecture & IMAP Polling
+* **Protocol & Security:** Inbound messages are polled periodically via IMAPS (`imaps://`, port 993 default) using `tokio-rustls` with Mozilla webpki roots. Plain unencrypted IMAP is rejected.
+* **Polling Interval:** Configured by `EMAIL_POLL_SECONDS` (default: 60 s, minimum: 5 s).
+* **Deduplication:** Tracked via `RecentMessages` (bounded 1024-entry sliding window on standard RFC 5322 `Message-ID`).
+* **DMARC Enforcement (Invariant 8):** Inbound emails MUST contain an `Authentication-Results` header with `dmarc=pass` matching the configured `EMAIL_AUTHSERV_ID`. Messages that fail DMARC or lack an authentication header are dropped silently with no bounce or response to prevent backscatter spam.
+* **Loop Prevention:** Automated messages (headers `Auto-Submitted`, `X-Auto-Response-Suppress`, `Precedence: bulk|junk|list`, or bounced/mailer-daemon senders) are dropped silently.
+* **Message Ingestion & Parsing:** Handled via `mail_parser`. Bodies prefer plain text (converted from HTML when only HTML is provided), trailing quotes (`> quote`, `On ... wrote:`, Outlook splitters) and email signatures are stripped before submission to the shared `InboundPipeline`.
+* **Mailbox State:** Processed messages are marked `\Seen`. If `EMAIL_PROCESSED_FOLDER` is configured, messages are copied/moved to that folder.
+
+#### 9.5.2 Outbound Delivery & Formatting
+* **SMTP Transport:** Built on `lettre::AsyncSmtpTransport` supporting `smtps://` (TLS) or `smtp://` (STARTTLS), bounded by a 30 s delivery timeout.
+* **MIME Formatting:** Rendered as `multipart/alternative` containing both clean plain-text fallback and sanitized HTML.
+* **Actions Rendering:** Interactive actions in `Content.actions` are rendered as a bulleted text list with action labels and commands.
+* **Subject & Threading:** Inbound message replies preserve subject threading (`Re: <original>` if not already present) and populate `In-Reply-To` and `References` headers. Unsolicited outbound messages derive subject lines from the first line of content (capped at 60 characters).
+* **Error Classification:** SMTP 5xx responses map to `ChannelError::Rejected` (permanent failure); SMTP 4xx and connection/timeout errors map to `ChannelError::Transient` (retryable).
 
 ---
 
-### 9.6 Cross-Platform Format Normalization & Media Bridge
+### 9.6 Omnichannel Account Linking Ceremony (`/link`)
+
+One account (`accounts.id`) holds the Matrix, Discord, Telegram and Email identities of one person. Linking is chat-initiated on every channel: `link` (`!link` on Matrix, `/link` elsewhere) in a direct conversation mints a single-use token that lives 10 minutes and is stored only as its SHA-256 (`link_tokens`); the reply carries `<WEB_URL>/link?token=…`; the web landing page shows what claiming would do and the claim itself needs a fresh passkey assertion. The direct conversation proves the chat identity, the passkey proves the account. A claim binds the identity to `platform_identities` (merging an unclaimed, auto-provisioned account when one holds it) and the bot confirms in the conversation that asked, through the outbox. An identity on the deployment's signup allowlist may create a new account with a passkey from the same page. The ceremony, its states and its security rules are specified in `docs/superpowers/specs/2026-10-01-omnichannel-design.md` §7 and amended at R73, R82 and R83 in `docs/superpowers/HANDOFF.md`; the HTTP half is in `docs/api.md`.
+
+---
+
+### 9.7 Cross-Platform Format Normalization & Media Bridge
 
 To ensure domain services write output once and render beautifully everywhere, the system utilizes a **Format Normalization Engine**:
 
@@ -1140,7 +1048,7 @@ To ensure domain services write output once and render beautifully everywhere, t
 
 ---
 
-### 9.7 Web REST & SSE API (Axum)
+### 9.8 Web REST & SSE API (Axum)
 
 * **Endpoints:** Full REST API under `/api/*` for todos, expenses, portfolio, bookmarks, habits, journal, footprints, LLM chat, and jobs.
 * **Real-Time Streaming:** `/api/events` provides a per-account SSE stream for live UI synchronization.
@@ -1148,7 +1056,7 @@ To ensure domain services write output once and render beautifully everywhere, t
 
 ---
 
-### 9.8 MCP Server (Model Context Protocol)
+### 9.9 MCP Server (Model Context Protocol)
 
 * **Transports:** `stdio` mode for Cursor / Claude Desktop and HTTP/SSE for remote agents.
 * **Authentication:** Authenticated via Personal Access Tokens (`mb_mcp_` prefix) mapped to an `account_id`.
@@ -1280,13 +1188,17 @@ backend/
 │   ├── 0001_baseline.sql              # Current schema, idempotent: adopts the live DB in place
 │   ├── 0002_account_uuid.sql          # owner_id TEXT -> UUID + foreign keys
 │   ├── 0003_jobs.sql
-│   └── 0004_outbox.sql                # outbox_events + outbox_deliveries; drops webhook_outbox
+│   ├── 0004_outbox.sql                # outbox_events + outbox_deliveries; drops webhook_outbox
+│   ├── 0005_drop_webhook_outbox.sql
+│   ├── 0006_platform_identities.sql   # platform_identities + link_tokens
+│   ├── 0007_platform_identities_backfill.sql  # matrix_links -> platform_identities, drops matrix_links
+│   └── 0008_drop_matrix_link_challenges.sql
 ├── tests/
 │   └── architecture.rs                # Fails if domain/ imports sqlx/axum/matrix-sdk, or interface/ runs SQL
 └── src/
     ├── main.rs                        # CLI: serve | mcp-stdio
     ├── app.rs                         # Composition root, task spawning, graceful shutdown
-    ├── config.rs
+    ├── config/
     ├── error.rs                       # ApiError (HTTP), AppError (application)
     ├── domain/<feature>/              # Entities, value objects, invariants, DomainError
     ├── application/<feature>/         # Services: transaction + use case + outbox publish

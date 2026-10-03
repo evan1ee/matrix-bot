@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO account_rooms (account_id, room_id, name) VALUES ($1, '!padded:x', '  Ops  '), ($1, '!blank:x', '   ')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a9e40e6c85e082c32744efd10a306d4f30e15c167ead1a145f15d97108cdbf02"
+}

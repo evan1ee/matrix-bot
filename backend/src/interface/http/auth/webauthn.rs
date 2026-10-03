@@ -16,9 +16,8 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use webauthn_rs::prelude::{DiscoverableKey, PublicKeyCredential, RegisterPublicKeyCredential};
 
-use crate::accounts::{
-    handle_to_account_id, session::COOKIE_NAME, AccountRepository, CredentialRepository,
-    SessionRepository,
+use crate::domain::accounts::{
+    cookie_value, hash_token, AccountId, ABSOLUTE_TIMEOUT_DAYS, COOKIE_NAME,
 };
 use crate::error::ApiError;
 use crate::interface::http::auth::types::{ApiState, Ceremony};
@@ -115,10 +114,8 @@ pub async fn register_start(
     // The account id is minted now because it *is* the WebAuthn user handle and
     // has to travel inside the challenge — but the row is not written until the
     // ceremony finishes, so an abandoned registration leaves nothing behind.
-    let account_id = crate::utils::random::new_account_id();
-
-    let handle = crate::accounts::account_id_to_handle(&account_id)
-        .ok_or_else(|| ApiError::internal("minted an account id with no handle"))?;
+    let account_id = AccountId::generate();
+    let handle = account_id.to_handle();
 
     let (options, reg_state) = state
         .webauthn
@@ -157,28 +154,26 @@ pub async fn enroll_start(
     Json(payload): Json<EnrollStartRequest>,
 ) -> Result<Json<CeremonyStart>, ApiError> {
     let token = payload.token.trim();
-    let account_id =
-        crate::accounts::EnrollmentRepository::validate_and_consume(&state.db.pool, token)
-            .await
-            .map_err(|err| {
-                ApiError::internal(format!("could not validate enrollment token: {err}"))
-            })?
-            .ok_or_else(|| ApiError::bad_request("Enrollment link is invalid or has expired."))?;
+    let accounts = &state.services.accounts;
+    let account_id = accounts
+        .validate_and_consume_enrollment_token(token)
+        .await
+        .map_err(|err| ApiError::internal(format!("could not validate enrollment token: {err}")))?
+        .ok_or_else(|| ApiError::bad_request("Enrollment link is invalid or has expired."))?;
 
-    let account = AccountRepository::find(&state.db.pool, &account_id)
+    let account = accounts
+        .find(&account_id)
         .await
         .map_err(|err| ApiError::internal(format!("could not find account: {err}")))?
         .ok_or_else(|| ApiError::bad_request("Account not found"))?;
 
-    let handle = crate::accounts::account_id_to_handle(&account_id)
-        .ok_or_else(|| ApiError::internal("Account has no valid handle"))?;
+    let handle = account_id.to_handle();
 
-    let stored = CredentialRepository::list_for_account(&state.db.pool, &account_id)
+    let exclude: Vec<webauthn_rs::prelude::CredentialID> = accounts
+        .passkeys_for(&account_id)
         .await
-        .unwrap_or_default();
-    let exclude: Vec<webauthn_rs::prelude::CredentialID> = stored
+        .unwrap_or_default()
         .iter()
-        .filter_map(|c| c.passkey())
         .map(|p| p.cred_id().clone())
         .collect();
     let exclude_opt = if exclude.is_empty() {
@@ -248,37 +243,19 @@ pub async fn register_finish(
             ApiError::bad_request("That passkey could not be verified")
         })?;
 
-    // Activate or create the account.
+    let label = passkey_label(payload.label.as_deref());
+
+    // One transaction: activating the account and storing its passkey either
+    // both happen or neither does. Records `PasskeyAdded` itself; recording it
+    // here as well would log it twice.
     state
         .services
         .accounts
-        .activate_or_create(
-            &crate::domain::accounts::AccountId::new(&account_id),
-            &display_name,
-        )
+        .register_with_passkey(&account_id, &display_name, &passkey, label)
         .await
         .map_err(|err| {
-            ApiError::internal(format!("could not activate or create the account: {err}"))
+            ApiError::internal(format!("could not create the account and passkey: {err}"))
         })?;
-
-    let label = payload
-        .label
-        .as_deref()
-        .map(str::trim)
-        .filter(|l| !l.is_empty())
-        .unwrap_or("Passkey");
-
-    CredentialRepository::add(&state.db.pool, &account_id, &passkey, label)
-        .await
-        .map_err(|err| ApiError::internal(format!("could not store the passkey: {err}")))?;
-
-    crate::accounts::SecurityEventRepository::record(
-        &state.db.pool,
-        &account_id,
-        crate::accounts::SecurityEventKind::PasskeyAdded,
-        Some(label),
-    )
-    .await;
 
     issue_session(&state, &account_id, &display_name, &headers).await
 }
@@ -342,21 +319,18 @@ pub async fn login_finish(
             ApiError::unauthorized("Sign-in failed")
         })?;
 
-    let cred_id_str = crate::accounts::credentials::credential_id_string(&cred_id);
-    let account_id = match CredentialRepository::find(&state.db.pool, &cred_id_str).await {
+    let accounts = &state.services.accounts;
+    let account_id = match accounts.find_passkey_by_raw_id(cred_id.as_ref()).await {
         Ok(Some(cred)) => cred.account_id,
-        _ => handle_to_account_id(&handle),
+        _ => AccountId::from_handle(&handle),
     };
 
-    let stored = CredentialRepository::list_for_account(&state.db.pool, &account_id)
+    let passkeys = accounts
+        .passkeys_for(&account_id)
         .await
         .map_err(|err| ApiError::internal(format!("could not read credentials: {err}")))?;
 
-    let discoverable: Vec<DiscoverableKey> = stored
-        .iter()
-        .filter_map(|c| c.passkey())
-        .map(|p| DiscoverableKey::from(&p))
-        .collect();
+    let discoverable: Vec<DiscoverableKey> = passkeys.iter().map(DiscoverableKey::from).collect();
 
     if discoverable.is_empty() {
         // Either the account has no passkeys or it does not exist. The caller
@@ -376,27 +350,32 @@ pub async fn login_finish(
     // successful assertion that moved it has to be written back. Dropping this
     // would quietly disable that protection.
     if result.needs_update() {
-        if let Some(row) = stored
-            .iter()
-            .find(|c| c.passkey().is_some_and(|p| p.cred_id() == result.cred_id()))
+        if let Some(mut passkey) = passkeys
+            .into_iter()
+            .find(|p| p.cred_id() == result.cred_id())
         {
-            if let Some(mut passkey) = row.passkey() {
-                passkey.update_credential(&result);
-                if let Err(err) =
-                    CredentialRepository::record_use(&state.db.pool, &row.id, &passkey).await
-                {
-                    tracing::error!("Could not persist the signature counter: {:?}", err);
-                }
+            passkey.update_credential(&result);
+            if let Err(err) = accounts.record_passkey_use_of(&passkey).await {
+                tracing::error!("Could not persist the signature counter: {:?}", err);
             }
         }
     }
 
-    let account = AccountRepository::find(&state.db.pool, &account_id)
+    let account = accounts
+        .find(&account_id)
         .await
         .map_err(|err| ApiError::internal(format!("could not read the account: {err}")))?
         .ok_or_else(|| ApiError::unauthorized("Sign-in failed"))?;
 
     issue_session(&state, &account_id, &account.display_name, &headers).await
+}
+
+/// What to call a freshly registered passkey when the browser sent no label.
+pub(crate) fn passkey_label(label: Option<&str>) -> &str {
+    label
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .unwrap_or("Passkey")
 }
 
 /// Opens a session and returns it as a `Set-Cookie` alongside the body.
@@ -405,9 +384,9 @@ pub async fn login_finish(
 /// means a cross-site request never carries it, which is most of the CSRF
 /// story. `Secure` follows the deployment — see `Config::cookie_secure` for why
 /// it is off in development.
-async fn issue_session(
+pub(crate) async fn issue_session(
     state: &ApiState,
-    account_id: &str,
+    account_id: &AccountId,
     display_name: &str,
     headers: &axum::http::HeaderMap,
 ) -> Result<axum::response::Response, ApiError> {
@@ -421,15 +400,16 @@ async fn issue_session(
         .get(axum::http::header::COOKIE)
         .and_then(|v| v.to_str().ok())
     {
-        if let Some(old_token) =
-            crate::accounts::principal::cookie_value(cookies, crate::accounts::session::COOKIE_NAME)
-        {
-            let old_id_hash = crate::accounts::session::hash_token(old_token);
-            let _ = SessionRepository::revoke(&state.db.pool, &old_id_hash).await;
+        if let Some(old_token) = cookie_value(cookies, COOKIE_NAME) {
+            let old_id_hash = hash_token(old_token);
+            let _ = state.services.accounts.end_session(&old_id_hash).await;
         }
     }
 
-    let token = SessionRepository::create(&state.db.pool, account_id, user_agent, None, None)
+    let token = state
+        .services
+        .accounts
+        .create_session(account_id, user_agent, None, None)
         .await
         .map_err(|err| ApiError::internal(format!("could not open a session: {err}")))?;
 
@@ -447,7 +427,7 @@ pub fn with_session_cookie(
     token: &str,
     secure: bool,
 ) -> axum::response::Response {
-    let max_age = crate::accounts::session::ABSOLUTE_TIMEOUT_DAYS * 24 * 60 * 60;
+    let max_age = ABSOLUTE_TIMEOUT_DAYS * 24 * 60 * 60;
     let cookie = format!(
         "{COOKIE_NAME}={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={max_age}{}",
         if secure { "; Secure" } else { "" }
@@ -481,14 +461,12 @@ pub fn clearing_session_cookie(secure: bool) -> axum::response::Response {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::EventBroadcaster;
 
     async fn state_with_secret(secret: Option<&str>) -> ApiState {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         ApiState::new(
-            crate::db::Database { pool: pool },
-            EventBroadcaster::default(),
+            crate::db::Database { pool },
             secret.map(str::to_string),
             "https://mbm.one".to_string(),
             reqwest::Client::new(),
@@ -759,13 +737,17 @@ mod tests {
     async fn test_enroll_start_validates_and_stashes_ceremony() {
         let state = state_with_secret(None).await;
         // Auto-provision an account
-        let account_id =
-            AccountRepository::resolve_or_provision(&state.db.pool, "@alice:matrix.org")
-                .await
-                .unwrap();
+        let account_id = state
+            .services
+            .identity
+            .provision_matrix_for_test("@alice:matrix.org")
+            .await;
 
         // Issue enrollment token
-        let token = crate::accounts::EnrollmentRepository::issue(&state.db.pool, &account_id, 10)
+        let token = state
+            .services
+            .accounts
+            .issue_enrollment_token(&account_id, 10)
             .await
             .unwrap();
 
@@ -797,22 +779,23 @@ mod tests {
     #[tokio::test]
     async fn test_enroll_start_refuses_an_account_that_already_has_a_passkey() {
         let state = state_with_secret(None).await;
-        let account_id =
-            AccountRepository::resolve_or_provision(&state.db.pool, "@alice:matrix.org")
-                .await
-                .unwrap();
-        let token = crate::accounts::EnrollmentRepository::issue(&state.db.pool, &account_id, 10)
+        let account_id = state
+            .services
+            .identity
+            .provision_matrix_for_test("@alice:matrix.org")
+            .await;
+        let token = state
+            .services
+            .accounts
+            .issue_enrollment_token(&account_id, 10)
             .await
             .unwrap();
-        crate::infrastructure::postgres::repositories::accounts::credentials::add(
-            &state.db.pool,
-            &crate::domain::accounts::AccountId::new(&account_id),
-            "pk1",
-            "{}",
-            "MacBook",
-        )
-        .await
-        .unwrap();
+        state
+            .services
+            .accounts
+            .add_passkey(&account_id, "pk1", "{}", "MacBook")
+            .await
+            .unwrap();
 
         let err = enroll_start(State(state.clone()), Json(EnrollStartRequest { token }))
             .await

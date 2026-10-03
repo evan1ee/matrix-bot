@@ -341,8 +341,33 @@ export class FakeApi {
    */
   pendingEvents: unknown[] = [];
 
-  /** A merge waiting on confirmation, as `!link` would have recorded. */
-  pendingMerge: { from_account: string; preview: Record<string, number> } | null = null;
+  /** Linked identities on channels other than Matrix (Matrix ones are `linkedMxids`). */
+  otherIdentities: { channel: string; user_id: string; display_name: string | null; linked_at: string }[] = [];
+
+  /**
+   * What `POST /link/inspect` answers for a token the table below does not know.
+   * The link page reads the token from the address bar, so a spec picks its
+   * state by choosing the token.
+   */
+  linkPreview: {
+    state: string;
+    channel: string | null;
+    user_id: string | null;
+    merge_item_count: number | null;
+  } = { state: 'bind', channel: 'telegram', user_id: '42', merge_item_count: null };
+
+  /** Token-driven answers for `POST /link/inspect`. */
+  linkPreviews: Record<string, { state: string; channel: string | null; user_id: string | null; merge_item_count: number | null }> = {
+    'expired-token': { state: 'expired', channel: null, user_id: null, merge_item_count: null },
+    'signup-token': { state: 'signup_allowed', channel: 'telegram', user_id: '77', merge_item_count: null },
+    'merge-token': { state: 'needs_merge', channel: 'discord', user_id: '9001', merge_item_count: 7 },
+    'signin-token': { state: 'sign_in_required', channel: 'telegram', user_id: '42', merge_item_count: null },
+    'yours-token': { state: 'already_yours', channel: 'telegram', user_id: '42', merge_item_count: null },
+    'taken-token': { state: 'owned_elsewhere', channel: 'telegram', user_id: '42', merge_item_count: null },
+  };
+
+  /** What `POST /link/claim` answers; `merge-token` claims merge. */
+  claimOutcome = 'linked';
 
   transactions: FakeTransaction[] = [];
   categories: FakeCategory[] = [];
@@ -864,23 +889,47 @@ export class FakeApi {
       this.passkeys = this.passkeys.filter((k) => k.id !== id);
       return route.fulfill({ status: 204, body: '' });
     }
-    if (path === '/account/matrix' && method === 'GET') {
-      return json(route, 200, this.linkedMxids);
+    if (path === '/account/identities' && method === 'GET') {
+      return json(route, 200, {
+        identities: [
+          ...this.linkedMxids.map((user_id) => ({
+            channel: 'matrix',
+            user_id,
+            display_name: null,
+            linked_at: '2026-08-01T10:00:00Z',
+          })),
+          ...this.otherIdentities,
+        ],
+      });
     }
-    if (path === '/account/matrix/link' && method === 'POST') {
-      return json(route, 200, { code: 'A3F9-K2QX', expires_in_seconds: 300 });
+    if (path === '/account/identities/unlink' && method === 'POST') {
+      const before = this.linkedMxids.length + this.otherIdentities.length;
+      if (body?.channel === 'matrix') {
+        this.linkedMxids = this.linkedMxids.filter((m) => m !== body?.user_id);
+      } else {
+        this.otherIdentities = this.otherIdentities.filter(
+          (i) => !(i.channel === body?.channel && i.user_id === body?.user_id)
+        );
+      }
+      const after = this.linkedMxids.length + this.otherIdentities.length;
+      return json(route, 200, { unlinked: after < before });
     }
-    if (path === '/account/matrix/unlink' && method === 'POST') {
-      this.linkedMxids = this.linkedMxids.filter((m) => m !== body?.mxid);
-      return route.fulfill({ status: 204, body: '' });
-    }
-    if (path === '/account/matrix/pending-merge' && method === 'GET') {
-      return json(route, 200, this.pendingMerge);
-    }
-    if (path === '/account/matrix/confirm-merge' && method === 'POST') {
-      const preview = this.pendingMerge?.preview ?? {};
-      this.pendingMerge = null;
+    if (path === '/link/inspect' && method === 'POST') {
+      const preview = this.linkPreviews[String(body?.token)] ?? this.linkPreview;
       return json(route, 200, preview);
+    }
+    if (path === '/link/claim' && method === 'POST') {
+      return json(route, 200, { outcome: body?.token === 'merge-token' ? 'merged' : this.claimOutcome });
+    }
+    if (path === '/link/signup/start' && method === 'POST') {
+      return json(route, 200, {
+        ceremony_id: 'ceremony_link_signup',
+        options: { publicKey: registrationOptions(DISPLAY_NAME) },
+      });
+    }
+    if (path === '/link/signup/finish' && method === 'POST') {
+      this.signedIn = true;
+      return json(route, 200, { account_id: OWNER, display_name: DISPLAY_NAME });
     }
     if (path === '/account/sessions' && method === 'GET') {
       return json(route, 200, this.sessions);

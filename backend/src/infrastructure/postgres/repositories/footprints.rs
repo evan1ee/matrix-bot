@@ -14,7 +14,7 @@ use crate::domain::footprints::{
 #[derive(Debug, sqlx::FromRow)]
 struct FootprintRow {
     id: i64,
-    owner_id: String,
+    owner_id: uuid::Uuid,
     title: String,
     latitude: f64,
     longitude: f64,
@@ -38,7 +38,7 @@ impl From<FootprintRow> for Footprint {
     fn from(row: FootprintRow) -> Self {
         Self {
             id: row.id,
-            owner_id: AccountId::new(row.owner_id),
+            owner_id: AccountId::from_uuid(row.owner_id),
             title: row.title,
             latitude: row.latitude,
             longitude: row.longitude,
@@ -80,7 +80,7 @@ pub async fn create<'e>(
                   spend_amount_minor, spend_currency, spend_currency_exponent,
                   rating, category, note, created_at, updated_at
         "#,
-        owner.as_str(),
+        owner.as_uuid(),
         f.title,
         f.latitude,
         f.longitude,
@@ -141,7 +141,7 @@ pub async fn find_owned<'e>(
         WHERE id = $1 AND owner_id = $2
         "#,
         id,
-        owner.as_str()
+        owner.as_uuid()
     )
     .fetch_optional(conn)
     .await?;
@@ -171,7 +171,7 @@ pub async fn list_by_owner<'e>(
           AND ($4::text IS NULL OR title LIKE $4 OR city LIKE $4 OR address LIKE $4 OR note LIKE $4)
         ORDER BY arrival_date DESC, id DESC
         "#,
-        owner.as_str(),
+        owner.as_uuid(),
         country,
         category,
         search_pattern.as_deref()
@@ -218,7 +218,7 @@ pub async fn update<'e>(
         f.category,
         f.note.as_deref(),
         id,
-        owner.as_str()
+        owner.as_uuid()
     )
     .fetch_optional(conn)
     .await?;
@@ -234,7 +234,7 @@ pub async fn delete<'e>(
     let res = sqlx::query!(
         "DELETE FROM footprints WHERE id = $1 AND owner_id = $2",
         id,
-        owner.as_str()
+        owner.as_uuid()
     )
     .execute(conn)
     .await?;
@@ -255,7 +255,7 @@ pub async fn summary_stats(
         FROM footprints
         WHERE owner_id = $1
         "#,
-        owner.as_str()
+        owner.as_uuid()
     )
     .fetch_one(pool)
     .await?;
@@ -271,7 +271,7 @@ pub async fn summary_stats(
         GROUP BY spend_currency, spend_currency_exponent
         ORDER BY 3 DESC
         "#,
-        owner.as_str()
+        owner.as_uuid()
     )
     .fetch_all(pool)
     .await?;
@@ -302,7 +302,15 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
 
-        let owner = AccountId::new("user_fp_test");
+        let owner = AccountId::from_seed("user_fp_test");
+        sqlx::query!(
+            "INSERT INTO accounts (id, display_name, status) VALUES ($1, 'test', 'active') ON CONFLICT DO NOTHING",
+            owner.as_uuid()
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
         let new_fp = CreateFootprint {
             title: "Tokyo Tower".to_string(),
             latitude: 35.6586,

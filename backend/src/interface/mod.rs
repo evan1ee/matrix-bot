@@ -10,4 +10,7 @@
 
 pub mod channels;
 pub mod chat;
+pub mod events;
 pub mod http;
+pub mod jobs;
+pub mod mcp;

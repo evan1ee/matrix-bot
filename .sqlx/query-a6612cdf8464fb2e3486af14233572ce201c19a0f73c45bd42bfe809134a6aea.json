@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE ai_conversations\n        SET updated_at = CAST(CURRENT_TIMESTAMP AS TEXT)\n        WHERE id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a6612cdf8464fb2e3486af14233572ce201c19a0f73c45bd42bfe809134a6aea"
+}

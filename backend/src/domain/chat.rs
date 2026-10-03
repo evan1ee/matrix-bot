@@ -40,6 +40,19 @@ impl QuotedMessage {
     }
 }
 
+use crate::domain::accounts::AccountId;
+
+/// A tracked chat message target linked to a domain entity (e.g. todo, reminder).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BotMessageTarget {
+    pub event_id: String,
+    pub room_id: String,
+    pub entity_type: String,
+    pub entity_id: i64,
+    pub owner_id: AccountId,
+    pub title: String,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

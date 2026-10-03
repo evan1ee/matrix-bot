@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE link_tokens SET consumed_at = $3\n         WHERE platform = $1 AND platform_user_id = $2 AND consumed_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cf07ceb04029afc7280c64f02608e9aaf95ad97920d74fdd7652fe5c1b3adade"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM outbox_events e\n        WHERE e.created_at < NOW() - make_interval(secs => $1)\n          AND NOT EXISTS (\n              SELECT 1 FROM outbox_deliveries d\n              WHERE d.event_id = e.id AND d.status = 'pending')\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Float8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fb84dcb673399e7e90b2fa1561060e0c81f132e2d801ff2d928ad8d3b674178c"
+}

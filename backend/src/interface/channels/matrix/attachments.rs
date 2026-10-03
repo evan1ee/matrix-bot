@@ -20,9 +20,12 @@ use tracing::{error, warn};
 
 use crate::config::AiEnvConfig;
 use crate::db::Database;
-use crate::events::EventBroadcaster;
+use crate::domain::accounts::AccountId;
+use crate::domain::channels::PlatformIdentity;
+use crate::infrastructure::postgres::repositories::identities;
 use crate::interface::channels::matrix::stage::{StageIndicator, StageReporter, TypingGuard};
-use crate::modules::voice::VoiceConfig;
+use crate::interface::chat::voice::VoiceConfig;
+use crate::llm::progress::ProgressSink;
 
 /// Everything that differs between handling an image and handling a voice
 /// note: which content carries the media, what to call the two processing
@@ -164,25 +167,25 @@ impl<'a> Attachment<'a> {
         db: &Database,
         services: &crate::application::AppServices,
         ai: &AiEnvConfig,
-        broadcaster: Option<&EventBroadcaster>,
         room: &Room,
-        owner_id: &str,
+        owner_id: &AccountId,
         media_bytes: &[u8],
         reporter: &StageReporter,
     ) -> String {
-        match self {
+        let conversation = room.room_id().as_str();
+        let progress: Option<&dyn ProgressSink> = Some(reporter);
+        let reply = match self {
             Self::Image { content, ocr } => {
-                crate::modules::ocr::process_image_event(
+                crate::interface::chat::ocr::process_image(
                     db,
                     services,
                     ai,
-                    broadcaster,
-                    room,
+                    conversation,
                     owner_id,
                     Some(&content.body),
                     media_bytes,
                     ocr,
-                    Some(reporter),
+                    progress,
                 )
                 .await
             }
@@ -191,12 +194,11 @@ impl<'a> Attachment<'a> {
                 voice_config,
                 stt,
             } => {
-                crate::modules::voice::process_audio_event(
+                crate::interface::chat::voice::process_audio(
                     db,
                     services,
                     ai,
-                    broadcaster,
-                    room,
+                    conversation,
                     owner_id,
                     media_bytes,
                     content
@@ -206,11 +208,22 @@ impl<'a> Attachment<'a> {
                     content.info.as_ref().and_then(|info| info.duration),
                     voice_config,
                     stt,
-                    Some(reporter),
+                    progress,
                 )
                 .await
             }
-        }
+        };
+        // The turn knows no channel; the tool targets are recorded against the
+        // stage event, which is what a reaction on the reply resolves through.
+        crate::interface::channels::matrix::reaction_targets::record_ai_tool_targets(
+            &db.pool,
+            reporter.message_ref().as_deref(),
+            conversation,
+            owner_id,
+            &reply.tool_results,
+        )
+        .await;
+        reply.html
     }
 }
 
@@ -227,7 +240,6 @@ pub async fn handle_attachment(
     db: &Database,
     services: &crate::application::AppServices,
     ai_config: &AiEnvConfig,
-    broadcaster: Option<&EventBroadcaster>,
     ocr: &crate::infrastructure::inference::ocr::OcrClient,
     voice_config: &VoiceConfig,
     stt: &crate::infrastructure::inference::stt::SttClient,
@@ -248,15 +260,16 @@ pub async fn handle_attachment(
     let (plain_stage, html_stage) = attachment.stage_labels();
     let stage_indicator = StageIndicator::start(room, plain_stage, html_stage).await;
 
-    let owner_id = match crate::accounts::AccountRepository::resolve_or_provision(
-        &db.pool,
-        ev.sender.as_str(),
-    )
-    .await
-    {
+    let resolved = match PlatformIdentity::matrix(ev.sender.as_str()) {
+        Ok(identity) => identities::resolve_or_provision(&db.pool, &identity)
+            .await
+            .map_err(|err| format!("{err:?}")),
+        Err(err) => Err(err.to_string()),
+    };
+    let owner_id = match resolved {
         Ok(owner_id) => owner_id,
         Err(err) => {
-            error!("Could not resolve account for {}: {:?}", ev.sender, err);
+            error!("Could not resolve account for {}: {}", ev.sender, err);
             typing_guard.stop().await;
             let (plain, html) = attachment.account_error();
             stage_indicator.cancel_with_error(plain, html).await;
@@ -292,7 +305,6 @@ pub async fn handle_attachment(
         db,
         services,
         ai_config,
-        broadcaster,
         room,
         &owner_id,
         &media_bytes,

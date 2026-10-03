@@ -6,14 +6,150 @@ use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::domain::life::DayLogInput;
 use crate::error::ApiError;
-use crate::events::SystemEvent;
 use crate::interface::http::auth::{ApiState, AuthUser};
-use crate::modules::life::models::{
-    normalize_mood, LifeDayLog, LifeHorizonDay, LifeProfile, LifeProfileStats, LifeYearView,
-    UpdateTimeAllocationInput, UpsertLifeDayLogInput, UpsertLifeProfileInput,
-};
-use crate::modules::life::repository::LifeRepository;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+pub struct LifeProfile {
+    pub owner_id: String,
+    pub birth_date: String,
+    pub expected_lifespan_years: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl From<crate::domain::life::LifeProfile> for LifeProfile {
+    fn from(p: crate::domain::life::LifeProfile) -> Self {
+        Self {
+            owner_id: p.owner_id.to_string(),
+            birth_date: p.birth_date,
+            expected_lifespan_years: p.expected_lifespan_years,
+            created_at: p.created_at,
+            updated_at: p.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+pub struct LifeDayLog {
+    pub id: i64,
+    pub owner_id: String,
+    pub log_date: String,
+    pub mood: String,
+    pub weather: Option<String>,
+    pub activities: Option<String>,
+    pub note: Option<String>,
+    pub time_allocation: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl From<crate::domain::life::LifeDayLog> for LifeDayLog {
+    fn from(l: crate::domain::life::LifeDayLog) -> Self {
+        Self {
+            id: l.id,
+            owner_id: l.owner_id.to_string(),
+            log_date: l.log_date,
+            mood: l.mood,
+            weather: l.weather,
+            activities: l.activities,
+            note: l.note,
+            time_allocation: l.time_allocation,
+            created_at: l.created_at,
+            updated_at: l.updated_at,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct UpsertLifeProfileInput {
+    pub birth_date: String,
+    pub expected_lifespan_years: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct UpsertLifeDayLogInput {
+    #[serde(alias = "date")]
+    pub log_date: String,
+    pub mood: String,
+    pub weather: Option<String>,
+    pub activities: Option<Vec<String>>,
+    pub note: Option<String>,
+    pub time_allocation: Option<Vec<Option<String>>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct UpdateTimeAllocationInput {
+    pub time_allocation: Vec<Option<String>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+pub struct LifeHorizonDay {
+    pub date: String,
+    pub mood: String,
+    pub time_allocation: Option<String>,
+    pub has_activity: bool,
+    pub activity_count: i64,
+}
+
+impl From<crate::domain::life::LifeHorizonDay> for LifeHorizonDay {
+    fn from(d: crate::domain::life::LifeHorizonDay) -> Self {
+        Self {
+            date: d.date,
+            mood: d.mood,
+            time_allocation: d.time_allocation,
+            has_activity: d.has_activity,
+            activity_count: d.activity_count,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, ToSchema)]
+pub struct LifeProfileStats {
+    pub profile: Option<LifeProfile>,
+    pub age_days: i64,
+    pub total_expected_days: i64,
+    pub days_lived_percent: f64,
+    pub total_logged_days: i64,
+    pub dominant_mood: Option<String>,
+    pub total_deep_work_hours: f64,
+    pub average_sleep_hours: f64,
+    pub today_date: String,
+}
+
+impl From<crate::domain::life::LifeProfileStats> for LifeProfileStats {
+    fn from(s: crate::domain::life::LifeProfileStats) -> Self {
+        Self {
+            profile: s.profile.map(LifeProfile::from),
+            age_days: s.age_days,
+            total_expected_days: s.total_expected_days,
+            days_lived_percent: s.days_lived_percent,
+            total_logged_days: s.total_logged_days,
+            dominant_mood: s.dominant_mood,
+            total_deep_work_hours: s.total_deep_work_hours,
+            average_sleep_hours: s.average_sleep_hours,
+            today_date: s.today_date,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
+pub struct LifeYearView {
+    pub year: i64,
+    pub logs: Vec<LifeDayLog>,
+    pub total_logged_days: i64,
+}
+
+impl From<crate::domain::life::LifeYearView> for LifeYearView {
+    fn from(v: crate::domain::life::LifeYearView) -> Self {
+        Self {
+            year: v.year,
+            logs: v.logs.into_iter().map(LifeDayLog::from).collect(),
+            total_logged_days: v.total_logged_days,
+        }
+    }
+}
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct DeleteDayResponse {
@@ -44,11 +180,13 @@ pub async fn get_profile_and_stats(
     State(state): State<ApiState>,
 ) -> Result<Json<LifeProfileStats>, ApiError> {
     let today = get_today_string();
-    let stats = LifeRepository::get_stats(&state.db.pool, &user.account_id, &today)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let stats = state
+        .services
+        .life
+        .get_stats(&user.account_id, &today)
+        .await?;
 
-    Ok(Json(stats))
+    Ok(Json(LifeProfileStats::from(stats)))
 }
 
 /// Also mounted as `POST /api/v1/life/profile` for the same handler — utoipa
@@ -79,16 +217,13 @@ pub async fn upsert_profile(
 
     let lifespan = payload.expected_lifespan_years.unwrap_or(80).clamp(40, 130);
 
-    let profile = LifeRepository::upsert_profile(&state.db.pool, &user.account_id, birth, lifespan)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let profile = state
+        .services
+        .life
+        .upsert_profile(&user.account_id, birth, lifespan)
+        .await?;
 
-    state.broadcaster.send(SystemEvent::LifeProfileUpdated {
-        owner_id: user.account_id.to_string(),
-        profile: profile.clone(),
-    });
-
-    Ok(Json(profile))
+    Ok(Json(LifeProfile::from(profile)))
 }
 
 #[utoipa::path(
@@ -112,11 +247,13 @@ pub async fn get_year_view(
         return Err(ApiError::bad_request("Year must be between 1900 and 2200."));
     }
 
-    let view = LifeRepository::get_year_view(&state.db.pool, &user.account_id, year)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let view = state
+        .services
+        .life
+        .get_year_view(&user.account_id, year)
+        .await?;
 
-    Ok(Json(view))
+    Ok(Json(LifeYearView::from(view)))
 }
 
 #[utoipa::path(
@@ -133,11 +270,15 @@ pub async fn get_horizon(
     user: AuthUser,
     State(state): State<ApiState>,
 ) -> Result<Json<Vec<LifeHorizonDay>>, ApiError> {
-    let horizon = LifeRepository::get_horizon_days(&state.db.pool, &user.account_id)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let horizon = state
+        .services
+        .life
+        .get_horizon_days(&user.account_id)
+        .await?;
 
-    Ok(Json(horizon))
+    Ok(Json(
+        horizon.into_iter().map(LifeHorizonDay::from).collect(),
+    ))
 }
 
 #[utoipa::path(
@@ -164,13 +305,11 @@ pub async fn upsert_day(
         ));
     }
 
-    let mood = normalize_mood(&payload.mood).ok_or_else(|| {
-        ApiError::bad_request("Invalid mood. Choose from amazing, good, neutral, low, rough.")
-    })?;
-
-    let existing = LifeRepository::get_day_log(&state.db.pool, &user.account_id, date_str)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let existing = state
+        .services
+        .life
+        .get_day_log(&user.account_id, date_str)
+        .await?;
     if let Some(ref ex) = existing {
         if !ex.mood.is_empty() {
             return Err(ApiError::bad_request(
@@ -214,24 +353,23 @@ pub async fn upsert_day(
         None => None,
     };
 
-    let log = LifeRepository::upsert_day_log(
-        &state.db.pool,
-        &user.account_id,
-        date_str,
-        mood,
-        payload.weather.as_deref(),
-        activities_json.as_deref(),
-        payload.note.as_deref(),
-        time_allocation_json.as_deref(),
-    )
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?;
+    let log = state
+        .services
+        .life
+        .upsert_day_log(
+            &user.account_id,
+            date_str,
+            DayLogInput {
+                mood: &payload.mood,
+                weather: payload.weather.as_deref(),
+                activities: activities_json.as_deref(),
+                note: payload.note.as_deref(),
+                time_allocation: time_allocation_json.as_deref(),
+            },
+        )
+        .await?;
 
-    state
-        .broadcaster
-        .send(SystemEvent::LifeDayLogged(log.clone()));
-
-    Ok(Json(log))
+    Ok(Json(LifeDayLog::from(log)))
 }
 
 #[utoipa::path(
@@ -266,9 +404,11 @@ pub async fn update_time_allocation(
     }
 
     let today = get_today_string();
-    let existing = LifeRepository::get_day_log(&state.db.pool, &user.account_id, &date)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let existing = state
+        .services
+        .life
+        .get_day_log(&user.account_id, &date)
+        .await?;
 
     if let Some(ref ex) = existing {
         if !ex.mood.is_empty() && date < today {
@@ -281,20 +421,13 @@ pub async fn update_time_allocation(
     let time_allocation_json = serde_json::to_string(&payload.time_allocation)
         .map_err(|e| ApiError::bad_request(format!("Invalid time allocation format: {e}")))?;
 
-    let log = LifeRepository::update_time_allocation(
-        &state.db.pool,
-        &user.account_id,
-        &date,
-        &time_allocation_json,
-    )
-    .await
-    .map_err(|e| ApiError::internal(e.to_string()))?;
+    let log = state
+        .services
+        .life
+        .update_time_allocation(&user.account_id, &date, &time_allocation_json)
+        .await?;
 
-    state
-        .broadcaster
-        .send(SystemEvent::LifeDayLogged(log.clone()));
-
-    Ok(Json(log))
+    Ok(Json(LifeDayLog::from(log)))
 }
 
 #[utoipa::path(
@@ -320,11 +453,13 @@ pub async fn get_day(
         ));
     }
 
-    let log = LifeRepository::get_day_log(&state.db.pool, &user.account_id, &date)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
+    let log = state
+        .services
+        .life
+        .get_day_log(&user.account_id, &date)
+        .await?;
 
-    Ok(Json(log))
+    Ok(Json(log.map(LifeDayLog::from)))
 }
 
 #[utoipa::path(
@@ -350,16 +485,11 @@ pub async fn delete_day(
         ));
     }
 
-    let deleted = LifeRepository::delete_day_log(&state.db.pool, &user.account_id, &date)
-        .await
-        .map_err(|e| ApiError::internal(e.to_string()))?;
-
-    if deleted {
-        state.broadcaster.send(SystemEvent::LifeDayCleared {
-            owner_id: user.account_id.to_string(),
-            date: date.clone(),
-        });
-    }
+    let deleted = state
+        .services
+        .life
+        .delete_day_log(&user.account_id, &date)
+        .await?;
 
     Ok(Json(DeleteDayResponse {
         success: deleted,
@@ -372,17 +502,15 @@ mod tests {
     use super::*;
     use crate::db::Database;
     use crate::db::DbPool;
-    use crate::events::EventBroadcaster;
 
     async fn create_test_state() -> (ApiState, DbPool) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["user_api_1"]).await;
         let db = Database { pool: pool.clone() };
-        let broadcaster = EventBroadcaster::new(10);
         let client = reqwest::Client::new();
         let state = ApiState::new(
             db,
-            broadcaster,
             Some("secret".to_string()),
             "https://matrix.org".to_string(),
             client,
@@ -394,7 +522,7 @@ mod tests {
     async fn test_profile_and_day_api_flow() {
         let (state, _) = create_test_state().await;
         let user = AuthUser {
-            account_id: crate::domain::accounts::AccountId::new("user_api_1"),
+            account_id: crate::domain::accounts::AccountId::from_seed("user_api_1"),
             display_name: "User Api 1".to_string(),
             session_id_hash: "hash_1".to_string(),
             last_verified_at: chrono::Utc::now(),

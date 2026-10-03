@@ -6,6 +6,7 @@
 use sqlx::{PgExecutor, PgPool};
 
 use crate::domain::accounts::AccountId;
+use crate::domain::bookmarks::BookmarkFields;
 use crate::domain::bookmarks::{
     Bookmark, BookmarkQuery, BookmarkStats, CreateBookmark, DomainCount,
 };
@@ -13,7 +14,7 @@ use crate::domain::bookmarks::{
 #[derive(Debug, sqlx::FromRow)]
 pub(crate) struct BookmarkRow {
     pub id: i64,
-    pub owner_id: String,
+    pub owner_id: uuid::Uuid,
     pub url: String,
     pub title: String,
     pub description: Option<String>,
@@ -33,7 +34,7 @@ impl From<BookmarkRow> for Bookmark {
     fn from(row: BookmarkRow) -> Self {
         Self {
             id: row.id,
-            owner_id: AccountId::new(row.owner_id),
+            owner_id: AccountId::from_uuid(row.owner_id),
             url: row.url,
             title: row.title,
             description: row.description,
@@ -69,7 +70,7 @@ pub async fn create(
                   domain, reader_content, reading_time_minutes, is_favorite,
                   is_archived, tags, created_at, updated_at
         "#,
-        owner.as_str(),
+        owner.as_uuid(),
         input.url,
         input.title,
         input.description,
@@ -101,7 +102,7 @@ pub async fn find_by_id(
         WHERE id = $1 AND owner_id = $2
         "#,
         id,
-        owner.as_str(),
+        owner.as_uuid(),
     )
     .fetch_optional(conn)
     .await?;
@@ -152,7 +153,7 @@ pub async fn list(
         LIMIT $8
         OFFSET $9
         "#,
-        owner.as_str(),
+        owner.as_uuid(),
         query.archived,
         query.favorite,
         domain_filter,
@@ -202,7 +203,7 @@ pub async fn count(
           AND ($5::text IS NULL OR tags LIKE $5 OR tags = $6)
           AND ($7::text IS NULL OR title LIKE $7 OR description LIKE $7 OR url LIKE $7)
         "#,
-        owner.as_str(),
+        owner.as_uuid(),
         query.archived,
         query.favorite,
         domain_filter,
@@ -220,12 +221,15 @@ pub async fn update_fields(
     conn: impl PgExecutor<'_>,
     id: i64,
     owner: &AccountId,
-    title: &str,
-    description: Option<&str>,
-    is_favorite: bool,
-    is_archived: bool,
-    tags: &str,
+    fields: BookmarkFields<'_>,
 ) -> Result<Option<Bookmark>, sqlx::Error> {
+    let BookmarkFields {
+        title,
+        description,
+        is_favorite,
+        is_archived,
+        tags,
+    } = fields;
     let row = sqlx::query_as!(
         BookmarkRow,
         r#"
@@ -243,7 +247,7 @@ pub async fn update_fields(
         is_archived,
         tags,
         id,
-        owner.as_str(),
+        owner.as_uuid(),
     )
     .fetch_optional(conn)
     .await?;
@@ -267,7 +271,7 @@ pub async fn toggle_favorite(
                   is_archived, tags, created_at, updated_at
         "#,
         id,
-        owner.as_str(),
+        owner.as_uuid(),
     )
     .fetch_optional(conn)
     .await?;
@@ -291,7 +295,7 @@ pub async fn toggle_archived(
                   is_archived, tags, created_at, updated_at
         "#,
         id,
-        owner.as_str(),
+        owner.as_uuid(),
     )
     .fetch_optional(conn)
     .await?;
@@ -307,7 +311,7 @@ pub async fn delete(
     let res = sqlx::query!(
         "DELETE FROM bookmarks WHERE id = $1 AND owner_id = $2",
         id,
-        owner.as_str(),
+        owner.as_uuid(),
     )
     .execute(conn)
     .await?;
@@ -326,7 +330,7 @@ pub async fn get_stats(pool: &PgPool, owner: &AccountId) -> Result<BookmarkStats
         FROM bookmarks
         WHERE owner_id = $1
         "#,
-        owner.as_str(),
+        owner.as_uuid(),
     )
     .fetch_one(pool)
     .await?;
@@ -340,7 +344,7 @@ pub async fn get_stats(pool: &PgPool, owner: &AccountId) -> Result<BookmarkStats
         ORDER BY COUNT(*) DESC
         LIMIT 10
         "#,
-        owner.as_str(),
+        owner.as_uuid(),
     )
     .fetch_all(pool)
     .await?;
@@ -355,7 +359,7 @@ pub async fn get_stats(pool: &PgPool, owner: &AccountId) -> Result<BookmarkStats
 
     let tag_rows = sqlx::query_scalar!(
         "SELECT tags FROM bookmarks WHERE owner_id = $1 AND tags != ''",
-        owner.as_str(),
+        owner.as_uuid(),
     )
     .fetch_all(pool)
     .await?;
@@ -388,10 +392,13 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let owner =
-            crate::accounts::AccountRepository::resolve_or_provision(&pool, "@alice:mbm.one")
-                .await
-                .unwrap();
-        (pool, AccountId::new(owner))
+            crate::infrastructure::postgres::repositories::identities::resolve_or_provision(
+                &pool,
+                &crate::domain::channels::PlatformIdentity::matrix("@alice:mbm.one").unwrap(),
+            )
+            .await
+            .unwrap();
+        (pool, owner)
     }
 
     #[tokio::test]

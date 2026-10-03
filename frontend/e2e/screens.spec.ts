@@ -183,25 +183,16 @@ test('@screens security states that are hard to reach by hand', async ({ app, ap
   let dialog = await openSecurity(app);
   await shot(app, '11-security-populated');
 
-  await dialog.getByRole('button', { name: /link a matrix account/i }).click();
-  await shot(app, '12-link-code');
-
   await dialog.getByRole('button', { name: /generate new codes/i }).click();
   await shot(app, '13-recovery-codes-shown-once');
 });
 
-test('@screens the two alarms', async ({ app, api }) => {
+test('@screens the recovery alarm', async ({ app, api }) => {
   api.recoveryStatus = { codes_remaining: 7, recovery_valid_after: '2026-08-13T09:00:00Z' };
-  api.pendingMerge = {
-    from_account: 'acct_old',
-    preview: { todos: 47, reminders: 8, transactions: 132, recurring_bills: 0,
-               portfolio_holdings: 3, portfolio_cash_balances: 1,
-               finance_categories: 2, user_settings: 1 },
-  };
 
   await gotoApp(app);
   await openSecurity(app);
-  await shot(app, '14-recovery-alarm-and-pending-merge');
+  await shot(app, '14-recovery-alarm');
 });
 
 // The app defaults to DARK, so toggling lands on light. Named for what it

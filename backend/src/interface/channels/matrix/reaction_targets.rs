@@ -2,82 +2,11 @@
 //! that can be interacted with via reactions.
 
 use crate::db::DbPool;
-/// A tracked message target linked to a domain entity.
-#[derive(Debug, Clone, PartialEq, Eq, sqlx::FromRow)]
-pub struct BotMessageTarget {
-    pub event_id: String,
-    pub room_id: String,
-    pub entity_type: String, // "todo" or "reminder"
-    pub entity_id: i64,
-    pub owner_id: String,
-    pub title: String,
-}
-
-/// Records or updates a Matrix message target associated with an entity.
-pub async fn record_target(
-    pool: &DbPool,
-    event_id: &str,
-    room_id: &str,
-    entity_type: &str,
-    entity_id: i64,
-    owner_id: &str,
-    title: &str,
-) -> Result<(), sqlx::Error> {
-    crate::db_execute!(
-        pool,
-        r#"
-        INSERT INTO bot_message_targets (event_id, room_id, entity_type, entity_id, owner_id, title)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(event_id) DO UPDATE SET
-            room_id = excluded.room_id,
-            entity_type = excluded.entity_type,
-            entity_id = excluded.entity_id,
-            owner_id = excluded.owner_id,
-            title = excluded.title
-        "#,
-        event_id,
-        room_id,
-        entity_type,
-        entity_id,
-        owner_id,
-        title
-    )?;
-
-    Ok(())
-}
-
-/// Retrieves a tracked message target by Matrix event ID.
-pub async fn get_target(
-    pool: &DbPool,
-    event_id: &str,
-) -> Result<Option<BotMessageTarget>, sqlx::Error> {
-    crate::db_fetch_optional!(
-        pool,
-        BotMessageTarget,
-        r#"
-        SELECT event_id, room_id, entity_type, entity_id, owner_id, title
-        FROM bot_message_targets
-        WHERE event_id = ?
-        "#,
-        event_id
-    )
-}
-
-/// Deletes tracked targets for a given entity type and ID.
-pub async fn delete_target_by_entity(
-    pool: &DbPool,
-    entity_type: &str,
-    entity_id: i64,
-) -> Result<u64, sqlx::Error> {
-    let res = crate::db_execute!(
-        pool,
-        "DELETE FROM bot_message_targets WHERE entity_type = ? AND entity_id = ?",
-        entity_type,
-        entity_id
-    )?;
-
-    Ok(res)
-}
+use crate::domain::accounts::AccountId;
+pub use crate::domain::chat::BotMessageTarget;
+pub use crate::infrastructure::postgres::repositories::reaction_targets::{
+    copy_targets, delete_target_by_entity, get_target, record_target,
+};
 
 /// Parses entity type, ID, and title from a bot confirmation HTML reply.
 pub fn parse_entity_from_reply(reply_html: &str) -> Option<(&'static str, i64, String)> {
@@ -121,7 +50,7 @@ pub async fn record_ai_tool_target(
     pool: &DbPool,
     event_id: Option<&str>,
     room_id: &str,
-    owner_id: &str,
+    owner_id: &AccountId,
     func_name: &str,
     result_str: &str,
 ) {
@@ -151,31 +80,18 @@ pub async fn record_ai_tool_target(
     }
 }
 
-/// Copies targets from one event ID to another.
-pub async fn copy_targets(
+/// Records the targets of every tool a turn ran, against the turn's progress
+/// message (Matrix: the stage event), in execution order.
+pub async fn record_ai_tool_targets(
     pool: &DbPool,
-    from_event_id: &str,
-    to_event_id: &str,
-) -> Result<u64, sqlx::Error> {
-    let res = crate::db_execute!(
-        pool,
-        r#"
-        INSERT INTO bot_message_targets (event_id, room_id, entity_type, entity_id, owner_id, title)
-        SELECT ?, room_id, entity_type, entity_id, owner_id, title
-        FROM bot_message_targets
-        WHERE event_id = ?
-        ON CONFLICT(event_id) DO UPDATE SET
-            room_id = excluded.room_id,
-            entity_type = excluded.entity_type,
-            entity_id = excluded.entity_id,
-            owner_id = excluded.owner_id,
-            title = excluded.title
-        "#,
-        to_event_id,
-        from_event_id
-    )?;
-
-    Ok(res)
+    event_id: Option<&str>,
+    room_id: &str,
+    owner_id: &AccountId,
+    tool_results: &[(String, String)],
+) {
+    for (func_name, result_str) in tool_results {
+        record_ai_tool_target(pool, event_id, room_id, owner_id, func_name, result_str).await;
+    }
 }
 
 /// Links related events across a command turn (stage placeholder, final bot reply, user prompt event)
@@ -203,7 +119,7 @@ pub async fn resolve_untracked_target(
     room: &matrix_sdk::Room,
     target_event_id: &str,
     pool: &DbPool,
-    owner_id: &str,
+    owner_id: &AccountId,
 ) -> Option<BotMessageTarget> {
     use matrix_sdk::ruma::events::{
         room::message::{MessageType, SyncRoomMessageEvent},
@@ -285,7 +201,7 @@ pub async fn resolve_untracked_target(
                             room_id_str,
                             &parent_target.entity_type,
                             parent_target.entity_id,
-                            owner_id,
+                            &parent_target.owner_id,
                             &parent_target.title,
                         )
                         .await;
@@ -325,15 +241,9 @@ pub async fn resolve_untracked_target(
 
     // 2. Reminder detection
     if lower.contains("reminder") || lower.contains("提醒") {
-        let account_id = crate::domain::accounts::AccountId::new(owner_id);
         if let Ok(mut reminders) =
             crate::infrastructure::postgres::repositories::reminders::list_user_reminders(
-                pool,
-                &account_id,
-                None,
-                None,
-                15,
-                0,
+                pool, owner_id, None, None, 15, 0,
             )
             .await
         {
@@ -365,7 +275,7 @@ pub async fn resolve_untracked_target(
                         room_id: room_id_str.to_string(),
                         entity_type: "reminder".to_string(),
                         entity_id: rem.id,
-                        owner_id: owner_id.to_string(),
+                        owner_id: *owner_id,
                         title: rem.message.clone(),
                     });
                 }
@@ -398,7 +308,7 @@ pub async fn resolve_untracked_target(
                     room_id: room_id_str.to_string(),
                     entity_type: "reminder".to_string(),
                     entity_id: rem.id,
-                    owner_id: owner_id.to_string(),
+                    owner_id: *owner_id,
                     title: rem.message.clone(),
                 });
             }
@@ -407,13 +317,8 @@ pub async fn resolve_untracked_target(
 
     // 3. Todo task detection
     if lower.contains("task") || lower.contains("todo") || lower.contains("待办") {
-        let account_id = crate::domain::accounts::AccountId::new(owner_id);
         if let Ok(mut todos) = crate::infrastructure::postgres::repositories::todos::list_all_user(
-            pool,
-            &account_id,
-            None,
-            15,
-            0,
+            pool, owner_id, None, 15, 0,
         )
         .await
         {
@@ -439,7 +344,7 @@ pub async fn resolve_untracked_target(
                         room_id: room_id_str.to_string(),
                         entity_type: "todo".to_string(),
                         entity_id: todo.id,
-                        owner_id: owner_id.to_string(),
+                        owner_id: *owner_id,
                         title: todo.text.clone(),
                     });
                 }
@@ -469,7 +374,7 @@ pub async fn resolve_untracked_target(
                     room_id: room_id_str.to_string(),
                     entity_type: "todo".to_string(),
                     entity_id: todo.id,
-                    owner_id: owner_id.to_string(),
+                    owner_id: *owner_id,
                     title: todo.text.clone(),
                 });
             }
@@ -484,7 +389,7 @@ pub async fn try_record_from_reply(
     pool: &DbPool,
     event_id: &str,
     room_id: &str,
-    owner_id: &str,
+    owner_id: &AccountId,
     reply_html: &str,
 ) {
     if let Some((entity_type, entity_id, title)) = parse_entity_from_reply(reply_html) {
@@ -511,6 +416,10 @@ mod tests {
         pool
     }
 
+    async fn ensure_account(pool: &DbPool, owner: &AccountId) {
+        crate::db::pool::seed_account(pool, owner).await;
+    }
+
     #[test]
     fn test_parse_todo_reply() {
         let reply = "✅ Added Task <b>#42</b> for Alice: <i>\"Buy groceries\"</i> [Med]";
@@ -528,6 +437,8 @@ mod tests {
     #[tokio::test]
     async fn test_crud_target() {
         let pool = setup_pool().await;
+        let owner = AccountId::from_seed("alice");
+        ensure_account(&pool, &owner).await;
 
         record_target(
             &pool,
@@ -535,7 +446,7 @@ mod tests {
             "!room:x",
             "todo",
             1,
-            "@alice:x",
+            &owner,
             "Test task",
         )
         .await
@@ -546,7 +457,7 @@ mod tests {
         assert_eq!(target.room_id, "!room:x");
         assert_eq!(target.entity_type, "todo");
         assert_eq!(target.entity_id, 1);
-        assert_eq!(target.owner_id, "@alice:x");
+        assert_eq!(target.owner_id, owner);
         assert_eq!(target.title, "Test task");
 
         // Try update via record_target ON CONFLICT
@@ -556,7 +467,7 @@ mod tests {
             "!room:x",
             "todo",
             1,
-            "@alice:x",
+            &owner,
             "Updated task",
         )
         .await
@@ -574,6 +485,8 @@ mod tests {
     #[tokio::test]
     async fn test_record_ai_tool_target() {
         let pool = setup_pool().await;
+        let owner = AccountId::from_seed("bob");
+        ensure_account(&pool, &owner).await;
 
         // 1. AI creates reminder
         let rem_json = r#"{"id":12,"message":"Have my hair cut","room_id":"!room:x"}"#;
@@ -581,7 +494,7 @@ mod tests {
             &pool,
             Some("$rem_ev"),
             "!room:x",
-            "@bob:x",
+            &owner,
             "set_reminder",
             rem_json,
         )
@@ -591,6 +504,7 @@ mod tests {
         assert_eq!(rem_target.entity_type, "reminder");
         assert_eq!(rem_target.entity_id, 12);
         assert_eq!(rem_target.title, "Have my hair cut");
+        assert_eq!(rem_target.owner_id, owner);
 
         // 2. AI creates todo
         let todo_json = r#"{"id":42,"title":"Buy groceries","room_id":"!room:x"}"#;
@@ -598,7 +512,7 @@ mod tests {
             &pool,
             Some("$todo_ev"),
             "!room:x",
-            "@bob:x",
+            &owner,
             "add_todo",
             todo_json,
         )
@@ -608,11 +522,14 @@ mod tests {
         assert_eq!(todo_target.entity_type, "todo");
         assert_eq!(todo_target.entity_id, 42);
         assert_eq!(todo_target.title, "Buy groceries");
+        assert_eq!(todo_target.owner_id, owner);
     }
 
     #[tokio::test]
     async fn test_copy_targets_and_link_turn() {
         let pool = setup_pool().await;
+        let owner = AccountId::from_seed("bob");
+        ensure_account(&pool, &owner).await;
 
         record_target(
             &pool,
@@ -620,7 +537,7 @@ mod tests {
             "!room:x",
             "reminder",
             12,
-            "@bob:x",
+            &owner,
             "Have my hair cut",
         )
         .await
@@ -636,6 +553,7 @@ mod tests {
         assert_eq!(edit_target.entity_type, "reminder");
         assert_eq!(edit_target.entity_id, 12);
         assert_eq!(edit_target.title, "Have my hair cut");
+        assert_eq!(edit_target.owner_id, owner);
 
         // Link full turn (placeholder, final bot reply, user prompt event)
         link_turn_targets(
@@ -648,5 +566,6 @@ mod tests {
         let user_target = get_target(&pool, "$user_prompt").await.unwrap().unwrap();
         assert_eq!(user_target.entity_type, "reminder");
         assert_eq!(user_target.entity_id, 12);
+        assert_eq!(user_target.owner_id, owner);
     }
 }

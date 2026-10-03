@@ -28,7 +28,7 @@
       {
         "ordinal": 2,
         "name": "owner_id",
-        "type_info": "Text",
+        "type_info": "Uuid",
         "origin": {
           "Table": {
             "table": "todos",
@@ -116,7 +116,7 @@
     ],
     "parameters": {
       "Left": [
-        "Text",
+        "Uuid",
         "Bool",
         "Int8",
         "Int8"

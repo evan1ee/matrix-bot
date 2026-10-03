@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE portfolio_audit_log SET prev_hash = $1, entry_hash = $2 WHERE id = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "42fa5186cd1cc0a5c489aa621eb780d887cdf580507db9f37cbb20eea3540153"
+}

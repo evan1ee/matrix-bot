@@ -32,7 +32,7 @@ impl From<crate::domain::bookmarks::Bookmark> for Bookmark {
     fn from(b: crate::domain::bookmarks::Bookmark) -> Self {
         Self {
             id: b.id,
-            owner_id: b.owner_id.into_inner(),
+            owner_id: b.owner_id.to_string(),
             url: b.url,
             title: b.title,
             description: b.description,
@@ -351,18 +351,16 @@ pub async fn delete_bookmark(
 mod tests {
     use super::*;
     use crate::db::Database;
-    use crate::events::EventBroadcaster;
 
-    async fn setup_state() -> (ApiState, String) {
+    async fn setup_state() -> (ApiState, crate::domain::accounts::AccountId) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        let owner =
-            crate::accounts::AccountRepository::resolve_or_provision(&pool, "@alice:mbm.one")
-                .await
-                .unwrap();
+        let owner = crate::application::AppServices::new(&pool)
+            .identity
+            .provision_matrix_for_test("@alice:mbm.one")
+            .await;
         let state = ApiState::new(
             Database { pool },
-            EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
@@ -373,7 +371,7 @@ mod tests {
     #[tokio::test]
     async fn test_bookmarks_api_crud_flow() {
         let (state, owner) = setup_state().await;
-        let user = AuthUser::for_account(&owner);
+        let user = AuthUser::for_account(owner);
 
         // 1. Create
         let req = CreateBookmarkInput {

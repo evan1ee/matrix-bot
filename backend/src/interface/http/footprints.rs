@@ -37,7 +37,7 @@ impl From<crate::domain::footprints::Footprint> for Footprint {
     fn from(fp: crate::domain::footprints::Footprint) -> Self {
         Self {
             id: fp.id,
-            owner_id: fp.owner_id.into_inner(),
+            owner_id: fp.owner_id.to_string(),
             title: fp.title,
             latitude: fp.latitude,
             longitude: fp.longitude,
@@ -354,7 +354,7 @@ pub async fn geocode_proxy(
     State(state): State<ApiState>,
     Query(params): Query<GeocodeQuery>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    if !crate::interface::http::rate_limit::check_geocode_limit(&user.account_id) {
+    if !crate::interface::http::rate_limit::check_geocode_limit(&user.account_id.to_string()) {
         return Err(ApiError::too_many_requests(
             "Geocoding rate limit exceeded. Please wait a moment.",
         ));

@@ -7,17 +7,14 @@ use std::sync::Arc;
 use tracing::error;
 
 use crate::db::Database;
-use crate::events::EventBroadcaster;
-use crate::modules::ModuleRegistry;
+use crate::interface::channels::inbound::Inbound;
 
 pub fn register_handlers(
     client: &Client,
     config: &crate::config::Config,
-    registry: Arc<ModuleRegistry>,
+    inbound: Arc<Inbound>,
     db: Database,
     services: crate::application::AppServices,
-    broadcaster: Option<EventBroadcaster>,
-    pending_merges: Option<Arc<crate::interface::channels::matrix::linking::PendingMerges>>,
 ) {
     // 1. Authorized invite event handler
     crate::interface::channels::matrix::invite::register_invite_handler(
@@ -43,7 +40,7 @@ pub fn register_handlers(
     };
     let ocr_client =
         crate::infrastructure::inference::ocr::OcrClient::new(config.ocr_base_url.clone());
-    let voice_config = crate::modules::voice::VoiceConfig {
+    let voice_config = crate::interface::chat::voice::VoiceConfig {
         enabled: config.voice_enabled,
         language: config.voice_language.clone(),
     };
@@ -55,11 +52,9 @@ pub fn register_handlers(
     let ai_config = config.ai.clone();
     client.add_event_handler(move |ev: OriginalSyncRoomMessageEvent, room: Room| {
         let own_id = bot_user_id.clone();
-        let registry = registry.clone();
+        let inbound = inbound.clone();
         let db = db.clone();
         let services = services.clone();
-        let broadcaster = broadcaster.clone();
-        let pending_merges = pending_merges.clone();
         let ocr_client = ocr_client.clone();
         let voice_config = voice_config.clone();
         let stt_client = stt_client.clone();
@@ -89,7 +84,6 @@ pub fn register_handlers(
                         &db,
                         &services,
                         &ai_config,
-                        broadcaster.as_ref(),
                         &ocr_client,
                         &voice_config,
                         &stt_client,
@@ -97,16 +91,8 @@ pub fn register_handlers(
                     .await;
                 }
                 MessageType::Text(_) => {
-                    crate::interface::channels::matrix::command_flow::handle_text(
-                        &ev,
-                        &room,
-                        &own_id,
-                        is_direct,
-                        &registry,
-                        &db,
-                        &services,
-                        broadcaster.as_ref(),
-                        pending_merges.as_deref(),
+                    crate::interface::channels::matrix::inbound::handle_text(
+                        &ev, &room, &own_id, is_direct, &inbound, &db, &services,
                     )
                     .await;
                 }

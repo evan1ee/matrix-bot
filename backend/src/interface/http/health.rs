@@ -123,7 +123,6 @@ fn ping_ok(outcome: Result<Result<(), sqlx::Error>, Elapsed>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::EventBroadcaster;
     use axum::body::Body;
     use axum::http::Request;
     use axum::routing::get;
@@ -135,7 +134,6 @@ mod tests {
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         ApiState::new(
             crate::db::Database { pool },
-            EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),

@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT d.destination FROM outbox_deliveries d JOIN outbox_events e ON e.id = d.event_id\n         WHERE e.account_id = $1 ORDER BY d.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "destination",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "outbox_deliveries",
+            "name": "destination"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f15d0102cd6f3da9d57eb84885de56392637f355364a7985827ad2073113bc1a"
+}

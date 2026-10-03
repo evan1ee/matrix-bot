@@ -2,22 +2,24 @@
 
 use crate::application::settings::SettingsService;
 use crate::application::todos::TodoService;
-use crate::modules::CommandContext;
+use crate::interface::channels::message::Reply;
+use crate::interface::chat::CommandContext;
 use crate::utils::html_escape;
 
 use super::mutate::{
     handle_add, handle_clear, handle_delete, handle_done, handle_due, handle_edit, handle_priority,
 };
-use super::view::{format_todo_list, handle_list_room, handle_list_user, PAGE_SIZE};
+use super::view::{handle_list_room, handle_list_user, list_reply, PAGE_SIZE};
 
 pub async fn handle_todo_command(
     todos: &TodoService,
     settings: &SettingsService,
     ctx: &CommandContext,
-) -> Option<String> {
-    let room_id = ctx.room_id.as_str();
+) -> Option<Reply> {
+    let room_key = ctx.room_key();
+    let room_id = room_key.as_str();
     let owner_id = &ctx.owner_id;
-    let sender_name = ctx.sender_name.as_str();
+    let sender_name = ctx.sender_name();
     let clean_body = ctx.full_body.as_str();
     let quoted = ctx.quoted.as_ref();
 
@@ -25,7 +27,7 @@ pub async fn handle_todo_command(
 
     // Bare "todo" or "!todo" without a space still claims the message.
     let bare = clean_lower == "todo" || clean_lower == "!todo";
-    if !bare && !(clean_lower.starts_with("todo ") || clean_lower.starts_with("!todo ")) {
+    if !(bare || clean_lower.starts_with("todo ") || clean_lower.starts_with("!todo ")) {
         return None;
     }
 
@@ -36,7 +38,8 @@ pub async fn handle_todo_command(
             .list(owner_id, None, None, PAGE_SIZE, 0)
             .await
             .unwrap_or_default();
-        return Some(format_todo_list(
+        return Some(list_reply(
+            owner_id,
             &format!("Your Tasks ({})", html_escape(sender_name)),
             &items,
             1,
@@ -52,21 +55,35 @@ pub async fn handle_todo_command(
     let args_lower = args_body.to_lowercase();
 
     if args_lower.starts_with("add") {
-        handle_add(todos, room_id, owner_id, sender_name, args_body, quoted).await
+        handle_add(todos, room_id, owner_id, sender_name, args_body, quoted)
+            .await
+            .map(Reply::from)
     } else if args_lower.starts_with("done") {
-        handle_done(todos, owner_id, args_body).await
+        handle_done(todos, owner_id, args_body)
+            .await
+            .map(Reply::from)
     } else if args_lower.starts_with("edit") {
-        handle_edit(todos, owner_id, args_body).await
+        handle_edit(todos, owner_id, args_body)
+            .await
+            .map(Reply::from)
     } else if args_lower.starts_with("priority") {
-        handle_priority(todos, owner_id, args_body).await
+        handle_priority(todos, owner_id, args_body)
+            .await
+            .map(Reply::from)
     } else if args_lower.starts_with("due") {
-        handle_due(todos, room_id, owner_id, args_body, &tz).await
+        handle_due(todos, room_id, owner_id, args_body, &tz)
+            .await
+            .map(Reply::from)
     } else if args_lower.starts_with("clear") {
-        handle_clear(todos, room_id, owner_id, sender_name, args_body).await
+        handle_clear(todos, room_id, owner_id, sender_name, args_body)
+            .await
+            .map(Reply::from)
     } else if args_lower.starts_with("delete") || args_lower.starts_with("rm") {
-        handle_delete(todos, owner_id, args_body).await
+        handle_delete(todos, owner_id, args_body)
+            .await
+            .map(Reply::from)
     } else if args_lower.starts_with("room") {
-        handle_list_room(todos, room_id, args_body, &tz).await
+        handle_list_room(todos, owner_id, room_id, args_body, &tz).await
     } else if args_lower.starts_with("list")
         || args_lower.starts_with("my")
         || args_lower.starts_with("all")
@@ -75,9 +92,9 @@ pub async fn handle_todo_command(
     {
         handle_list_user(todos, owner_id, sender_name, args_body, &tz).await
     } else {
-        Some("⚠️ Unknown todo command. Available: <code>add</code>, <code>list</code>, \
+        Some(Reply::html("⚠️ Unknown todo command. Available: <code>add</code>, <code>list</code>, \
               <code>all</code>, <code>room</code>, <code>done</code>, <code>edit</code>, <code>priority</code>, \
-              <code>due</code>, <code>clear</code>, <code>delete</code>".to_string())
+              <code>due</code>, <code>clear</code>, <code>delete</code>"))
     }
 }
 
@@ -86,31 +103,36 @@ mod tests {
     use super::*;
     use crate::application::reminders::ReminderService;
     use crate::domain::accounts::AccountId;
-    use crate::events::EventBroadcaster;
 
     async fn setup_services() -> (TodoService, SettingsService) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        let broadcaster = EventBroadcaster::default();
-        let settings = SettingsService::new(pool.clone(), broadcaster.clone());
-        let reminders = ReminderService::new(pool.clone(), broadcaster.clone());
-        let todos = TodoService::new(pool, broadcaster, reminders);
+        crate::db::pool::seed_accounts(&pool, &["@bob:1"]).await;
+        let settings = SettingsService::new(pool.clone());
+        let reminders = ReminderService::new(pool.clone());
+        let todos = TodoService::new(pool, reminders);
         (todos, settings)
+    }
+
+    fn html(reply: Option<Reply>) -> String {
+        reply.unwrap().html_body().to_owned()
     }
 
     fn ctx(body: &str) -> CommandContext {
         CommandContext {
-            room_id: "!room:1".to_string(),
-            sender_mxid: "@bob:1".to_string(),
-            owner_id: AccountId::new("@bob:1"),
-            sender_name: "bob".to_string(),
+            conversation: crate::domain::channels::ConversationAddress::Matrix(
+                "!room:1".to_string(),
+            ),
+            owner_id: AccountId::from_seed("@bob:1"),
+            sender: crate::interface::chat::test_support::sender("@bob:1", "bob"),
             command: "todo".to_string(),
             raw_args: String::new(),
             full_body: body.to_string(),
             is_direct: true,
             is_mentioned: false,
             quoted: None,
-            stage_reporter: None,
+            progress: None,
+            outbound: None,
         }
     }
 
@@ -118,20 +140,15 @@ mod tests {
     async fn test_handle_todo_add_and_done() {
         let (todos, settings) = setup_services().await;
 
-        let res_add = handle_todo_command(&todos, &settings, &ctx("!todo add Buy groceries"))
-            .await
-            .unwrap();
+        let res_add =
+            html(handle_todo_command(&todos, &settings, &ctx("!todo add Buy groceries")).await);
         assert!(res_add.contains("Added Task <b>#1</b>"));
         assert!(res_add.contains("Buy groceries"));
 
-        let res_list = handle_todo_command(&todos, &settings, &ctx("!todo list"))
-            .await
-            .unwrap();
+        let res_list = html(handle_todo_command(&todos, &settings, &ctx("!todo list")).await);
         assert!(res_list.contains("Buy groceries"));
 
-        let res_done = handle_todo_command(&todos, &settings, &ctx("!todo done 1"))
-            .await
-            .unwrap();
+        let res_done = html(handle_todo_command(&todos, &settings, &ctx("!todo done 1")).await);
         assert!(res_done.contains("Marked Task <b>#1</b>"));
         assert!(res_done.contains("as completed"));
     }
@@ -142,15 +159,13 @@ mod tests {
 
         handle_todo_command(&todos, &settings, &ctx("!todo add Initial task")).await;
 
-        let res_edit =
-            handle_todo_command(&todos, &settings, &ctx("!todo edit 1 Updated task text"))
-                .await
-                .unwrap();
+        let res_edit = html(
+            handle_todo_command(&todos, &settings, &ctx("!todo edit 1 Updated task text")).await,
+        );
         assert!(res_edit.contains("Updated Task <b>#1</b> text to: <i>\"Updated task text\"</i>"));
 
-        let res_prio = handle_todo_command(&todos, &settings, &ctx("!todo priority 1 high"))
-            .await
-            .unwrap();
+        let res_prio =
+            html(handle_todo_command(&todos, &settings, &ctx("!todo priority 1 high")).await);
         assert!(res_prio.contains("Set Task <b>#1</b> priority to"));
         assert!(res_prio.contains("HIGH"));
     }
@@ -161,14 +176,11 @@ mod tests {
 
         handle_todo_command(&todos, &settings, &ctx("!todo add Delete me")).await;
 
-        let res_del = handle_todo_command(&todos, &settings, &ctx("!todo delete 1"))
-            .await
-            .unwrap();
+        let res_del = html(handle_todo_command(&todos, &settings, &ctx("!todo delete 1")).await);
         assert!(res_del.contains("Deleted Task <b>#1</b>: <i>\"Delete me\"</i>"));
 
-        let res_del_again = handle_todo_command(&todos, &settings, &ctx("!todo delete 1"))
-            .await
-            .unwrap();
+        let res_del_again =
+            html(handle_todo_command(&todos, &settings, &ctx("!todo delete 1")).await);
         assert!(res_del_again.contains("Task <b>#1</b> not found"));
     }
 
@@ -184,9 +196,7 @@ mod tests {
         let mut quoted_ctx = ctx("!todo add");
         quoted_ctx.quoted = Some(quoted);
 
-        let res = handle_todo_command(&todos, &settings, &quoted_ctx)
-            .await
-            .unwrap();
+        let res = html(handle_todo_command(&todos, &settings, &quoted_ctx).await);
         assert!(res.contains("Added Task <b>#1</b>"));
         assert!(res.contains("Remember to review PR #42"));
     }

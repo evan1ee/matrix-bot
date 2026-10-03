@@ -45,7 +45,7 @@ impl From<crate::domain::recurring_bills::RecurringBill> for RecurringBill {
         Self {
             id: b.id,
             room_id: b.room_id,
-            owner_id: b.owner_id.into_inner(),
+            owner_id: b.owner_id.to_string(),
             sender_name: b.sender_name,
             name: b.name,
             category: b.category,
@@ -387,13 +387,11 @@ mod tests {
     use super::*;
     use crate::db::DbPool;
     use crate::domain::reminders::ReminderSource;
-    use crate::events::EventBroadcaster;
     use crate::infrastructure::postgres::repositories::reminders as ReminderRepository;
 
     fn state_with(pool: DbPool) -> ApiState {
         ApiState::new(
-            crate::db::Database { pool: pool },
-            EventBroadcaster::default(),
+            crate::db::Database { pool },
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
@@ -430,8 +428,9 @@ mod tests {
     async fn test_bill_lead_time_schedules_rearms_and_tears_down() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["acct_alice", "acct_bob"]).await;
         let state = state_with(pool);
-        let alice = AuthUser::named("alice", "acct_alice");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
 
         let bill = create_bill(
             State(state.clone()),
@@ -524,8 +523,9 @@ mod tests {
     async fn test_lead_time_is_validated_at_the_boundary() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["acct_alice", "acct_bob"]).await;
         let state = state_with(pool);
-        let alice = AuthUser::named("alice", "acct_alice");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
 
         for bad in [0, -5, MAX_LEAD_MINUTES + 1] {
             let err = create_bill(
@@ -566,16 +566,16 @@ mod tests {
     async fn test_recurring_bills_api_flow() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["acct_alice", "acct_bob"]).await;
         let state = ApiState::new(
-            crate::db::Database { pool: pool },
-            EventBroadcaster::default(),
+            crate::db::Database { pool },
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
 
-        let alice = AuthUser::named("alice", "acct_alice");
-        let bob = AuthUser::named("bob", "acct_bob");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
+        let bob = AuthUser::named_seed("bob", "acct_bob");
 
         // Create
         let req = CreateBillPayload {
@@ -619,18 +619,21 @@ mod tests {
         assert_eq!(paid.next_due_at, "2026-10-01 00:00:00");
 
         // Verify bill payment automatically posted an expense transaction to the finance ledger
-        let txs = crate::modules::finance::repository::FinanceRepository::list(
-            &state.db.pool,
-            &alice.owner_id(),
-            None,
-            10,
-            0,
-        )
-        .await
-        .unwrap();
+        let txs = state
+            .services
+            .finance
+            .list_transactions(
+                &alice.account_id,
+                &crate::domain::finance::ListTransactionsFilter {
+                    limit: Some(10),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
         assert_eq!(txs.len(), 1);
         assert_eq!(txs[0].amount_minor, 999);
-        assert_eq!(txs[0].direction, "expense");
+        assert_eq!(txs[0].direction, crate::domain::finance::Direction::Expense);
         assert_eq!(txs[0].source_kind.as_deref(), Some("recurring_bill"));
         assert_eq!(txs[0].source_id, Some(bill.id));
         assert_eq!(txs[0].category_name.as_deref(), Some("subscription"));

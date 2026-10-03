@@ -6,7 +6,8 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::accounts::{AccountRepository, SessionRepository};
+use crate::application::identity::Resolution;
+use crate::domain::channels::PlatformIdentity;
 use crate::error::ApiError;
 #[allow(unused_imports)]
 use crate::error::ApiErrorResponse;
@@ -220,32 +221,41 @@ pub async fn issue_matrix_session(
     mxid: &str,
     user_agent: Option<&str>,
 ) -> Result<axum::response::Response, ApiError> {
-    let account_id = AccountRepository::resolve_or_provision(&state.db.pool, mxid)
+    let accounts = &state.services.accounts;
+    let internal = |err: &dyn std::fmt::Debug| {
+        tracing::error!("Failed resolving account for {}: {:?}", mxid, err);
+        ApiError::internal("Failed to resolve user account")
+    };
+    let identity = PlatformIdentity::matrix(mxid).map_err(|err| internal(&err))?;
+    let account_id = match state
+        .services
+        .identity
+        .resolve(&identity)
         .await
-        .map_err(|err| {
-            tracing::error!("Failed resolving account for {}: {:?}", mxid, err);
-            ApiError::internal("Failed to resolve user account")
-        })?;
+        .map_err(|err| internal(&err))?
+    {
+        Resolution::Account(account_id) => account_id,
+        // Matrix provisions every sender, so this cannot happen.
+        Resolution::Unlinked => return Err(internal(&"matrix identity left unlinked")),
+    };
 
-    let display_name = AccountRepository::find(&state.db.pool, &account_id)
+    let display_name = accounts
+        .find(&account_id)
         .await
         .map_err(|err| ApiError::internal(err.to_string()))?
         .map(|a| a.display_name)
         .unwrap_or_else(|| mxid.to_string());
 
-    let session_token = SessionRepository::create(
-        &state.db.pool,
-        &account_id,
-        user_agent.or(Some("ElementX-iOS")),
-        None,
-        None,
-    )
-    .await
-    .map_err(|err| ApiError::internal(format!("Could not open a session: {err}")))?;
+    let session_token = state
+        .services
+        .accounts
+        .create_session(&account_id, user_agent.or(Some("ElementX-iOS")), None, None)
+        .await
+        .map_err(|err| ApiError::internal(format!("Could not open a session: {err}")))?;
 
     let body = Json(MatrixLoginResponse {
         session_token: session_token.clone(),
-        account_id,
+        account_id: account_id.to_string(),
         display_name,
         mxid: mxid.to_string(),
     });
@@ -260,19 +270,26 @@ pub async fn issue_matrix_session(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::EventBroadcaster;
     use axum::http::StatusCode;
 
     async fn test_state() -> ApiState {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        ApiState::new(
-            crate::db::Database { pool: pool },
-            EventBroadcaster::default(),
+        // Tests never touch the network: the resolved homeserver is pre-filled
+        // (so no `.well-known` discovery request is made) with a closed
+        // loopback port, and the client gives up fast if one is ever sent.
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_millis(500))
+            .build()
+            .expect("test http client");
+        let state = ApiState::new(
+            crate::db::Database { pool },
             None,
             "https://mbm.one".to_string(),
-            reqwest::Client::new(),
-        )
+            client,
+        );
+        *state.resolved_homeserver.write().await = Some("http://127.0.0.1:9".to_string());
+        state
     }
 
     #[tokio::test]
@@ -285,9 +302,11 @@ mod tests {
 
         assert!(res.headers().contains_key(header::SET_COOKIE));
 
-        let account_id = AccountRepository::find_by_mxid(&state.db.pool, "@alice:example.org")
-            .await
-            .unwrap();
+        let account_id = state
+            .services
+            .identity
+            .find_matrix_for_test("@alice:example.org")
+            .await;
         assert!(account_id.is_some());
     }
 

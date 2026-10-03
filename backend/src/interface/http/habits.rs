@@ -5,6 +5,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
+use crate::domain::habits::HabitUpdate;
 use crate::error::ApiError;
 use crate::interface::http::auth::{ApiState, AuthUser};
 
@@ -31,7 +32,7 @@ impl From<crate::domain::habits::Habit> for Habit {
     fn from(h: crate::domain::habits::Habit) -> Self {
         Self {
             id: h.id,
-            owner_id: h.owner_id.into_inner(),
+            owner_id: h.owner_id.to_string(),
             name: h.name,
             description: h.description,
             frequency: h.frequency,
@@ -239,11 +240,13 @@ pub async fn update_habit(
         .update_habit(
             &user.account_id,
             id,
-            &payload.name,
-            payload.description.as_deref(),
-            payload.frequency.as_deref(),
-            payload.category.as_deref(),
-            payload.target_days_per_week,
+            HabitUpdate {
+                name: &payload.name,
+                description: payload.description.as_deref(),
+                frequency: payload.frequency.as_deref(),
+                category: payload.category.as_deref(),
+                target_days_per_week: payload.target_days_per_week,
+            },
         )
         .await?;
 

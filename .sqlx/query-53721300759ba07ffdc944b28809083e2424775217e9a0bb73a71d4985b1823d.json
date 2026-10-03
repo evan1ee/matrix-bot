@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE jobs SET status = 'failed', completed_at = NOW() WHERE job_type = $1 AND dedupe_key = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "53721300759ba07ffdc944b28809083e2424775217e9a0bb73a71d4985b1823d"
+}

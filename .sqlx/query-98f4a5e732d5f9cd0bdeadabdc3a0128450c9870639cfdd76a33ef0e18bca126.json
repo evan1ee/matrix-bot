@@ -18,7 +18,7 @@
     "parameters": {
       "Left": [
         "Int8",
-        "Text",
+        "Uuid",
         "Text"
       ]
     },

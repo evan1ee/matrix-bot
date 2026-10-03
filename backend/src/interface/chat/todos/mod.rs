@@ -1,8 +1,9 @@
 use async_trait::async_trait;
 
+use crate::interface::channels::message::Reply;
+
 use crate::db::Database;
-use crate::events::EventBroadcaster;
-use crate::modules::{BotModule, CommandContext, CommandHelp};
+use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 
 pub mod handler;
 pub mod mutate;
@@ -80,8 +81,7 @@ impl BotModule for TodoModule {
         ctx: &CommandContext,
         services: &crate::application::AppServices,
         _db: &Database,
-        _broadcaster: Option<&EventBroadcaster>,
-    ) -> Option<String> {
+    ) -> Option<Reply> {
         handler::handle_todo_command(&services.todos, &services.settings, ctx).await
     }
 }
@@ -89,14 +89,15 @@ impl BotModule for TodoModule {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::modules::CommandContext;
+    use crate::interface::chat::CommandContext;
 
     fn ctx(body: &str) -> CommandContext {
         CommandContext {
-            room_id: "!room:a".to_string(),
-            sender_mxid: "@tester:x".to_string(),
-            owner_id: crate::domain::accounts::AccountId::new("@alice:a"),
-            sender_name: "alice".to_string(),
+            conversation: crate::domain::channels::ConversationAddress::Matrix(
+                "!room:a".to_string(),
+            ),
+            owner_id: crate::domain::accounts::AccountId::from_seed("@alice:a"),
+            sender: crate::interface::chat::test_support::sender("@tester:x", "alice"),
             command: body
                 .split_whitespace()
                 .next()
@@ -108,13 +109,15 @@ mod tests {
             is_direct: true,
             is_mentioned: false,
             quoted: None,
-            stage_reporter: None,
+            progress: None,
+            outbound: None,
         }
     }
 
     async fn setup_services() -> (Database, crate::application::AppServices) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["@alice:a"]).await;
         let services = crate::application::AppServices::new(&pool);
         (Database { pool }, services)
     }
@@ -143,15 +146,15 @@ mod tests {
         let (db, services) = setup_services().await;
 
         assert!(module
-            .handle_command(&ctx("!todo list"), &services, &db, None)
+            .handle_command(&ctx("!todo list"), &services, &db)
             .await
             .is_some());
         assert!(module
-            .handle_command(&ctx("!expense add 1 EUR x"), &services, &db, None)
+            .handle_command(&ctx("!expense add 1 EUR x"), &services, &db)
             .await
             .is_none());
         assert!(module
-            .handle_command(&ctx("!remind me later"), &services, &db, None)
+            .handle_command(&ctx("!remind me later"), &services, &db)
             .await
             .is_none());
     }
@@ -162,18 +165,15 @@ mod tests {
         let (db, services) = setup_services().await;
 
         module
-            .handle_command(
-                &ctx("!todo add <img src=x onerror=1>"),
-                &services,
-                &db,
-                None,
-            )
+            .handle_command(&ctx("!todo add <img src=x onerror=1>"), &services, &db)
             .await
             .unwrap();
         let listed = module
-            .handle_command(&ctx("!todo list"), &services, &db, None)
+            .handle_command(&ctx("!todo list"), &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
 
         assert!(
             !listed.contains("<img"),
@@ -190,14 +190,16 @@ mod tests {
         let (db, services) = setup_services().await;
 
         module
-            .handle_command(&ctx("!todo add ship it"), &services, &db, None)
+            .handle_command(&ctx("!todo add ship it"), &services, &db)
             .await
             .unwrap();
 
         let utc_reply = module
-            .handle_command(&ctx("!todo due 1 2d"), &services, &db, None)
+            .handle_command(&ctx("!todo due 1 2d"), &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(
             utc_reply.contains("UTC"),
             "default must render as UTC: {utc_reply}"
@@ -206,7 +208,7 @@ mod tests {
         services
             .settings
             .save(
-                &crate::domain::accounts::AccountId::new("@alice:a"),
+                &crate::domain::accounts::AccountId::from_seed("@alice:a"),
                 UserSettings {
                     timezone: "Asia/Shanghai".to_string(),
                     currency: "CNY".to_string(),
@@ -217,9 +219,11 @@ mod tests {
             .unwrap();
 
         let listed = module
-            .handle_command(&ctx("!todo list"), &services, &db, None)
+            .handle_command(&ctx("!todo list"), &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(
             listed.contains("CST"),
             "should render in Asia/Shanghai: {listed}"
@@ -231,28 +235,63 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_the_module_broadcasts_events() {
+    async fn test_the_module_writes_events_to_the_outbox() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        let broadcaster = EventBroadcaster::default();
-        let mut rx = broadcaster.subscribe();
-        let services = crate::application::AppServices::with_events(&pool, &broadcaster);
-        let db = Database { pool };
+        crate::db::pool::seed_accounts(&pool, &["@alice:a"]).await;
+        let services = crate::application::AppServices::new(&pool);
+        let db = Database { pool: pool.clone() };
 
         let reply = TodoModule::new()
-            .handle_command(
-                &ctx("!todo add Buy milk"),
-                &services,
-                &db,
-                Some(&broadcaster),
-            )
+            .handle_command(&ctx("!todo add Buy milk"), &services, &db)
             .await
-            .expect("the add must be handled");
+            .expect("the add must be handled")
+            .html_body()
+            .to_owned();
         assert!(reply.contains("Added Task"), "unexpected reply: {reply}");
 
-        let event = rx
-            .try_recv()
-            .expect("dispatching through the module must broadcast the creation");
-        assert!(matches!(event, crate::events::SystemEvent::TodoCreated(_)));
+        let owner = crate::domain::accounts::AccountId::from_seed("@alice:a");
+        assert_eq!(
+            crate::infrastructure::postgres::repositories::outbox::event_types_for(&pool, &owner)
+                .await
+                .unwrap(),
+            vec!["TodoCreated"],
+            "dispatching through the module must write the creation to the outbox"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_the_list_reply_carries_one_done_action_per_open_task() {
+        let module = TodoModule::new();
+        let (db, services) = setup_services().await;
+        for text in ["one", "two"] {
+            module
+                .handle_command(&ctx(&format!("!todo add {text}")), &services, &db)
+                .await
+                .unwrap();
+        }
+        module
+            .handle_command(&ctx("!todo done 1"), &services, &db)
+            .await
+            .unwrap();
+
+        for body in ["!todo", "!todo list"] {
+            let reply = module
+                .handle_command(&ctx(body), &services, &db)
+                .await
+                .unwrap();
+            let commands: Vec<_> = reply
+                .content
+                .actions
+                .iter()
+                .map(|a| a.command.as_str())
+                .collect();
+            assert_eq!(commands, vec!["todo done 2"], "for {body}");
+        }
+        let added = module
+            .handle_command(&ctx("!todo add three"), &services, &db)
+            .await
+            .unwrap();
+        assert!(added.content.actions.is_empty(), "only lists carry buttons");
     }
 }

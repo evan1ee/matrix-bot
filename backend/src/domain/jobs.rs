@@ -1,0 +1,398 @@
+//! The durable job queue's vocabulary: which kinds of work exist, the retry
+//! policy and dedupe key each kind uses, and the pure rules the runtime
+//! applies (backoff, error truncation). Persistence is in
+//! `infrastructure/postgres/repositories/jobs.rs`; execution in `crate::jobs`.
+
+use std::fmt;
+use std::time::Duration;
+
+use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
+use serde::{Deserialize, Serialize};
+
+use crate::domain::accounts::AccountId;
+use crate::domain::reminders::MAX_DELIVERY_ATTEMPTS;
+
+/// Longest error text stored on a job row.
+pub const MAX_ERROR_CHARS: usize = 2_000;
+/// Upper bound on any computed backoff.
+pub const MAX_BACKOFF: Duration = Duration::from_secs(86_400);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct JobId(pub i64);
+
+impl fmt::Display for JobId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum JobType {
+    ReminderFire,
+    BriefingSend,
+    PortfolioCheckAlerts,
+    PortfolioRefreshPrices,
+}
+
+impl JobType {
+    pub const ALL: [JobType; 4] = [
+        JobType::ReminderFire,
+        JobType::BriefingSend,
+        JobType::PortfolioCheckAlerts,
+        JobType::PortfolioRefreshPrices,
+    ];
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            JobType::ReminderFire => "reminder.fire",
+            JobType::BriefingSend => "briefing.send",
+            JobType::PortfolioCheckAlerts => "portfolio.check_alerts",
+            JobType::PortfolioRefreshPrices => "portfolio.refresh_prices",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|t| t.as_str() == s)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JobStatus {
+    Pending,
+    Running,
+    Completed,
+    Failed,
+    Cancelled,
+}
+
+impl JobStatus {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            JobStatus::Pending => "pending",
+            JobStatus::Running => "running",
+            JobStatus::Completed => "completed",
+            JobStatus::Failed => "failed",
+            JobStatus::Cancelled => "cancelled",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        [
+            Self::Pending,
+            Self::Running,
+            Self::Completed,
+            Self::Failed,
+            Self::Cancelled,
+        ]
+        .into_iter()
+        .find(|st| st.as_str() == s)
+    }
+}
+
+/// `reminder.fire`: a row id plus the trigger the job was enqueued for, so a
+/// handler can tell a snoozed/advanced reminder from the one it was meant for.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReminderFirePayload {
+    pub reminder_id: i64,
+    pub trigger_at: DateTime<Utc>,
+}
+
+/// `briefing.send`: the recipient's local date; the account is the job's
+/// `account_id` column.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BriefingSendPayload {
+    pub local_date: NaiveDate,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum JobPayload {
+    ReminderFire(ReminderFirePayload),
+    BriefingSend(BriefingSendPayload),
+    /// `{}` — the job's type and account say everything.
+    Empty,
+}
+
+/// A job ready to enqueue. Built only through the per-type constructors, so
+/// a job's type, payload, retry policy and dedupe key always agree.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewJob {
+    job_type: JobType,
+    account_id: Option<AccountId>,
+    payload: JobPayload,
+    priority: i16,
+    max_attempts: i32,
+    backoff_seconds: i32,
+    available_at: Option<DateTime<Utc>>,
+    dedupe_key: Option<String>,
+}
+
+impl NewJob {
+    fn new(
+        job_type: JobType,
+        account_id: Option<AccountId>,
+        payload: JobPayload,
+        max_attempts: i32,
+        backoff_seconds: i32,
+        dedupe_key: String,
+    ) -> Self {
+        Self {
+            job_type,
+            account_id,
+            payload,
+            priority: 0,
+            max_attempts,
+            backoff_seconds,
+            available_at: None,
+            dedupe_key: Some(dedupe_key),
+        }
+    }
+
+    pub fn reminder_fire(owner: AccountId, reminder_id: i64, trigger_at: DateTime<Utc>) -> Self {
+        let key = format!(
+            "{reminder_id}:{}",
+            trigger_at.to_rfc3339_opts(SecondsFormat::Micros, true)
+        );
+        let payload = JobPayload::ReminderFire(ReminderFirePayload {
+            reminder_id,
+            trigger_at,
+        });
+        // MAX_DELIVERY_ATTEMPTS is 5; the cast cannot truncate.
+        Self::new(
+            JobType::ReminderFire,
+            Some(owner),
+            payload,
+            MAX_DELIVERY_ATTEMPTS as i32,
+            30,
+            key,
+        )
+    }
+
+    pub fn briefing_send(owner: AccountId, local_date: NaiveDate) -> Self {
+        let key = format!("{owner}:{}", local_date.format("%Y-%m-%d"));
+        let payload = JobPayload::BriefingSend(BriefingSendPayload { local_date });
+        Self::new(JobType::BriefingSend, Some(owner), payload, 3, 60, key)
+    }
+
+    pub fn portfolio_check_alerts(now: DateTime<Utc>) -> Self {
+        let key = format!("alerts:{}", now.timestamp().div_euclid(60));
+        Self::new(
+            JobType::PortfolioCheckAlerts,
+            None,
+            JobPayload::Empty,
+            1,
+            0,
+            key,
+        )
+    }
+
+    pub fn portfolio_refresh_prices(owner: AccountId, now: DateTime<Utc>) -> Self {
+        let key = format!("{owner}:{}", now.format("%Y-%m-%dT%H"));
+        Self::new(
+            JobType::PortfolioRefreshPrices,
+            Some(owner),
+            JobPayload::Empty,
+            3,
+            60,
+            key,
+        )
+    }
+
+    pub fn job_type(&self) -> JobType {
+        self.job_type
+    }
+    pub fn account_id(&self) -> Option<&AccountId> {
+        self.account_id.as_ref()
+    }
+    pub fn payload(&self) -> &JobPayload {
+        &self.payload
+    }
+    pub fn priority(&self) -> i16 {
+        self.priority
+    }
+    pub fn max_attempts(&self) -> i32 {
+        self.max_attempts
+    }
+    pub fn backoff_seconds(&self) -> i32 {
+        self.backoff_seconds
+    }
+    pub fn available_at(&self) -> Option<DateTime<Utc>> {
+        self.available_at
+    }
+    pub fn dedupe_key(&self) -> Option<&str> {
+        self.dedupe_key.as_deref()
+    }
+}
+
+#[cfg(test)]
+impl NewJob {
+    pub fn test_job(job_type: JobType, dedupe_key: Option<&str>) -> Self {
+        Self {
+            job_type,
+            account_id: None,
+            payload: JobPayload::Empty,
+            priority: 0,
+            max_attempts: 3,
+            backoff_seconds: 0,
+            available_at: None,
+            dedupe_key: dedupe_key.map(str::to_owned),
+        }
+    }
+    pub fn with_priority(mut self, p: i16) -> Self {
+        self.priority = p;
+        self
+    }
+    pub fn with_available_at(mut self, at: DateTime<Utc>) -> Self {
+        self.available_at = Some(at);
+        self
+    }
+    pub fn with_policy(mut self, max_attempts: i32, backoff_seconds: i32) -> Self {
+        self.max_attempts = max_attempts;
+        self.backoff_seconds = backoff_seconds;
+        self
+    }
+    pub fn for_account(mut self, owner: AccountId) -> Self {
+        self.account_id = Some(owner);
+        self
+    }
+}
+
+/// Delay before retry number `attempt + 1`: `backoff · 2^(attempt-1)`,
+/// attempt counted from 1, capped at [`MAX_BACKOFF`].
+pub fn backoff_delay(backoff_seconds: i32, attempt: i32) -> Duration {
+    let base = u64::try_from(backoff_seconds.max(0)).unwrap_or(0);
+    let exponent = u32::try_from((attempt.max(1) - 1).min(20)).unwrap_or(20);
+    let secs = base.saturating_mul(1u64 << exponent);
+    Duration::from_secs(secs).min(MAX_BACKOFF)
+}
+
+/// Error text as stored on a job row: at most [`MAX_ERROR_CHARS`] characters.
+pub fn truncate_error(message: &str) -> String {
+    message.chars().take(MAX_ERROR_CHARS).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    fn owner() -> AccountId {
+        AccountId::from_seed("acct_alice")
+    }
+
+    #[test]
+    fn job_type_round_trips_through_its_wire_name() {
+        for t in JobType::ALL {
+            assert_eq!(JobType::parse(t.as_str()), Some(t));
+        }
+        assert_eq!(JobType::ReminderFire.as_str(), "reminder.fire");
+        assert_eq!(JobType::BriefingSend.as_str(), "briefing.send");
+        assert_eq!(
+            JobType::PortfolioCheckAlerts.as_str(),
+            "portfolio.check_alerts"
+        );
+        assert_eq!(
+            JobType::PortfolioRefreshPrices.as_str(),
+            "portfolio.refresh_prices"
+        );
+        assert_eq!(JobType::parse("nope"), None);
+    }
+
+    #[test]
+    fn job_status_round_trips() {
+        for s in ["pending", "running", "completed", "failed", "cancelled"] {
+            assert_eq!(JobStatus::parse(s).map(JobStatus::as_str), Some(s));
+        }
+        assert_eq!(JobStatus::parse("bogus"), None);
+    }
+
+    /// Given the same reminder and trigger, When built twice, Then the dedupe
+    /// key is identical (a double tick enqueues once); a moved trigger_at
+    /// (snooze, next recurrence) yields a new key.
+    #[test]
+    fn reminder_fire_key_is_stable_per_trigger() {
+        let t = Utc.with_ymd_and_hms(2026, 9, 29, 7, 30, 0).unwrap();
+        let a = NewJob::reminder_fire(owner(), 42, t);
+        let b = NewJob::reminder_fire(owner(), 42, t);
+        assert_eq!(a.dedupe_key(), Some("42:2026-09-29T07:30:00.000000Z"));
+        assert_eq!(a.dedupe_key(), b.dedupe_key());
+        let later = NewJob::reminder_fire(owner(), 42, t + chrono::Duration::days(1));
+        assert_ne!(a.dedupe_key(), later.dedupe_key());
+        assert_eq!((a.max_attempts(), a.backoff_seconds()), (5, 30));
+        assert_eq!(a.job_type(), JobType::ReminderFire);
+        assert_eq!(a.account_id(), Some(&owner()));
+    }
+
+    #[test]
+    fn briefing_key_is_account_and_local_date() {
+        let d = NaiveDate::from_ymd_opt(2026, 9, 29).unwrap();
+        let job = NewJob::briefing_send(owner(), d);
+        assert_eq!(
+            job.dedupe_key(),
+            Some(format!("{}:2026-09-29", owner()).as_str())
+        );
+        assert_eq!((job.max_attempts(), job.backoff_seconds()), (3, 60));
+    }
+
+    #[test]
+    fn alert_check_key_buckets_by_unix_minute_and_has_no_account() {
+        let t = Utc.with_ymd_and_hms(2026, 9, 29, 7, 30, 59).unwrap();
+        let job = NewJob::portfolio_check_alerts(t);
+        assert_eq!(
+            job.dedupe_key(),
+            Some(format!("alerts:{}", t.timestamp() / 60).as_str())
+        );
+        assert_eq!(job.account_id(), None);
+        assert_eq!(job.max_attempts(), 1);
+        let same_minute = NewJob::portfolio_check_alerts(t - chrono::Duration::seconds(30));
+        assert_eq!(job.dedupe_key(), same_minute.dedupe_key());
+    }
+
+    #[test]
+    fn price_refresh_key_is_account_and_utc_hour() {
+        let t = Utc.with_ymd_and_hms(2026, 9, 29, 7, 59, 0).unwrap();
+        let job = NewJob::portfolio_refresh_prices(owner(), t);
+        assert_eq!(
+            job.dedupe_key(),
+            Some(format!("{}:2026-09-29T07", owner()).as_str())
+        );
+        assert_eq!((job.max_attempts(), job.backoff_seconds()), (3, 60));
+    }
+
+    /// R21: 30/60/120/240 s for the reminder policy.
+    #[test]
+    fn backoff_doubles_per_attempt_from_the_base() {
+        let secs = |a| backoff_delay(30, a).as_secs();
+        assert_eq!([secs(1), secs(2), secs(3), secs(4)], [30, 60, 120, 240]);
+        assert_eq!(
+            backoff_delay(30, 0).as_secs(),
+            30,
+            "attempt 0 is treated as the first"
+        );
+        assert_eq!(backoff_delay(0, 5).as_secs(), 0);
+        assert_eq!(
+            backoff_delay(i32::MAX, i32::MAX),
+            MAX_BACKOFF,
+            "never overflows"
+        );
+    }
+
+    #[test]
+    fn truncate_error_keeps_whole_chars_up_to_the_limit() {
+        let long = "é".repeat(MAX_ERROR_CHARS + 10);
+        let cut = truncate_error(&long);
+        assert_eq!(cut.chars().count(), MAX_ERROR_CHARS);
+        assert_eq!(truncate_error("short"), "short");
+    }
+
+    #[test]
+    fn payloads_serialise_as_plain_objects() {
+        let t = Utc.with_ymd_and_hms(2026, 9, 29, 7, 30, 0).unwrap();
+        let p = ReminderFirePayload {
+            reminder_id: 7,
+            trigger_at: t,
+        };
+        let back: ReminderFirePayload =
+            serde_json::from_value(serde_json::to_value(&p).unwrap()).unwrap();
+        assert_eq!(back, p);
+    }
+}

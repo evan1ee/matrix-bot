@@ -38,7 +38,6 @@ pub fn row_key(table: &str) -> &'static str {
     match table {
         "finance_shares" | "user_settings" | "life_profiles" | "ai_user_configs" => "owner_id",
         "bot_message_targets" => "event_id",
-        "matrix_links" => "mxid",
         "account_rooms" => "room_id",
         _ => "id",
     }
@@ -69,8 +68,8 @@ pub async fn move_rows(
 
     let bulk_sql = format!("UPDATE {table} SET {column} = $1 WHERE {column} = $2");
     let bulk = sqlx::query(AssertSqlSafe(bulk_sql.as_str()))
-        .bind(into.as_str())
-        .bind(from.as_str())
+        .bind(into.as_uuid())
+        .bind(from.as_uuid())
         .execute(&mut *conn)
         .await;
 
@@ -93,7 +92,7 @@ pub async fn move_rows(
             let select_keys_sql =
                 format!("SELECT CAST({key} AS TEXT) FROM {table} WHERE {column} = $1");
             let keys: Vec<String> = sqlx::query_scalar(AssertSqlSafe(select_keys_sql.as_str()))
-                .bind(from.as_str())
+                .bind(from.as_uuid())
                 .fetch_all(&mut *conn)
                 .await?;
 
@@ -109,8 +108,8 @@ pub async fn move_rows(
                     .await?;
 
                 let one = sqlx::query(AssertSqlSafe(update_row_sql.as_str()))
-                    .bind(into.as_str())
-                    .bind(from.as_str())
+                    .bind(into.as_uuid())
+                    .bind(from.as_uuid())
                     .bind(&value)
                     .execute(&mut *conn)
                     .await;
@@ -151,7 +150,7 @@ pub async fn delete_leftovers(
 
     let count_sql = format!("SELECT COUNT(*) FROM {table} WHERE {column} = $1");
     let leftover: i64 = sqlx::query_scalar(AssertSqlSafe(count_sql.as_str()))
-        .bind(from.as_str())
+        .bind(from.as_uuid())
         .fetch_one(&mut *conn)
         .await
         .unwrap_or(0);
@@ -159,7 +158,7 @@ pub async fn delete_leftovers(
     if leftover > 0 {
         let delete_sql = format!("DELETE FROM {table} WHERE {column} = $1");
         sqlx::query(AssertSqlSafe(delete_sql.as_str()))
-            .bind(from.as_str())
+            .bind(from.as_uuid())
             .execute(&mut *conn)
             .await?;
     }
@@ -179,13 +178,13 @@ pub async fn discard_account_table(
         sqlx::query(AssertSqlSafe(
             "UPDATE sessions SET revoked_at = CURRENT_TIMESTAMP WHERE account_id = $1",
         ))
-        .bind(from.as_str())
+        .bind(from.as_uuid())
         .execute(conn)
         .await?;
     } else {
         let delete_sql = format!("DELETE FROM {table} WHERE account_id = $1");
         sqlx::query(AssertSqlSafe(delete_sql.as_str()))
-            .bind(from.as_str())
+            .bind(from.as_uuid())
             .execute(conn)
             .await?;
     }
@@ -199,7 +198,7 @@ pub async fn delete_account(
     from: &AccountId,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(AssertSqlSafe("DELETE FROM accounts WHERE id = $1"))
-        .bind(from.as_str())
+        .bind(from.as_uuid())
         .execute(conn)
         .await?;
     Ok(())
@@ -217,7 +216,7 @@ pub async fn count_rows(
 
     let count_sql = format!("SELECT COUNT(*) FROM {table} WHERE {column} = $1");
     let count: i64 = sqlx::query_scalar(AssertSqlSafe(count_sql.as_str()))
-        .bind(owner.as_str())
+        .bind(owner.as_uuid())
         .fetch_one(executor)
         .await
         .unwrap_or(0);
@@ -245,6 +244,8 @@ pub async fn preview(pool: &sqlx::PgPool, from: &AccountId) -> Result<MergePrevi
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::PgPool;
+    use std::collections::BTreeSet;
 
     #[test]
     #[should_panic(expected = "not in the merge allow-list")]
@@ -280,14 +281,23 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
 
-        for (owner, name) in [
-            ("acct_from", "food"),
-            ("acct_from", "travel"),
-            ("acct_into", "food"),
-        ] {
+        let from = AccountId::from_seed("acct_from");
+        let into = AccountId::from_seed("acct_into");
+
+        for acc in [&from, &into] {
+            sqlx::query!(
+                "INSERT INTO accounts (id, display_name, status) VALUES ($1, 'test', 'active') ON CONFLICT DO NOTHING",
+                acc.as_uuid()
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        for (owner, name) in [(&from, "food"), (&from, "travel"), (&into, "food")] {
             sqlx::query!(
                 "INSERT INTO finance_categories (owner_id, name) VALUES ($1, $2)",
-                owner,
+                owner.as_uuid(),
                 name
             )
             .execute(&pool)
@@ -296,9 +306,7 @@ mod tests {
         }
 
         let mut tx = pool.begin().await.unwrap();
-        let from = AccountId::new("acct_from");
-        let into = AccountId::new("acct_into");
-        let moved = move_rows(&mut *tx, "finance_categories", "owner_id", &from, &into)
+        let moved = move_rows(&mut tx, "finance_categories", "owner_id", &from, &into)
             .await
             .expect("a collision must not fail the move");
         tx.commit().await.unwrap();
@@ -307,7 +315,7 @@ mod tests {
 
         let names: Vec<String> = sqlx::query_scalar!(
             "SELECT name FROM finance_categories WHERE owner_id = $1 ORDER BY name",
-            "acct_into"
+            into.as_uuid()
         )
         .fetch_all(&pool)
         .await
@@ -316,11 +324,97 @@ mod tests {
 
         let left: Vec<String> = sqlx::query_scalar!(
             "SELECT name FROM finance_categories WHERE owner_id = $1",
-            "acct_from"
+            from.as_uuid()
         )
         .fetch_all(&pool)
         .await
         .unwrap();
         assert_eq!(left, vec!["food".to_string()]);
+    }
+
+    /// Every table in the schema that has `column`.
+    async fn tables_with_column(pool: &PgPool, column: &str) -> BTreeSet<String> {
+        sqlx::query_scalar!(
+            "SELECT table_name FROM information_schema.columns \
+             WHERE table_schema = current_schema() AND column_name = $1",
+            column
+        )
+        .fetch_all(pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .flatten()
+        .collect()
+    }
+
+    fn declared(lists: &[&[&str]]) -> BTreeSet<String> {
+        lists
+            .iter()
+            .flat_map(|list| list.iter())
+            .map(|name| name.to_string())
+            .collect()
+    }
+
+    async fn migrated_pool() -> PgPool {
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        pool
+    }
+
+    /// The list a merge walks must be derived from the schema, not remembered.
+    ///
+    /// It fell three tables behind before this existed, so a merge silently
+    /// stranded a user's finance share, their audit ledger and their reaction
+    /// targets on an account it then deleted. A new `owner_id` table must now be
+    /// classified as following a merge or explicitly not, or this fails.
+    #[tokio::test]
+    async fn test_owned_tables_and_exceptions_match_the_schema() {
+        let pool = migrated_pool().await;
+        let in_schema = tables_with_column(&pool, "owner_id").await;
+        let classified = declared(&[OWNED_TABLES, OWNER_ID_MERGED_SEPARATELY]);
+
+        let unclassified: Vec<_> = in_schema.difference(&classified).collect();
+        assert!(
+            unclassified.is_empty(),
+            "these tables carry owner_id but no list classifies them: {unclassified:?}"
+        );
+
+        let phantom: Vec<_> = classified.difference(&in_schema).collect();
+        assert!(
+            phantom.is_empty(),
+            "these tables are classified but are not in the schema: {phantom:?}"
+        );
+
+        for table in OWNER_ID_MERGED_SEPARATELY {
+            assert!(
+                !OWNED_TABLES.contains(table),
+                "{table} cannot both follow a merge and be excluded from one"
+            );
+        }
+    }
+
+    /// Same rule for the other ownership column. An unclassified table here leaves
+    /// a row pointing at an account id that the merge is about to delete.
+    #[tokio::test]
+    async fn test_account_id_tables_are_all_classified() {
+        let pool = migrated_pool().await;
+        let in_schema = tables_with_column(&pool, "account_id").await;
+        let classified = declared(&[
+            ACCOUNT_ID_FOLLOWS,
+            ACCOUNT_ID_DISCARDED,
+            ACCOUNT_ID_UNTOUCHED,
+        ]);
+
+        let unclassified: Vec<_> = in_schema.difference(&classified).collect();
+        assert!(
+            unclassified.is_empty(),
+            "these tables carry account_id but no list classifies them: {unclassified:?}"
+        );
+
+        let phantom: Vec<_> = classified.difference(&in_schema).collect();
+        assert!(
+            phantom.is_empty(),
+            "these tables are classified but are not in the schema: {phantom:?}"
+        );
     }
 }

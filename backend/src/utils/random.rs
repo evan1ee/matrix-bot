@@ -42,15 +42,6 @@ pub fn random_bytes(bytes: usize) -> Vec<u8> {
     out
 }
 
-/// An `accounts.id`: `acct_` followed by 32 hex characters.
-///
-/// The shape is load-bearing beyond readability — `accounts::account_id_to_handle`
-/// relies on those 32 hex characters being exactly a UUID's simple form, which
-/// is what lets a WebAuthn user handle round-trip without a second column.
-pub fn new_account_id() -> String {
-    format!("acct_{}", Uuid::new_v4().simple())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -88,9 +79,6 @@ mod tests {
     fn test_values_do_not_repeat() {
         let hexes: HashSet<String> = (0..500).map(|_| random_hex(16)).collect();
         assert_eq!(hexes.len(), 500, "random_hex repeated a value");
-
-        let ids: HashSet<String> = (0..500).map(|_| new_account_id()).collect();
-        assert_eq!(ids.len(), 500, "new_account_id repeated a value");
     }
 
     /// Sizes past 16 bytes are stitched from more than one UUID; the join must
@@ -101,17 +89,5 @@ mod tests {
         let b = random_hex(32);
         assert_ne!(a[..32], b[..32], "first half is constant");
         assert_ne!(a[32..], b[32..], "second half is constant");
-    }
-
-    #[test]
-    fn test_account_ids_have_the_shape_the_webauthn_handle_relies_on() {
-        let id = new_account_id();
-        let hex = id
-            .strip_prefix("acct_")
-            .expect("must carry the acct_ prefix");
-        assert_eq!(hex.len(), 32);
-        assert!(hex
-            .chars()
-            .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
     }
 }

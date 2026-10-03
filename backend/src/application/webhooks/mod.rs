@@ -1,46 +1,27 @@
-//! Application service for inbound webhooks and the webhook outbox.
+//! Application service for inbound webhooks.
 //!
-//! Orchestrates webhook creation, token rotation, alert enqueueing,
-//! outbox draining, and system event publication.
+//! Orchestrates webhook creation, token rotation and alert enqueueing. An
+//! accepted alert is one `WebhookTriggered` outbox event; its delivery and
+//! its logs are read from the outbox (`application/outbox`).
 
-use std::sync::Arc;
-
-use chrono::{DateTime, Utc};
 use sqlx::PgPool;
-use tokio::sync::Notify;
 
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
+use crate::domain::events::{DeliveryId, SystemEvent, WebhookAlert};
 use crate::domain::webhooks::{
     hash_token, Webhook, WebhookOutboxItem, WebhookSeverity, MAX_NAME_LEN,
 };
-use crate::events::{EventBroadcaster, SystemEvent};
-use crate::infrastructure::postgres::repositories;
+use crate::infrastructure::postgres::repositories::{self, outbox};
 
 #[derive(Clone)]
 pub struct WebhookService {
     pool: PgPool,
-    events: EventBroadcaster,
-    notify: Arc<Notify>,
 }
 
 impl WebhookService {
-    pub fn new(pool: PgPool, events: EventBroadcaster) -> Self {
-        Self {
-            pool,
-            events,
-            notify: Arc::new(Notify::new()),
-        }
-    }
-
-    /// Returns the notification signal for waking the outbox worker immediately.
-    pub fn get_outbox_notify(&self) -> Arc<Notify> {
-        self.notify.clone()
-    }
-
-    /// Triggers an immediate wakeup of the background outbox worker.
-    pub fn notify_outbox(&self) {
-        self.notify.notify_one();
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
     }
 
     pub async fn create(
@@ -69,8 +50,9 @@ impl WebhookService {
         let token_prefix = raw_token.chars().take(10).collect::<String>();
         let id = format!("whk_{}", uuid::Uuid::new_v4());
 
+        let mut tx = self.pool.begin().await?;
         let webhook = repositories::webhooks::create(
-            &self.pool,
+            &mut *tx,
             &id,
             owner,
             name,
@@ -80,8 +62,8 @@ impl WebhookService {
         )
         .await?;
 
-        self.events
-            .send(SystemEvent::WebhookCreated(webhook.clone()));
+        outbox::publish(&mut tx, &SystemEvent::WebhookCreated(webhook.clone())).await?;
+        tx.commit().await?;
 
         Ok((webhook, raw_token))
     }
@@ -118,8 +100,9 @@ impl WebhookService {
             }
         }
 
+        let mut tx = self.pool.begin().await?;
         let updated = repositories::webhooks::update(
-            &self.pool,
+            &mut *tx,
             id,
             owner,
             name.map(|s| s.trim()),
@@ -130,8 +113,8 @@ impl WebhookService {
 
         let webhook = updated.ok_or_else(|| AppError::NotFound("Webhook not found".to_string()))?;
 
-        self.events
-            .send(SystemEvent::WebhookUpdated(webhook.clone()));
+        outbox::publish(&mut tx, &SystemEvent::WebhookUpdated(webhook.clone())).await?;
+        tx.commit().await?;
 
         Ok(webhook)
     }
@@ -146,32 +129,44 @@ impl WebhookService {
         let token_hash = hash_token(&raw_token);
         let token_prefix = raw_token.chars().take(10).collect::<String>();
 
+        let mut tx = self.pool.begin().await?;
         let opt =
-            repositories::webhooks::rotate_token(&self.pool, id, owner, &token_hash, &token_prefix)
+            repositories::webhooks::rotate_token(&mut *tx, id, owner, &token_hash, &token_prefix)
                 .await?;
 
         let webhook = opt.ok_or_else(|| AppError::NotFound("Webhook not found".to_string()))?;
 
-        self.events
-            .send(SystemEvent::WebhookUpdated(webhook.clone()));
+        outbox::publish(&mut tx, &SystemEvent::WebhookUpdated(webhook.clone())).await?;
+        tx.commit().await?;
 
         Ok((webhook, raw_token))
     }
 
     pub async fn delete(&self, owner: &AccountId, id: &str) -> Result<(), AppError> {
-        let deleted = repositories::webhooks::delete(&self.pool, id, owner).await?;
+        let mut tx = self.pool.begin().await?;
+        let deleted = repositories::webhooks::delete(&mut *tx, id, owner).await?;
         if !deleted {
             return Err(AppError::NotFound("Webhook not found".to_string()));
         }
+        // Deliveries outlive the webhook row; without this a revoked webhook's
+        // queued alerts would still be posted, possibly days later.
+        outbox::fail_pending_webhook_deliveries(&mut *tx, owner, id, "webhook deleted").await?;
 
-        self.events.send(SystemEvent::WebhookDeleted {
-            id: id.to_string(),
-            owner_id: owner.to_string(),
-        });
+        outbox::publish(
+            &mut tx,
+            &SystemEvent::WebhookDeleted {
+                id: id.to_string(),
+                owner_id: *owner,
+            },
+        )
+        .await?;
+        tx.commit().await?;
 
         Ok(())
     }
 
+    /// Accepts one alert: publishes it and stamps the webhook in one
+    /// transaction, and returns the id of its Matrix delivery.
     pub async fn enqueue_alert(
         &self,
         webhook: &Webhook,
@@ -180,33 +175,30 @@ impl WebhookService {
         html_body: &str,
         plain_body: &str,
         severity: WebhookSeverity,
-    ) -> Result<WebhookOutboxItem, AppError> {
-        let outbox_id = format!("outbox_{}", uuid::Uuid::new_v4());
-
-        let outbox_item = repositories::webhooks::enqueue_outbox(
-            &self.pool,
-            &outbox_id,
-            &webhook.id,
-            &webhook.owner_id,
-            target_room,
-            severity.as_str(),
-            title,
-            html_body,
-            plain_body,
-        )
-        .await?;
-
-        self.notify_outbox();
-
-        self.events.send(SystemEvent::WebhookTriggered {
+    ) -> Result<DeliveryId, AppError> {
+        let alert = WebhookAlert {
             id: webhook.id.clone(),
-            owner_id: webhook.owner_id.to_string(),
-            outbox_id: outbox_item.id.clone(),
+            owner_id: webhook.owner_id,
             room_id: target_room.to_string(),
             severity: severity.as_str().to_string(),
-        });
+            title: title.map(str::to_string),
+            html_body: html_body.to_string(),
+            plain_body: plain_body.to_string(),
+        };
 
-        Ok(outbox_item)
+        let mut tx = self.pool.begin().await?;
+        let published = outbox::publish(&mut tx, &SystemEvent::WebhookTriggered(alert)).await?;
+        repositories::webhooks::touch_last_triggered(&mut *tx, &webhook.id).await?;
+        tx.commit().await?;
+
+        // `WebhookTriggered` has exactly one destination; an empty list is a
+        // broken invariant. `Database` is the opaque-500 variant whose detail
+        // is logged and never shown to a client.
+        published.deliveries.first().copied().ok_or_else(|| {
+            AppError::Database(sqlx::Error::Protocol(
+                "WebhookTriggered was published without a delivery".to_string(),
+            ))
+        })
     }
 
     pub async fn list_logs(
@@ -219,56 +211,155 @@ impl WebhookService {
         // Enforce ownership of the webhook before querying its logs
         let _ = self.get(owner, webhook_id).await?;
 
-        let items = repositories::webhooks::list_outbox_by_webhook(
-            &self.pool, webhook_id, owner, limit, offset,
-        )
-        .await?;
-        let total =
-            repositories::webhooks::count_outbox_by_webhook(&self.pool, webhook_id, owner).await?;
+        let items = outbox::list_webhook_logs(&self.pool, owner, webhook_id, limit, offset).await?;
+        let total = outbox::count_webhook_logs(&self.pool, owner, webhook_id).await?;
 
         Ok((items, total))
     }
+}
 
-    pub async fn fetch_pending_outbox(
-        &self,
-        limit: i64,
-    ) -> Result<Vec<WebhookOutboxItem>, AppError> {
-        let items = repositories::webhooks::fetch_pending_outbox(&self.pool, limit).await?;
-        Ok(items)
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn services(seed: &str) -> (crate::application::AppServices, AccountId) {
+        let pool = crate::db::pool::test_pool_sized(4).await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let owner = AccountId::from_seed(seed);
+        crate::db::pool::seed_account(&pool, &owner).await;
+        (crate::application::AppServices::new(&pool), owner)
     }
 
-    pub async fn mark_outbox_delivered(&self, id: &str, webhook_id: &str) -> Result<(), AppError> {
-        repositories::webhooks::mark_outbox_delivered(&self.pool, id, webhook_id).await?;
-        Ok(())
+    #[tokio::test]
+    async fn list_logs_reads_an_outbox_delivery_as_a_log_row() {
+        let (services, owner) = services("acct_logs_map").await;
+        let (webhook, _) = services
+            .webhooks
+            .create(&owner, "ci", "!room:example.org")
+            .await
+            .unwrap();
+        let id = services
+            .webhooks
+            .enqueue_alert(
+                &webhook,
+                "!room:example.org",
+                Some("Disk"),
+                "<b>full</b>",
+                "full",
+                WebhookSeverity::Critical,
+            )
+            .await
+            .unwrap();
+
+        let (logs, total) = services
+            .webhooks
+            .list_logs(&owner, &webhook.id, 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(total, 1);
+        let log = &logs[0];
+        assert_eq!(log.id, id.to_string());
+        assert_eq!(log.webhook_id, webhook.id);
+        assert_eq!(log.owner_id, owner);
+        assert_eq!(log.room_id, "!room:example.org");
+        assert_eq!(log.title.as_deref(), Some("Disk"));
+        assert_eq!(log.html_body, "<b>full</b>");
+        assert_eq!(log.plain_body, "full");
+        assert_eq!(log.severity, "critical");
+        assert_eq!(log.status, "pending");
+        assert_eq!(log.attempts, 0);
+        assert_eq!(log.max_attempts, 10);
+        let stamped = services.webhooks.get(&owner, &webhook.id).await.unwrap();
+        assert!(
+            stamped.last_triggered_at.is_some(),
+            "C1: the enqueue stamps it"
+        );
     }
 
-    pub async fn mark_outbox_retry(
-        &self,
-        id: &str,
-        webhook_id: &str,
-        attempts: i64,
-        next_attempt_at: DateTime<Utc>,
-        last_error: &str,
-    ) -> Result<(), AppError> {
-        repositories::webhooks::mark_outbox_retry(
-            &self.pool,
-            id,
-            webhook_id,
-            attempts,
-            next_attempt_at,
-            last_error,
+    #[tokio::test]
+    async fn another_accounts_logs_are_not_visible() {
+        let (services, owner) = services("acct_logs_owner").await;
+        let other = AccountId::from_seed("acct_logs_other");
+        crate::db::pool::seed_account(&services.outbox.pool().clone(), &other).await;
+        let (webhook, _) = services
+            .webhooks
+            .create(&owner, "ci", "!room:example.org")
+            .await
+            .unwrap();
+        services
+            .webhooks
+            .enqueue_alert(
+                &webhook,
+                "!room:example.org",
+                None,
+                "h",
+                "h",
+                WebhookSeverity::Info,
+            )
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            services
+                .webhooks
+                .list_logs(&other, &webhook.id, 10, 0)
+                .await,
+            Err(AppError::NotFound(_))
+        ));
+    }
+
+    /// Given a webhook with a pending alert, When it is deleted, Then the
+    /// alert is never delivered (the pre-outbox ON DELETE CASCADE semantics),
+    /// and another account's alert carrying the same id string is untouched.
+    #[tokio::test]
+    async fn deleting_a_webhook_fails_its_pending_deliveries_only() {
+        let (services, owner) = services("acct_del_alerts").await;
+        let other = AccountId::from_seed("acct_del_other");
+        crate::db::pool::seed_account(services.outbox.pool(), &other).await;
+        let (webhook, _) = services
+            .webhooks
+            .create(&owner, "ci", "!room:example.org")
+            .await
+            .unwrap();
+        services
+            .webhooks
+            .enqueue_alert(&webhook, "!r:1", None, "h", "h", WebhookSeverity::Info)
+            .await
+            .unwrap();
+        let mut tx = services.outbox.pool().begin().await.unwrap();
+        outbox::publish(
+            &mut tx,
+            &SystemEvent::WebhookTriggered(WebhookAlert {
+                id: webhook.id.clone(),
+                owner_id: other,
+                room_id: "!r:2".into(),
+                severity: "info".into(),
+                title: None,
+                html_body: "h".into(),
+                plain_body: "h".into(),
+            }),
         )
-        .await?;
-        Ok(())
-    }
+        .await
+        .unwrap();
+        tx.commit().await.unwrap();
 
-    pub async fn mark_outbox_failed(
-        &self,
-        id: &str,
-        webhook_id: &str,
-        last_error: &str,
-    ) -> Result<(), AppError> {
-        repositories::webhooks::mark_outbox_failed(&self.pool, id, webhook_id, last_error).await?;
-        Ok(())
+        services.webhooks.delete(&owner, &webhook.id).await.unwrap();
+
+        let pool = services.outbox.pool();
+        assert_eq!(
+            outbox::delivery_statuses_for(pool, &owner).await.unwrap(),
+            vec!["failed"]
+        );
+        assert_eq!(
+            outbox::delivery_statuses_for(pool, &other).await.unwrap(),
+            vec!["pending"]
+        );
+        let due = services
+            .outbox
+            .claim_due(10, std::time::Duration::from_secs(60))
+            .await
+            .unwrap();
+        assert_eq!(due.len(), 1, "only the other account's alert is due");
+        assert_eq!(due[0].event.account_id, other);
     }
 }

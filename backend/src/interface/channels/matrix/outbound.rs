@@ -1,0 +1,243 @@
+//! `ChannelAdapter::send` for Matrix: neutral `OutgoingMessage`s onto the
+//! homeserver, with every matrix-sdk failure mapped to a `ChannelError` at this
+//! boundary so no caller sees the SDK's error types.
+
+use matrix_sdk::room::Room;
+use matrix_sdk::ruma::events::room::message::RoomMessageEventContent;
+use matrix_sdk::ruma::{OwnedTransactionId, RoomId, UserId};
+use matrix_sdk::Client;
+use tracing::warn;
+
+use crate::domain::channels::{Channel, ConversationAddress};
+use crate::interface::channels::adapter::{ChannelError, SentRef};
+use crate::interface::channels::matrix::live_client::MatrixHandle;
+use crate::interface::channels::matrix::voice_upload;
+use crate::interface::channels::message::{
+    AttachmentKind, Content, MessageRef, OutgoingMessage, Target,
+};
+
+/// Where a message goes, validated before any client is needed.
+enum Destination<'a> {
+    Room(&'a RoomId),
+    Direct(&'a UserId),
+}
+
+fn destination(target: &Target) -> Result<Destination<'_>, ChannelError> {
+    match target {
+        Target::Conversation(ConversationAddress::Matrix(room)) => {
+            <&RoomId>::try_from(room.as_str())
+                .map(Destination::Room)
+                .map_err(|_| ChannelError::Rejected(format!("not a Matrix room id: {room}")))
+        }
+        Target::Direct(identity) if identity.channel() == Channel::Matrix => {
+            <&UserId>::try_from(identity.user_id().as_str())
+                .map(Destination::Direct)
+                .map_err(|_| {
+                    ChannelError::Rejected(format!(
+                        "not a Matrix user id: {}",
+                        identity.user_id().as_str()
+                    ))
+                })
+        }
+        other => Err(ChannelError::Rejected(format!(
+            "not a Matrix target: {other:?}"
+        ))),
+    }
+}
+
+/// The outbox's `outbox-<delivery id>` key, as the transaction id the
+/// homeserver deduplicates on.
+fn transaction_id(key: &str) -> OwnedTransactionId {
+    OwnedTransactionId::from(key)
+}
+
+/// The room message for `content`: rich when it has HTML, else plain.
+fn text_content(content: &Content) -> RoomMessageEventContent {
+    match &content.html {
+        Some(html) => RoomMessageEventContent::text_html(&content.plain, html),
+        None => RoomMessageEventContent::text_plain(&content.plain),
+    }
+}
+
+pub async fn send(
+    handle: &MatrixHandle,
+    message: OutgoingMessage,
+) -> Result<SentRef, ChannelError> {
+    // Shape errors first: a message that can never be delivered is `Rejected`
+    // whether or not the connection is up, so a retry loop does not wait on it.
+    let destination = destination(&message.target)?;
+    if let Some(unsupported) = message
+        .content
+        .attachments
+        .iter()
+        .find(|a| a.kind != AttachmentKind::Audio)
+    {
+        return Err(ChannelError::Rejected(format!(
+            "Matrix delivery has no path for a {:?} attachment",
+            unsupported.kind
+        )));
+    }
+    let key = message.idempotency_key.as_deref();
+    let join = message.join_if_needed;
+    let client = handle
+        .current()
+        .ok_or(ChannelError::NotConnected(Channel::Matrix))?;
+
+    match destination {
+        Destination::Room(room_id) => {
+            deliver_to_room_id(&client, room_id, &message.content, key, join).await
+        }
+        Destination::Direct(user_id) => {
+            let room = dm_room(&client, user_id).await?;
+            deliver(&room, &message.content, key).await
+        }
+    }
+}
+
+/// Send into a room the bot already has; when that fails (or the room is not
+/// in the store) and `join` allows it, join and send once more, the way the
+/// job handlers always did. Without `join` the failure is returned as is.
+async fn deliver_to_room_id(
+    client: &Client,
+    room_id: &RoomId,
+    content: &Content,
+    key: Option<&str>,
+    join: bool,
+) -> Result<SentRef, ChannelError> {
+    if let Some(room) = client.get_room(room_id) {
+        match deliver(&room, content, key).await {
+            Ok(sent) => return Ok(sent),
+            Err(err) if !join => return Err(err),
+            Err(err) => warn!(%room_id, error = %err, "Send failed; retrying via join"),
+        }
+    } else if join {
+        warn!(%room_id, "No room handle in the store; joining");
+    } else {
+        return Err(ChannelError::Transient(format!(
+            "Bot is not joined to room: {room_id}"
+        )));
+    }
+    let joined = client
+        .join_room_by_id(room_id)
+        .await
+        .map_err(|e| ChannelError::Transient(format!("join {room_id}: {e}")))?;
+    deliver(&joined, content, key).await
+}
+
+/// Audio first (voice bubbles), then the text: the order a voice reply has
+/// always had in the room.
+///
+/// A key becomes the transaction id of the text message (not of the voice
+/// uploads), so the homeserver deduplicates a resend within one session.
+async fn deliver(
+    room: &Room,
+    content: &Content,
+    key: Option<&str>,
+) -> Result<SentRef, ChannelError> {
+    for attachment in &content.attachments {
+        voice_upload::send_voice_message(room, attachment)
+            .await
+            .map_err(ChannelError::Transient)?;
+    }
+    if content.plain.is_empty() && content.html.is_none() && !content.attachments.is_empty() {
+        return Ok(SentRef { message: None });
+    }
+    let mut request = room.send(text_content(content));
+    if let Some(key) = key {
+        request = request.with_transaction_id(transaction_id(key));
+    }
+    let response = request.await.map_err(|e| {
+        ChannelError::Transient(format!("Matrix homeserver delivery failed: {e:?}"))
+    })?;
+    Ok(SentRef {
+        message: Some(MessageRef(response.response.event_id.to_string())),
+    })
+}
+
+/// The user's DM with the bot: an existing one first (creating a second each
+/// time would litter their client), else a new one — a notice such as a
+/// recovery warning must not be dropped for want of a room.
+async fn dm_room(client: &Client, user_id: &UserId) -> Result<Room, ChannelError> {
+    for room in client.joined_rooms() {
+        if !room.is_direct().await.unwrap_or(false) {
+            continue;
+        }
+        if matches!(room.get_member(user_id).await, Ok(Some(_))) {
+            return Ok(room);
+        }
+    }
+    client
+        .create_dm(user_id)
+        .await
+        .map_err(|e| ChannelError::Transient(format!("open a DM with {user_id}: {e}")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::channels::PlatformIdentity;
+    use crate::interface::channels::message::Reply;
+
+    #[test]
+    fn a_matrix_room_and_a_matrix_identity_are_destinations() {
+        let room = Target::Conversation(ConversationAddress::Matrix("!r:x".into()));
+        assert!(matches!(destination(&room), Ok(Destination::Room(_))));
+        let user = Target::Direct(PlatformIdentity::matrix("@u:x").unwrap());
+        assert!(matches!(destination(&user), Ok(Destination::Direct(_))));
+    }
+
+    #[test]
+    fn the_idempotency_key_is_the_matrix_transaction_id() {
+        assert_eq!(transaction_id("outbox-42").as_str(), "outbox-42");
+    }
+
+    #[test]
+    fn anything_else_is_rejected() {
+        for target in [
+            Target::Conversation(ConversationAddress::Telegram(1)),
+            Target::Conversation(ConversationAddress::Web),
+            Target::Conversation(ConversationAddress::Matrix("no-sigil".into())),
+        ] {
+            assert!(matches!(
+                destination(&target),
+                Err(ChannelError::Rejected(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn html_content_is_sent_rich_and_the_rest_plain() {
+        let rich = text_content(&Reply::html("<b>x</b>").content);
+        assert_eq!(rich.body(), "x");
+        assert!(matches!(
+            rich.msgtype,
+            matrix_sdk::ruma::events::room::message::MessageType::Text(ref t) if t.formatted.is_some()
+        ));
+        let plain = text_content(&Content::text("hello"));
+        assert!(matches!(
+            plain.msgtype,
+            matrix_sdk::ruma::events::room::message::MessageType::Text(ref t) if t.formatted.is_none()
+        ));
+    }
+
+    #[test]
+    fn actions_never_change_what_matrix_sends() {
+        let plain_reply = Reply::html("<b>x</b>");
+        let with =
+            plain_reply
+                .clone()
+                .with_actions(vec![crate::interface::channels::message::Action {
+                    label: "Done #1".into(),
+                    command: "todo done 1".into(),
+                }]);
+        let (a, b) = (
+            text_content(&plain_reply.content),
+            text_content(&with.content),
+        );
+        assert_eq!(a.body(), b.body());
+        assert_eq!(
+            serde_json::to_value(&a).unwrap(),
+            serde_json::to_value(&b).unwrap()
+        );
+    }
+}

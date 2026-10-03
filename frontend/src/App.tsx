@@ -20,6 +20,7 @@ import { useSystemEvents } from './core/useSystemEvents';
 import { AppShell } from './components/AppShell';
 import { AuthModal } from './components/AuthModal';
 import { SettingsModal } from './components/SettingsModal';
+import { LinkPage } from './modules/link/LinkPage';
 import { PublicTransparencyView } from './modules/finance/components/PublicTransparencyView';
 import { AUTH_EXPIRED_EVENT } from './core/apiClient';
 import { useSession, useRefreshSession } from './core/session';
@@ -41,7 +42,11 @@ const queryClient = new QueryClient({
   },
 });
 
+/** The page a bot's `/link` message opens; it works signed out and owns its own sign-in prompt. */
+const isLinkRoute = () => typeof window !== 'undefined' && window.location.pathname.replace(/\/+$/, '') === '/link';
+
 const AppContent: React.FC = () => {
+  const [onLinkRoute] = useState(isLinkRoute);
   const [activeModuleId, setActiveModuleId] = useState<string>('dashboard');
   // Set alongside activeModuleId only by a Quick Action jump, so the target
   // module's primary input autofocuses; any ordinary nav click clears it.
@@ -50,7 +55,7 @@ const AppContent: React.FC = () => {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [theme, setTheme] = useState<Theme>(getStoredTheme());
   const [enrollToken, setEnrollToken] = useState<string | null>(() => {
-    if (typeof window === 'undefined') return null;
+    if (typeof window === 'undefined' || isLinkRoute()) return null;
     const params = new URLSearchParams(window.location.search);
     return params.get('enroll') || params.get('token');
   });
@@ -63,7 +68,7 @@ const AppContent: React.FC = () => {
   const { user, isSignedIn, isLoading, isError } = useSession();
   const refreshSession = useRefreshSession();
 
-  const { events, isConnected } = useSystemEvents(isSignedIn);
+  const { events, isConnected } = useSystemEvents(isSignedIn && !onLinkRoute);
 
   useEffect(() => {
     applyTheme(theme);
@@ -98,8 +103,8 @@ const AppContent: React.FC = () => {
   // itself so it appears on a cold load as well as on an expiry, and so it
   // closes on its own once a session exists. Do not open during network errors / server restarts.
   useEffect(() => {
-    if (!isLoading && !isError && !publicFinanceToken) setIsAuthOpen(!isSignedIn);
-  }, [isLoading, isSignedIn, isError, publicFinanceToken]);
+    if (!isLoading && !isError && !publicFinanceToken && !onLinkRoute) setIsAuthOpen(!isSignedIn);
+  }, [isLoading, isSignedIn, isError, publicFinanceToken, onLinkRoute]);
 
   // The server rejected the session cookie on some *other* call. Re-read the
   // session so the rest of the UI stops showing data it can no longer refresh;
@@ -126,6 +131,10 @@ const AppContent: React.FC = () => {
     setActiveModuleId(id);
     setFocusModuleId(id);
   };
+
+  if (onLinkRoute) {
+    return <LinkPage />;
+  }
 
   if (publicFinanceToken) {
     return (

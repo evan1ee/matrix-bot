@@ -1,3 +1,4 @@
+pub mod credential;
 pub mod extractor;
 pub mod handlers;
 pub mod matrix;
@@ -11,12 +12,8 @@ pub use types::*;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::accounts::{
-        session::{hash_token, COOKIE_NAME},
-        AccountRepository, SessionRepository, STATUS_ACTIVE,
-    };
+    use crate::domain::accounts::{hash_token, AccountId, COOKIE_NAME, STATUS_ACTIVE};
     use crate::error::ApiError;
-    use crate::events::EventBroadcaster;
     use axum::extract::FromRequestParts;
     use axum::http::{header, Method};
 
@@ -26,8 +23,7 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         ApiState::new(
-            crate::db::Database { pool: pool },
-            EventBroadcaster::default(),
+            crate::db::Database { pool },
             None,
             "https://mbm.one".to_string(),
             reqwest::Client::new(),
@@ -74,11 +70,11 @@ mod tests {
     }
 
     /// A signed-in account, and the cookie proving it.
-    async fn signed_in(state: &ApiState, display_name: &str) -> (String, String) {
-        let account = AccountRepository::create(&state.db.pool, display_name, STATUS_ACTIVE)
-            .await
-            .unwrap();
-        let token = SessionRepository::create(&state.db.pool, &account, None, None, None)
+    async fn signed_in(state: &ApiState, display_name: &str) -> (AccountId, String) {
+        let accounts = &state.services.accounts;
+        let account = accounts.create(display_name, STATUS_ACTIVE).await.unwrap();
+        let token = accounts
+            .create_session(&account, None, None, None)
             .await
             .unwrap();
         (account, token)
@@ -92,7 +88,7 @@ mod tests {
         let user = extract(&state, Method::GET, Some(&token), None)
             .await
             .unwrap();
-        assert_eq!(user.owner_id(), account);
+        assert_eq!(user.owner_id(), account.to_string());
         assert_eq!(user.display_name, "evan");
         assert_eq!(user.session_id_hash, hash_token(&token));
     }
@@ -105,7 +101,7 @@ mod tests {
         let user = extract_bearer(&state, Method::GET, Some(&token), None)
             .await
             .unwrap();
-        assert_eq!(user.owner_id(), account);
+        assert_eq!(user.owner_id(), account.to_string());
         assert_eq!(user.display_name, "evan");
         assert_eq!(user.session_id_hash, hash_token(&token));
     }
@@ -152,7 +148,10 @@ mod tests {
             .await
             .is_ok());
 
-        SessionRepository::revoke(&state.db.pool, &hash_token(&token))
+        state
+            .services
+            .accounts
+            .end_session(&hash_token(&token))
             .await
             .unwrap();
 
@@ -168,9 +167,7 @@ mod tests {
         let state = state().await;
         let (account, token) = signed_in(&state, "evan").await;
 
-        AccountRepository::delete(&state.db.pool, &account)
-            .await
-            .unwrap();
+        state.services.accounts.delete(&account).await.unwrap();
 
         let err = extract(&state, Method::GET, Some(&token), None)
             .await
@@ -254,13 +251,13 @@ mod tests {
     async fn test_step_up_expires_and_recovery_sessions_never_qualify() {
         use chrono::{Duration, Utc};
 
-        let fresh = AuthUser::for_account("acct_a");
+        let fresh = AuthUser::for_seed("acct_a");
         assert!(fresh.may_perform_sensitive_action(Utc::now()));
 
         // Just past the window.
         let stale = AuthUser {
             last_verified_at: Utc::now()
-                - Duration::minutes(crate::accounts::session::STEP_UP_WINDOW_MINUTES + 1),
+                - Duration::minutes(crate::domain::accounts::STEP_UP_WINDOW_MINUTES + 1),
             ..fresh.clone()
         };
         assert!(!stale.may_perform_sensitive_action(Utc::now()));
@@ -294,22 +291,26 @@ mod tests {
     #[tokio::test]
     async fn test_an_mcp_token_never_satisfies_step_up() {
         let state = state().await;
-        let account = AccountRepository::create(&state.db.pool, "evan", STATUS_ACTIVE)
+        let account = state
+            .services
+            .accounts
+            .create("evan", STATUS_ACTIVE)
             .await
             .unwrap();
-        let (raw, _token) = crate::modules::mcp::repository::McpTokenRepository::create(
-            &state.db.pool,
-            &account,
-            "a machine",
-            None,
-        )
-        .await
-        .unwrap();
+        let (raw, _token) =
+            crate::infrastructure::postgres::repositories::mcp::McpTokenRepository::create(
+                &state.db.pool,
+                &account,
+                "a machine",
+                None,
+            )
+            .await
+            .unwrap();
 
         let user = extract_bearer(&state, Method::GET, Some(&raw), None)
             .await
             .expect("a fresh MCP token must still authenticate");
-        assert_eq!(user.owner_id(), account);
+        assert_eq!(user.owner_id(), account.to_string());
 
         assert!(
             !user.may_perform_sensitive_action(chrono::Utc::now()),

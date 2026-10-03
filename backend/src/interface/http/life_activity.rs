@@ -3,10 +3,94 @@ use axum::{
     Json,
 };
 use chrono::NaiveDate;
+use serde::Serialize;
+use utoipa::ToSchema;
 
 use crate::error::ApiError;
 use crate::interface::http::auth::{ApiState, AuthUser};
-use crate::modules::life::activity::{collect_day_activity, DayActivityResponse};
+
+/// A single event from any module that happened on a given date.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ActivityEvent {
+    /// ISO time within the day, e.g. "09:15:00" (or null if date-only)
+    pub time: Option<String>,
+    /// Source module identifier
+    pub module: String,
+    /// Verb: "created", "completed", "expense", "income", "buy", "sell", etc.
+    pub action: String,
+    /// Visual emoji for the event type
+    pub emoji: String,
+    /// One-line human summary
+    pub summary: String,
+    /// Optional secondary detail
+    pub detail: Option<String>,
+}
+
+impl From<crate::domain::life::ActivityEvent> for ActivityEvent {
+    fn from(e: crate::domain::life::ActivityEvent) -> Self {
+        Self {
+            time: e.time,
+            module: e.module,
+            action: e.action,
+            emoji: e.emoji,
+            summary: e.summary,
+            detail: e.detail,
+        }
+    }
+}
+
+/// Summary counts per module.
+#[derive(Debug, Clone, Serialize, Default, ToSchema)]
+pub struct ActivityStats {
+    pub total_events: usize,
+    pub todos_created: usize,
+    pub todos_completed: usize,
+    pub todos_due: usize,
+    pub expenses: usize,
+    pub income: usize,
+    pub portfolio_trades: usize,
+    pub habits_done: usize,
+    pub reminders_fired: usize,
+    pub bookmarks_saved: usize,
+    pub bills_paid: usize,
+    pub footprints: usize,
+}
+
+impl From<crate::domain::life::ActivityStats> for ActivityStats {
+    fn from(s: crate::domain::life::ActivityStats) -> Self {
+        Self {
+            total_events: s.total_events,
+            todos_created: s.todos_created,
+            todos_completed: s.todos_completed,
+            todos_due: s.todos_due,
+            expenses: s.expenses,
+            income: s.income,
+            portfolio_trades: s.portfolio_trades,
+            habits_done: s.habits_done,
+            reminders_fired: s.reminders_fired,
+            bookmarks_saved: s.bookmarks_saved,
+            bills_paid: s.bills_paid,
+            footprints: s.footprints,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct DayActivityResponse {
+    pub date: String,
+    pub events: Vec<ActivityEvent>,
+    pub stats: ActivityStats,
+}
+
+impl From<crate::domain::life::DayActivityResponse> for DayActivityResponse {
+    fn from(r: crate::domain::life::DayActivityResponse) -> Self {
+        Self {
+            date: r.date,
+            events: r.events.into_iter().map(ActivityEvent::from).collect(),
+            stats: ActivityStats::from(r.stats),
+        }
+    }
+}
 
 #[utoipa::path(
     get,
@@ -31,8 +115,12 @@ pub async fn get_day_activity(
         ));
     }
 
-    let response = collect_day_activity(&state.db.pool, &user.account_id, &date).await;
-    Ok(Json(response))
+    let response = state
+        .services
+        .life
+        .collect_day_activity(&user.account_id, &date)
+        .await?;
+    Ok(Json(DayActivityResponse::from(response)))
 }
 
 #[cfg(test)]
@@ -40,17 +128,14 @@ mod tests {
     use super::*;
     use crate::db::Database;
     use crate::db::DbPool;
-    use crate::events::EventBroadcaster;
 
     async fn create_test_state() -> (ApiState, DbPool) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let db = Database { pool: pool.clone() };
-        let broadcaster = EventBroadcaster::new(10);
         let client = reqwest::Client::new();
         let state = ApiState::new(
             db,
-            broadcaster,
             Some("secret".to_string()),
             "https://matrix.org".to_string(),
             client,
@@ -60,7 +145,7 @@ mod tests {
 
     fn test_user(account_id: &str) -> AuthUser {
         AuthUser {
-            account_id: crate::domain::accounts::AccountId::new(account_id),
+            account_id: crate::domain::accounts::AccountId::from_seed(account_id),
             display_name: account_id.to_string(),
             session_id_hash: "sess_hash".to_string(),
             last_verified_at: crate::utils::time::now_at_storage_precision(),
@@ -87,57 +172,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_todo_created_on_date_appears_in_feed() {
-        let (state, pool) = create_test_state().await;
-
-        crate::db_execute!(&pool, "INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed, created_at) \
-             VALUES ('!r', 'user1', 'Alice', 'Buy groceries', 'high', FALSE, '2026-09-06 09:15:00')")
-        .unwrap();
-
-        let user = test_user("user1");
-        let result = get_day_activity(
-            user,
-            axum::extract::State(state),
-            Path("2026-09-06".to_string()),
-        )
-        .await
-        .unwrap();
-
-        let body = result.0;
-        assert_eq!(body.stats.todos_created, 1);
-        assert_eq!(body.events.len(), 1);
-        assert_eq!(body.events[0].module, "todo");
-        assert_eq!(body.events[0].action, "created");
-        assert!(body.events[0].summary.contains("Buy groceries"));
-    }
-
-    #[tokio::test]
-    async fn test_finance_transaction_appears_in_feed() {
-        let (state, pool) = create_test_state().await;
-
-        crate::db_execute!(
-            &pool,
-            "INSERT INTO transactions (room_id, owner_id, sender_name, direction, amount_minor, \
-             currency, currency_exponent, occurred_at) \
-             VALUES ('!r', 'user1', 'Alice', 'expense', 4250, 'USD', 2, '2026-09-06 10:30:00')"
-        )
-        .unwrap();
-
-        let user = test_user("user1");
-        let result = get_day_activity(
-            user,
-            axum::extract::State(state),
-            Path("2026-09-06".to_string()),
-        )
-        .await
-        .unwrap();
-
-        let body = result.0;
-        assert_eq!(body.stats.expenses, 1);
-        assert!(body.events[0].summary.contains("42.50"));
-    }
-
-    #[tokio::test]
     async fn test_invalid_date_rejected() {
         let (state, _pool) = create_test_state().await;
         let user = test_user("user1");
@@ -149,53 +183,5 @@ mod tests {
         .await;
 
         assert!(result.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_footprints_only_appear_on_arrival_date() {
-        let (state, pool) = create_test_state().await;
-
-        // Trip from 2026-09-04 to 2026-09-14
-        crate::db_execute!(&pool, "INSERT INTO footprints (owner_id, title, latitude, longitude, city, arrival_date, departure_date, created_at) \
-             VALUES ('user1', 'Danxia Mountain', 25.0, 113.0, 'Shaoguan', '2026-09-04', '2026-09-14', '2026-09-04 01:48:57')")
-        .unwrap();
-
-        let user = test_user("user1");
-
-        // 1. On arrival date: appears as "arrived"
-        let res_arrival = get_day_activity(
-            user.clone(),
-            axum::extract::State(state.clone()),
-            Path("2026-09-04".to_string()),
-        )
-        .await
-        .unwrap()
-        .0;
-        assert_eq!(res_arrival.stats.footprints, 1);
-        assert_eq!(res_arrival.events[0].action, "arrived");
-
-        // 2. On intermediate date: does NOT appear
-        let res_mid = get_day_activity(
-            user.clone(),
-            axum::extract::State(state.clone()),
-            Path("2026-09-10".to_string()),
-        )
-        .await
-        .unwrap()
-        .0;
-        assert_eq!(res_mid.stats.footprints, 0);
-        assert_eq!(res_mid.events.len(), 0);
-
-        // 3. On departure date: does NOT appear
-        let res_dep = get_day_activity(
-            user,
-            axum::extract::State(state),
-            Path("2026-09-14".to_string()),
-        )
-        .await
-        .unwrap()
-        .0;
-        assert_eq!(res_dep.stats.footprints, 0);
-        assert_eq!(res_dep.events.len(), 0);
     }
 }

@@ -7,8 +7,8 @@ use tracing::{info, warn};
 use utoipa::ToSchema;
 
 use crate::error::ApiError;
+use crate::interface::chat::voice::VoiceTranscriptionResult;
 use crate::interface::http::auth::types::{ApiState, AuthUser};
-use crate::modules::voice::VoiceTranscriptionResult;
 
 #[derive(Debug, Serialize, Deserialize, ToSchema)]
 pub struct VoiceTranscribeResponse {

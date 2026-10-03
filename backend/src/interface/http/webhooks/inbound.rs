@@ -24,7 +24,7 @@ pub(crate) async fn queue_and_broadcast(
 ) -> Result<String, ApiError> {
     let target_room = if let Some(ref override_room) = room_override {
         let client_guard = state.bot_client.read().await;
-        let is_auth = crate::interface::chat::rooms::is_room_authorized_for_account(
+        let is_auth = crate::interface::channels::matrix::rooms::is_room_authorized_for_account(
             &state.services.rooms,
             client_guard.as_ref(),
             &webhook.owner_id,
@@ -50,14 +50,14 @@ pub(crate) async fn queue_and_broadcast(
         format,
     );
 
-    let outbox_item = state
+    let delivery_id = state
         .services
         .webhooks
         .enqueue_alert(webhook, &target_room, title, &html, &plain, domain_severity)
         .await
         .map_err(ApiError::from)?;
 
-    Ok(outbox_item.id)
+    Ok(delivery_id.to_string())
 }
 
 #[utoipa::path(

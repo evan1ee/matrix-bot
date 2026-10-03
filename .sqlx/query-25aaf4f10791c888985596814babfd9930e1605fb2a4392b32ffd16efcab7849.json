@@ -17,7 +17,7 @@
       {
         "ordinal": 1,
         "name": "owner_id",
-        "type_info": "Text",
+        "type_info": "Uuid",
         "origin": {
           "Table": {
             "table": "habits",
@@ -117,7 +117,7 @@
     "parameters": {
       "Left": [
         "Int8",
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [

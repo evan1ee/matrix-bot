@@ -2,7 +2,8 @@ use anyhow::{Context, Result};
 use sqlx::postgres::PgPoolOptions;
 use tracing::info;
 
-use crate::db::executor::DbPool;
+pub type DbPool = sqlx::PgPool;
+pub type DbTx<'a> = sqlx::Transaction<'a, sqlx::Postgres>;
 
 #[derive(Clone, Debug)]
 pub struct Database {
@@ -21,9 +22,16 @@ pub async fn connect_pool(database_url: &str, max_connections: u32) -> Result<Db
         .context("Failed to connect to PostgreSQL")
 }
 
+#[cfg(test)]
+pub fn lazy_pool(database_url: &str) -> DbPool {
+    PgPoolOptions::new()
+        .connect_lazy(database_url)
+        .expect("lazy pool")
+}
+
 /// The PostgreSQL URL the `#[ignore]`d live tests connect to.
 ///
-/// Lives here because `config.rs`'s "only config reads the environment" guard
+/// Lives here because `config/`'s "only config reads the environment" guard
 /// allow-lists this file, and duplicating the read into other modules would
 /// mean growing that list further.
 #[cfg(test)]
@@ -31,40 +39,120 @@ pub fn pg_test_url() -> String {
     std::env::var("PG_TEST_URL").expect("PG_TEST_URL must be set for the live PostgreSQL tests")
 }
 
+/// The PostgreSQL server every in-crate test runs against.
+#[cfg(test)]
+pub fn test_database_url() -> String {
+    std::env::var("TEST_DATABASE_URL").expect(
+        "TEST_DATABASE_URL must point at a PostgreSQL server, e.g. \
+         postgres://postgres:bot@localhost:5432/postgres (see AGENTS.md)",
+    )
+}
+
 /// The pool every in-crate test runs against.
 ///
 /// Each call gets its own PostgreSQL schema, because the suite runs in parallel
 /// and `search_path` is per connection, not per statement. The schema name
-/// carries the process id so concurrent `cargo test` runs cannot collide.
-/// Schemas are left behind: the server is a throwaway CI container, and a test
-/// that failed is more useful with its rows still in place.
+/// carries the process id so concurrent `cargo test` runs cannot collide, and
+/// is dropped first in case a dead process with the same pid left it behind.
+///
+/// Schemas outlive the test so a failure keeps its rows, but not the process:
+/// the next test process to start reaps them (see [`crate::db::test_schemas`]).
 ///
 /// The pool is returned **unmigrated**; callers run whichever schema they need.
 #[cfg(test)]
 pub async fn test_pool() -> crate::db::DbPool {
+    test_pool_sized(2).await
+}
+
+/// [`test_pool`] with an explicit connection cap.
+///
+/// For tests that need more than two concurrent connections (concurrent
+/// claimers, a LISTEN connection, the runtime).
+#[cfg(test)]
+pub async fn test_pool_sized(max_connections: u32) -> crate::db::DbPool {
+    use crate::db::test_schemas;
     use std::sync::atomic::{AtomicU64, Ordering};
     static NEXT: AtomicU64 = AtomicU64::new(0);
 
-    let base = std::env::var("TEST_DATABASE_URL").expect(
-        "TEST_DATABASE_URL must point at a PostgreSQL server, e.g. \
-         postgres://postgres:bot@localhost:5432/postgres (see AGENTS.md)",
-    );
-
-    let schema = format!(
-        "t{}_{}",
-        std::process::id(),
-        NEXT.fetch_add(1, Ordering::Relaxed)
-    );
+    let base = test_database_url();
+    test_schemas::hold_liveness_lock(&base);
+    let schema =
+        test_schemas::schema_name(std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed));
 
     let admin = connect_pool(&base, 1)
         .await
         .expect("TEST_DATABASE_URL must point at a reachable server");
-    crate::db_execute!(&admin, &format!("CREATE SCHEMA IF NOT EXISTS {schema}")).unwrap();
+    test_schemas::drop_schema(&admin, &schema).await.unwrap();
+    sqlx::QueryBuilder::<sqlx::Postgres>::new("CREATE SCHEMA ")
+        .push(&schema)
+        .build()
+        .execute(&admin)
+        .await
+        .unwrap();
     admin.close().await;
 
     let separator = if base.contains('?') { "&" } else { "?" };
     let scoped = format!("{base}{separator}options=-c%20search_path%3D{schema}");
-    connect_pool(&scoped, 2).await.expect("scoped test pool")
+    connect_pool(&scoped, max_connections)
+        .await
+        .expect("scoped test pool")
+}
+
+/// A pool on a **private database** of the test server, unmigrated.
+///
+/// For the one thing a schema cannot isolate: `LISTEN`/`NOTIFY` is
+/// database-wide, so a test asserting that *no* notification arrived needs a
+/// database no other test writes to. `name` is chosen by the caller and is
+/// unique per test; any leftover database of that name (a previous run that
+/// panicked before cleaning up) is dropped first, so at most one database per
+/// test ever exists. Pair with [`drop_private_database`]. Needs a role allowed
+/// to `CREATE DATABASE`.
+#[cfg(test)]
+pub async fn test_pool_private_database(name: &str, max_connections: u32) -> crate::db::DbPool {
+    let base = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
+    let admin = connect_pool(&base, 1)
+        .await
+        .expect("TEST_DATABASE_URL must point at a reachable server");
+    drop_database(&admin, name).await;
+    sqlx::QueryBuilder::<sqlx::Postgres>::new("CREATE DATABASE ")
+        .push(name)
+        .build()
+        .execute(&admin)
+        .await
+        .expect("CREATE DATABASE needs a role that may create databases");
+    admin.close().await;
+
+    connect_pool(&private_database_url(&base, name), max_connections)
+        .await
+        .expect("private database pool")
+}
+
+/// Closes `pool` and drops the database [`test_pool_private_database`] made.
+#[cfg(test)]
+pub async fn drop_private_database(pool: crate::db::DbPool, name: &str) {
+    pool.close().await;
+    let base = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
+    let admin = connect_pool(&base, 1).await.expect("admin pool");
+    drop_database(&admin, name).await;
+    admin.close().await;
+}
+
+#[cfg(test)]
+fn private_database_url(base: &str, name: &str) -> String {
+    let mut url = url::Url::parse(base).expect("TEST_DATABASE_URL parses");
+    url.set_path(&format!("/{name}"));
+    url.to_string()
+}
+
+#[cfg(test)]
+async fn drop_database(admin: &crate::db::DbPool, name: &str) {
+    sqlx::QueryBuilder::<sqlx::Postgres>::new("DROP DATABASE IF EXISTS ")
+        .push(name)
+        .push(" WITH (FORCE)")
+        .build()
+        .execute(admin)
+        .await
+        .expect("drop private test database");
 }
 
 /// A pool pointed at a throwaway PostgreSQL schema, for the live tests.
@@ -78,8 +166,19 @@ pub async fn test_pool() -> crate::db::DbPool {
 pub async fn connect_pg_schema(schema: &str) -> crate::db::DbPool {
     let base = pg_test_url();
     let admin = connect_pool(&base, 1).await.expect("admin pool");
-    crate::db_execute!(&admin, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE")).unwrap();
-    crate::db_execute!(&admin, &format!("CREATE SCHEMA {schema}")).unwrap();
+    sqlx::QueryBuilder::<sqlx::Postgres>::new("DROP SCHEMA IF EXISTS ")
+        .push(schema)
+        .push(" CASCADE")
+        .build()
+        .execute(&admin)
+        .await
+        .unwrap();
+    sqlx::QueryBuilder::<sqlx::Postgres>::new("CREATE SCHEMA ")
+        .push(schema)
+        .build()
+        .execute(&admin)
+        .await
+        .unwrap();
 
     let separator = if base.contains('?') { "&" } else { "?" };
     let scoped = format!("{base}{separator}options=-c%20search_path%3D{schema}");
@@ -90,7 +189,13 @@ pub async fn connect_pg_schema(schema: &str) -> crate::db::DbPool {
 #[cfg(test)]
 pub async fn drop_pg_schema(schema: &str) {
     let admin = connect_pool(&pg_test_url(), 1).await.expect("admin pool");
-    crate::db_execute!(&admin, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE")).unwrap();
+    sqlx::QueryBuilder::<sqlx::Postgres>::new("DROP SCHEMA IF EXISTS ")
+        .push(schema)
+        .push(" CASCADE")
+        .build()
+        .execute(&admin)
+        .await
+        .unwrap();
 }
 
 impl Database {
@@ -104,6 +209,32 @@ impl Database {
             .context("Failed to apply database migrations")?;
 
         Ok(Self { pool })
+    }
+}
+
+/// Inserts the `accounts` row a test fixture's owner id refers to.
+///
+/// Every `owner_id` / `account_id` column is a foreign key to `accounts(id)`,
+/// so a fixture that writes as `AccountId::from_seed("alice")` must create that
+/// account first. Idempotent, so a test can call it for each id it uses.
+#[cfg(test)]
+pub async fn seed_account(pool: &crate::db::DbPool, id: &crate::domain::accounts::AccountId) {
+    sqlx::query!(
+        "INSERT INTO accounts (id, display_name, status) VALUES ($1, 'test', 'active') \
+         ON CONFLICT DO NOTHING",
+        id.as_uuid()
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// [`seed_account`] for several fixture owners, named the way the test names
+/// them (`"@alice:a"`, `"acct_alice"`).
+#[cfg(test)]
+pub async fn seed_accounts(pool: &crate::db::DbPool, names: &[&str]) {
+    for name in names {
+        seed_account(pool, &crate::domain::accounts::AccountId::from_seed(name)).await;
     }
 }
 
@@ -166,7 +297,10 @@ mod tests {
 
         // `SELECT 1` is int4 on PostgreSQL and will not decode into i64 — the
         // same mismatch that made the schema use BIGINT everywhere.
-        let one: i64 = crate::db_scalar_one!(&pool, i64, "SELECT 1::bigint").unwrap();
+        let one: i64 = sqlx::query_scalar!(r#"SELECT 1::bigint AS "one!""#)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
         assert_eq!(one, 1, "the pool must actually answer a query");
     }
 
@@ -183,8 +317,14 @@ mod tests {
         let scoped = {
             let base = pg_test_url();
             let admin = connect_pool(&base, 1).await.unwrap();
-            crate::db_execute!(&admin, "DROP SCHEMA IF EXISTS boot_check CASCADE").unwrap();
-            crate::db_execute!(&admin, "CREATE SCHEMA boot_check").unwrap();
+            sqlx::query("DROP SCHEMA IF EXISTS boot_check CASCADE")
+                .execute(&admin)
+                .await
+                .unwrap();
+            sqlx::query("CREATE SCHEMA boot_check")
+                .execute(&admin)
+                .await
+                .unwrap();
             let sep = if base.contains('?') { "&" } else { "?" };
             format!("{base}{sep}options=-c%20search_path%3Dboot_check")
         };
@@ -193,22 +333,22 @@ mod tests {
             .await
             .expect("Database::connect must run every migration on PostgreSQL");
 
-        crate::db_execute!(
-            &db.pool,
-            "INSERT INTO accounts (id, display_name, status) VALUES (?, ?, ?)",
-            "acct_boot",
+        let boot_id = uuid::Uuid::new_v4();
+        sqlx::query!(
+            "INSERT INTO accounts (id, display_name, status) VALUES ($1, $2, $3)",
+            boot_id,
             "Evan",
             "unclaimed"
         )
+        .execute(&db.pool)
+        .await
         .expect("an ordinary write must work after boot");
 
-        let status: String = crate::db_scalar_one!(
-            &db.pool,
-            String,
-            "SELECT status FROM accounts WHERE id = ?",
-            "acct_boot"
-        )
-        .expect("an ordinary read must work after boot");
+        let status: String =
+            sqlx::query_scalar!("SELECT status FROM accounts WHERE id = $1", boot_id)
+                .fetch_one(&db.pool)
+                .await
+                .expect("an ordinary read must work after boot");
         assert_eq!(status, "unclaimed");
 
         crate::db::pool::drop_pg_schema("boot_check").await;

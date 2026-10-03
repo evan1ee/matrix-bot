@@ -6,21 +6,21 @@ use sqlx::PgPool;
 
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
+use crate::domain::events::SystemEvent;
 use crate::domain::habits::{
     Habit, HabitStatsSummary, HabitWithStatus, HeatmapDay, MAX_HABIT_NAME_LEN,
 };
-use crate::events::{EventBroadcaster, SystemEvent};
-use crate::infrastructure::postgres::repositories;
+use crate::domain::habits::{HabitFields, HabitUpdate};
+use crate::infrastructure::postgres::repositories::{self, outbox};
 
 #[derive(Clone)]
 pub struct HabitService {
     pool: PgPool,
-    events: EventBroadcaster,
 }
 
 impl HabitService {
-    pub fn new(pool: PgPool, events: EventBroadcaster) -> Self {
-        Self { pool, events }
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
     }
 
     pub async fn list_with_status(
@@ -70,8 +70,9 @@ impl HabitService {
         let category = category.unwrap_or("wellness");
         let target_days = target_days_per_week.unwrap_or(7).clamp(1, 7);
 
+        let mut tx = self.pool.begin().await?;
         let habit = repositories::habits::create_habit(
-            &self.pool,
+            &mut *tx,
             owner,
             trimmed_name,
             description,
@@ -81,7 +82,8 @@ impl HabitService {
         )
         .await?;
 
-        self.events.send(SystemEvent::HabitCreated(habit.clone()));
+        outbox::publish(&mut tx, &SystemEvent::HabitCreated(habit.clone())).await?;
+        tx.commit().await?;
         Ok(habit)
     }
 
@@ -89,13 +91,9 @@ impl HabitService {
         &self,
         owner: &AccountId,
         id: i64,
-        name: &str,
-        description: Option<&str>,
-        frequency: Option<&str>,
-        category: Option<&str>,
-        target_days_per_week: Option<i64>,
+        update: HabitUpdate<'_>,
     ) -> Result<Habit, AppError> {
-        let trimmed_name = name.trim();
+        let trimmed_name = update.name.trim();
         if trimmed_name.is_empty() {
             return Err(AppError::Validation(
                 "Habit name cannot be empty.".to_string(),
@@ -107,36 +105,42 @@ impl HabitService {
             ));
         }
 
-        let frequency = frequency.unwrap_or("daily");
-        let category = category.unwrap_or("wellness");
-        let target_days = target_days_per_week.unwrap_or(7).clamp(1, 7);
-
+        let mut tx = self.pool.begin().await?;
         let updated = repositories::habits::update_habit(
-            &self.pool,
+            &mut *tx,
             id,
             owner,
-            trimmed_name,
-            description,
-            frequency,
-            category,
-            target_days,
+            HabitFields {
+                name: trimmed_name,
+                description: update.description,
+                frequency: update.frequency.unwrap_or("daily"),
+                category: update.category.unwrap_or("wellness"),
+                target_days_per_week: update.target_days_per_week.unwrap_or(7).clamp(1, 7),
+            },
         )
         .await?;
 
         let habit = updated.ok_or_else(|| AppError::NotFound(format!("Habit #{id} not found")))?;
-        self.events.send(SystemEvent::HabitUpdated(habit.clone()));
+        outbox::publish(&mut tx, &SystemEvent::HabitUpdated(habit.clone())).await?;
+        tx.commit().await?;
         Ok(habit)
     }
 
     pub async fn delete_habit(&self, owner: &AccountId, id: i64) -> Result<(), AppError> {
-        let deleted = repositories::habits::delete_habit(&self.pool, id, owner).await?;
+        let mut tx = self.pool.begin().await?;
+        let deleted = repositories::habits::delete_habit(&mut *tx, id, owner).await?;
         if !deleted {
             return Err(AppError::NotFound(format!("Habit #{id} not found")));
         }
-        self.events.send(SystemEvent::HabitDeleted {
-            id,
-            owner_id: owner.to_string(),
-        });
+        outbox::publish(
+            &mut tx,
+            &SystemEvent::HabitDeleted {
+                id,
+                owner_id: *owner,
+            },
+        )
+        .await?;
+        tx.commit().await?;
         Ok(())
     }
 
@@ -151,15 +155,20 @@ impl HabitService {
             .await?
             .ok_or_else(|| AppError::NotFound(format!("Habit #{id} not found")))?;
 
+        let mut tx = self.pool.begin().await?;
         let completed =
-            repositories::habits::toggle_log(&self.pool, habit.id, owner, log_date, note).await?;
-
-        self.events.send(SystemEvent::HabitLogToggled {
-            habit_id: habit.id,
-            owner_id: owner.to_string(),
-            log_date: log_date.to_string(),
-            completed,
-        });
+            repositories::habits::toggle_log(&mut tx, habit.id, owner, log_date, note).await?;
+        outbox::publish(
+            &mut tx,
+            &SystemEvent::HabitLogToggled {
+                habit_id: habit.id,
+                owner_id: *owner,
+                log_date: log_date.to_string(),
+                completed,
+            },
+        )
+        .await?;
+        tx.commit().await?;
 
         Ok(completed)
     }
@@ -176,5 +185,70 @@ impl HabitService {
     ) -> Result<HabitStatsSummary, AppError> {
         let habits = self.list_with_status(owner, today_str).await?;
         Ok(HabitStatsSummary::from_habits(&habits))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::application::AppServices;
+    use crate::domain::accounts::AccountId;
+    use crate::infrastructure::postgres::repositories;
+
+    async fn setup(seed: &str) -> (sqlx::PgPool, AppServices, AccountId) {
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let owner = AccountId::from_seed(seed);
+        crate::db::pool::seed_account(&pool, &owner).await;
+        let services = AppServices::new(&pool);
+        (pool, services, owner)
+    }
+
+    /// Given a habit, When a check-in is toggled, Then HabitLogToggled is in the outbox.
+    #[tokio::test]
+    async fn toggle_log_writes_habit_log_toggled_to_the_outbox() {
+        let (pool, services, owner) = setup("habit_outbox_toggle").await;
+        let habit = services
+            .habits
+            .create_habit(&owner, "Read", None, None, None, None)
+            .await
+            .unwrap();
+
+        assert!(services
+            .habits
+            .toggle_log(&owner, habit.id, "2026-09-30", None)
+            .await
+            .unwrap());
+
+        assert_eq!(
+            repositories::outbox::event_types_for(&pool, &owner)
+                .await
+                .unwrap(),
+            vec!["HabitCreated", "HabitLogToggled"]
+        );
+    }
+
+    /// Given the outbox insert failing, When create runs, Then the habit row is
+    /// rolled back and the call errors.
+    #[tokio::test]
+    async fn a_failed_create_leaves_no_row_and_no_event() {
+        let (pool, services, owner) = setup("habit_outbox_atomic").await;
+        repositories::outbox::fail_every_publish(&pool).await;
+
+        assert!(services
+            .habits
+            .create_habit(&owner, "abc", None, None, None, None)
+            .await
+            .is_err());
+
+        assert!(services
+            .habits
+            .find_by_name(&owner, "abc")
+            .await
+            .unwrap()
+            .is_none());
+        assert!(repositories::outbox::event_types_for(&pool, &owner)
+            .await
+            .unwrap()
+            .is_empty());
     }
 }

@@ -6,7 +6,7 @@ use crate::domain::accounts::{AccountId, DeleteOutcome, StoredCredential};
 
 struct StoredCredentialRow {
     id: String,
-    account_id: String,
+    account_id: uuid::Uuid,
     passkey_json: String,
     label: String,
     created_at: Option<DateTime<Utc>>,
@@ -26,6 +26,16 @@ impl From<StoredCredentialRow> for StoredCredential {
     }
 }
 
+/// The storage key of a credential: its raw id as URL-safe, unpadded base64.
+///
+/// This is the encoding of `webauthn_credentials.id`, so it lives with the
+/// storage. Callers holding a raw id from an authenticator go through
+/// `AccountService::find_passkey_by_raw_id` rather than encoding it themselves.
+pub fn credential_id(raw: &[u8]) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(raw)
+}
+
 pub async fn add(
     conn: impl sqlx::PgExecutor<'_>,
     account_id: &AccountId,
@@ -37,7 +47,7 @@ pub async fn add(
         "INSERT INTO webauthn_credentials (id, account_id, passkey_json, label) \
          VALUES ($1, $2, $3, $4)",
         credential_id,
-        account_id.as_str(),
+        account_id.as_uuid(),
         passkey_json,
         label,
     )
@@ -54,7 +64,7 @@ pub async fn list_for_account(
         StoredCredentialRow,
         "SELECT id, account_id, passkey_json, label, created_at, last_used_at \
          FROM webauthn_credentials WHERE account_id = $1 ORDER BY created_at",
-        account_id.as_str(),
+        account_id.as_uuid(),
     )
     .fetch_all(conn)
     .await?;
@@ -102,7 +112,7 @@ pub async fn rename(
         "UPDATE webauthn_credentials SET label = $1 WHERE id = $2 AND account_id = $3",
         label,
         credential_id,
-        account_id.as_str(),
+        account_id.as_uuid(),
     )
     .execute(conn)
     .await?
@@ -116,7 +126,7 @@ pub async fn count_for_account(
 ) -> Result<i64, sqlx::Error> {
     let count = sqlx::query_scalar!(
         r#"SELECT COUNT(*) AS "count!" FROM webauthn_credentials WHERE account_id = $1"#,
-        account_id.as_str(),
+        account_id.as_uuid(),
     )
     .fetch_one(conn)
     .await?;
@@ -133,15 +143,16 @@ pub async fn delete(
     // If only one passkey remains and no Matrix link exists, prevent self-lockout
     let count = sqlx::query_scalar!(
         r#"SELECT COUNT(*) AS "count!" FROM webauthn_credentials WHERE account_id = $1"#,
-        account_id.as_str(),
+        account_id.as_uuid(),
     )
     .fetch_one(&mut *tx)
     .await?;
 
     if count <= 1 {
         let has_matrix_link = sqlx::query_scalar!(
-            r#"SELECT COUNT(*) AS "count!" FROM matrix_links WHERE account_id = $1"#,
-            account_id.as_str(),
+            r#"SELECT COUNT(*) AS "count!" FROM platform_identities
+               WHERE account_id = $1 AND platform = 'matrix'"#,
+            account_id.as_uuid(),
         )
         .fetch_one(&mut *tx)
         .await?
@@ -155,7 +166,7 @@ pub async fn delete(
     let affected = sqlx::query!(
         "DELETE FROM webauthn_credentials WHERE id = $1 AND account_id = $2",
         credential_id,
-        account_id.as_str(),
+        account_id.as_uuid(),
     )
     .execute(&mut *tx)
     .await?
@@ -183,7 +194,7 @@ pub async fn issue_enrollment_token(
         "INSERT INTO passkey_enrollment_tokens (token, account_id, created_at, expires_at) \
          VALUES ($1, $2, $3, $4)",
         token,
-        account_id.as_str(),
+        account_id.as_uuid(),
         now,
         expires_at,
     )
@@ -211,7 +222,7 @@ pub async fn validate_and_consume_enrollment_token(
     .fetch_optional(conn)
     .await?;
 
-    Ok(account_id.map(AccountId::new))
+    Ok(account_id.map(AccountId::from_uuid))
 }
 
 #[cfg(test)]
@@ -221,9 +232,174 @@ pub async fn count_enrollment_tokens(
 ) -> Result<i64, sqlx::Error> {
     let count = sqlx::query_scalar!(
         r#"SELECT COUNT(*) AS "count!" FROM passkey_enrollment_tokens WHERE account_id = $1"#,
-        account_id.as_str(),
+        account_id.as_uuid(),
     )
     .fetch_one(conn)
     .await?;
     Ok(count)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::DbPool;
+
+    async fn db() -> DbPool {
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(&pool, &["acct_a", "acct_b", "acct_matrix", "acct_primary"])
+            .await;
+        pool
+    }
+
+    /// Inserts a credential row directly. Building a real `Passkey` needs an
+    /// authenticator, so the shape of the blob is irrelevant to the ownership
+    /// and lockout rules under test here.
+    async fn add_raw(pool: &DbPool, id: &str, account_id: &str) {
+        let acct = AccountId::from_seed(account_id);
+        sqlx::query!(
+            "INSERT INTO accounts (id, display_name, status) VALUES ($1, 'test', 'active') ON CONFLICT DO NOTHING",
+            acct.as_uuid()
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+
+        sqlx::query!(
+            "INSERT INTO webauthn_credentials (id, account_id, passkey_json, label) \
+             VALUES ($1, $2, '{}', 'test key')",
+            id,
+            acct.as_uuid()
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    #[test]
+    fn a_credential_id_is_url_safe_unpadded_base64() {
+        assert_eq!(credential_id(&[0xfb, 0xff, 0xfe, 0x01]), "-__-AQ");
+        assert_eq!(credential_id(&[]), "");
+    }
+
+    #[tokio::test]
+    async fn test_credentials_are_listed_per_account() {
+        let pool = db().await;
+        add_raw(&pool, "cred_a1", "acct_a").await;
+        add_raw(&pool, "cred_a2", "acct_a").await;
+        add_raw(&pool, "cred_b1", "acct_b").await;
+
+        let mine = list_for_account(&pool, &AccountId::from_seed("acct_a"))
+            .await
+            .unwrap();
+        assert_eq!(mine.len(), 2);
+        assert!(mine
+            .iter()
+            .all(|c| c.account_id == AccountId::from_seed("acct_a")));
+    }
+
+    /// Removing the only passkey would lock the account out of itself.
+    #[tokio::test]
+    async fn test_the_last_passkey_cannot_be_deleted() {
+        let pool = db().await;
+        let acct = AccountId::from_seed("acct_a");
+        add_raw(&pool, "cred_only", "acct_a").await;
+
+        let outcome = delete(&pool, &acct, "cred_only").await.unwrap();
+        assert_eq!(outcome, DeleteOutcome::WouldLockOut);
+        assert_eq!(count_for_account(&pool, &acct).await.unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn test_a_passkey_can_be_deleted_once_a_second_exists() {
+        let pool = db().await;
+        let acct = AccountId::from_seed("acct_a");
+        add_raw(&pool, "cred_1", "acct_a").await;
+        add_raw(&pool, "cred_2", "acct_a").await;
+
+        let outcome = delete(&pool, &acct, "cred_1").await.unwrap();
+        assert_eq!(outcome, DeleteOutcome::Removed);
+        assert_eq!(count_for_account(&pool, &acct).await.unwrap(), 1);
+    }
+
+    /// A credential id is not a capability: knowing one must not let another
+    /// account delete or rename it.
+    #[tokio::test]
+    async fn test_one_account_cannot_touch_anothers_passkey() {
+        let pool = db().await;
+        add_raw(&pool, "cred_a1", "acct_a").await;
+        add_raw(&pool, "cred_a2", "acct_a").await;
+        add_raw(&pool, "cred_b1", "acct_b").await;
+        add_raw(&pool, "cred_b2", "acct_b").await;
+        let (a, b) = (
+            AccountId::from_seed("acct_a"),
+            AccountId::from_seed("acct_b"),
+        );
+
+        let outcome = delete(&pool, &b, "cred_a1").await.unwrap();
+        assert_eq!(outcome, DeleteOutcome::NotFound);
+        assert_eq!(count_for_account(&pool, &a).await.unwrap(), 2);
+
+        let renamed = rename(&pool, &b, "cred_a1", "stolen").await.unwrap();
+        assert!(
+            !renamed,
+            "renaming another account's passkey must not succeed"
+        );
+    }
+
+    /// A credential blob that will not parse stays listed, so the UI can show
+    /// it and offer removal; the service skips it when authenticating.
+    #[tokio::test]
+    async fn test_an_unreadable_credential_is_still_listed() {
+        let pool = db().await;
+        add_raw(&pool, "cred_broken", "acct_a").await;
+
+        let listed = list_for_account(&pool, &AccountId::from_seed("acct_a"))
+            .await
+            .unwrap();
+        assert_eq!(listed.len(), 1);
+        assert!(listed[0].passkey().is_none());
+    }
+
+    #[tokio::test]
+    async fn test_enrollment_token_issue_and_consumption() {
+        let pool = db().await;
+        let acct = AccountId::from_seed("acct_matrix");
+        let token = issue_enrollment_token(&pool, &acct, 10).await.unwrap();
+        assert!(!token.is_empty());
+
+        // First consumption succeeds
+        let consumed = validate_and_consume_enrollment_token(&pool, &token)
+            .await
+            .unwrap();
+        assert_eq!(consumed, Some(acct));
+
+        // Second consumption fails (single-use)
+        let second = validate_and_consume_enrollment_token(&pool, &token)
+            .await
+            .unwrap();
+        assert_eq!(second, None);
+    }
+
+    #[tokio::test]
+    async fn test_last_passkey_can_be_deleted_if_matrix_linked() {
+        let pool = db().await;
+        add_raw(&pool, "cred_only", "acct_primary").await;
+
+        // Insert matrix link
+        let acct = AccountId::from_seed("acct_primary");
+        sqlx::query!(
+            "INSERT INTO platform_identities (account_id, platform, platform_user_id) \
+             VALUES ($1, 'matrix', '@alice:matrix.org')",
+            acct.as_uuid()
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Deleting the only passkey succeeds because Matrix is primary identity
+        let outcome = delete(&pool, &acct, "cred_only").await.unwrap();
+        assert_eq!(outcome, DeleteOutcome::Removed);
+        assert_eq!(count_for_account(&pool, &acct).await.unwrap(), 0);
+    }
 }

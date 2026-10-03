@@ -37,8 +37,9 @@ jobs:
     # are already there and the OpenSSL headers are the only real addition.
     container: node:20-bookworm
 
-    # The full suite runs against a real PostgreSQL. See
-    # docs/POSTGRES_MIGRATION.md.
+    # The full suite runs against a real PostgreSQL. The job runs inside a
+    # container, so the service answers to its label (`postgres`), not
+    # 127.0.0.1; see the README's Development section.
     services:
       postgres:
         image: postgres:18

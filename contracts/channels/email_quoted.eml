@@ -1,0 +1,20 @@
+Authentication-Results: mx.example.com;
+    dmarc=pass header.from=example.com
+From: Charlie <charlie@example.com>
+To: bot@example.com
+Subject: Re: Status update
+Message-ID: <msg-quoted-1111@example.com>
+In-Reply-To: <bot-reply-0000@example.com>
+References: <bot-reply-0000@example.com>
+Date: Fri, 03 Oct 2026 10:03:00 +0000
+Content-Type: text/plain; charset=utf-8
+
+todo list
+
+On Fri, Oct 3, 2026 at 9:59 AM Bot <bot@example.com> wrote:
+> Here are your tasks:
+> 1. Buy milk
+
+-- 
+Charlie's Phone
+Sent from my mobile

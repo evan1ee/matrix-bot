@@ -1,14 +1,15 @@
 //! Matrix bot module for Bookmarks.
 
 use async_trait::async_trait;
+
+use crate::interface::channels::message::Reply;
 use reqwest::Client;
 
 use crate::application::AppServices;
 use crate::db::Database;
 use crate::domain::bookmarks::BookmarkQuery;
-use crate::events::EventBroadcaster;
 use crate::infrastructure::web::fetch_and_extract_metadata;
-use crate::modules::{BotModule, CommandContext, CommandHelp};
+use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 use crate::utils::html::html_escape;
 
 pub struct BookmarksModule {
@@ -26,6 +27,20 @@ impl BookmarksModule {
 impl Default for BookmarksModule {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+impl BookmarksModule {
+    /// The command's HTML answer; `handle_command` wraps it in a [`Reply`].
+    async fn respond(&self, ctx: &CommandContext, services: &AppServices) -> Option<String> {
+        match ctx.command.as_str() {
+            "save" => Some(handle_save_command(ctx, services, Some(&self.http_client)).await),
+            "bookmarks" | "reading" => Some(handle_list_command(ctx, services).await),
+            "bookmark" => {
+                Some(handle_bookmark_subcommands(ctx, services, Some(&self.http_client)).await)
+            }
+            _ => None,
+        }
     }
 }
 
@@ -70,16 +85,8 @@ impl BotModule for BookmarksModule {
         ctx: &CommandContext,
         services: &AppServices,
         _db: &Database,
-        _broadcaster: Option<&EventBroadcaster>,
-    ) -> Option<String> {
-        match ctx.command.as_str() {
-            "save" => Some(handle_save_command(ctx, services, Some(&self.http_client)).await),
-            "bookmarks" | "reading" => Some(handle_list_command(ctx, services).await),
-            "bookmark" => {
-                Some(handle_bookmark_subcommands(ctx, services, Some(&self.http_client)).await)
-            }
-            _ => None,
-        }
+    ) -> Option<Reply> {
+        self.respond(ctx, services).await.map(Reply::from)
     }
 }
 
@@ -286,12 +293,12 @@ mod tests {
     async fn setup_db() -> (AppServices, crate::domain::accounts::AccountId) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        let owner =
-            crate::accounts::AccountRepository::resolve_or_provision(&pool, "@alice:mbm.one")
-                .await
-                .unwrap();
+        let owner = AppServices::new(&pool)
+            .identity
+            .provision_matrix_for_test("@alice:mbm.one")
+            .await;
         let services = AppServices::new(&pool);
-        (services, crate::domain::accounts::AccountId::new(owner))
+        (services, owner)
     }
 
     #[tokio::test]
@@ -299,17 +306,19 @@ mod tests {
         let (services, owner) = setup_db().await;
 
         let ctx = CommandContext {
-            room_id: "!room:test".to_string(),
-            owner_id: owner.clone(),
-            sender_mxid: "@alice:mbm.one".to_string(),
-            sender_name: "Alice".to_string(),
+            conversation: crate::domain::channels::ConversationAddress::Matrix(
+                "!room:test".to_string(),
+            ),
+            owner_id: owner,
+            sender: crate::interface::chat::test_support::sender("@alice:mbm.one", "Alice"),
             command: "save".to_string(),
             raw_args: "https://example.com/rust-tips rust,coding".to_string(),
             full_body: "!save https://example.com/rust-tips rust,coding".to_string(),
             is_direct: true,
             is_mentioned: false,
             quoted: None,
-            stage_reporter: None,
+            progress: None,
+            outbound: None,
         };
 
         let reply = handle_save_command(&ctx, &services, None).await;
@@ -317,17 +326,19 @@ mod tests {
         assert!(reply.contains("example.com"));
 
         let list_ctx = CommandContext {
-            room_id: "!room:test".to_string(),
-            owner_id: owner.clone(),
-            sender_mxid: "@alice:mbm.one".to_string(),
-            sender_name: "Alice".to_string(),
+            conversation: crate::domain::channels::ConversationAddress::Matrix(
+                "!room:test".to_string(),
+            ),
+            owner_id: owner,
+            sender: crate::interface::chat::test_support::sender("@alice:mbm.one", "Alice"),
             command: "bookmarks".to_string(),
             raw_args: String::new(),
             full_body: "!bookmarks".to_string(),
             is_direct: true,
             is_mentioned: false,
             quoted: None,
-            stage_reporter: None,
+            progress: None,
+            outbound: None,
         };
 
         let list_reply = handle_list_command(&list_ctx, &services).await;
@@ -336,34 +347,38 @@ mod tests {
 
         // Toggle fav
         let fav_ctx = CommandContext {
-            room_id: "!room:test".to_string(),
-            owner_id: owner.clone(),
-            sender_mxid: "@alice:mbm.one".to_string(),
-            sender_name: "Alice".to_string(),
+            conversation: crate::domain::channels::ConversationAddress::Matrix(
+                "!room:test".to_string(),
+            ),
+            owner_id: owner,
+            sender: crate::interface::chat::test_support::sender("@alice:mbm.one", "Alice"),
             command: "bookmark".to_string(),
             raw_args: "fav 1".to_string(),
             full_body: "!bookmark fav 1".to_string(),
             is_direct: true,
             is_mentioned: false,
             quoted: None,
-            stage_reporter: None,
+            progress: None,
+            outbound: None,
         };
         let fav_reply = handle_bookmark_subcommands(&fav_ctx, &services, None).await;
         assert!(fav_reply.contains("Starred ⭐"));
 
         // Toggle archive
         let arch_ctx = CommandContext {
-            room_id: "!room:test".to_string(),
-            owner_id: owner.clone(),
-            sender_mxid: "@alice:mbm.one".to_string(),
-            sender_name: "Alice".to_string(),
+            conversation: crate::domain::channels::ConversationAddress::Matrix(
+                "!room:test".to_string(),
+            ),
+            owner_id: owner,
+            sender: crate::interface::chat::test_support::sender("@alice:mbm.one", "Alice"),
             command: "bookmark".to_string(),
             raw_args: "archive 1".to_string(),
             full_body: "!bookmark archive 1".to_string(),
             is_direct: true,
             is_mentioned: false,
             quoted: None,
-            stage_reporter: None,
+            progress: None,
+            outbound: None,
         };
         let arch_reply = handle_bookmark_subcommands(&arch_ctx, &services, None).await;
         assert!(arch_reply.contains("Archived 📦"));

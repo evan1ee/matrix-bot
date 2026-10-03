@@ -2,12 +2,12 @@
 
 use async_trait::async_trait;
 
+use crate::interface::channels::message::Reply;
+
 use crate::db::Database;
-use crate::events::EventBroadcaster;
-use crate::modules::{BotModule, CommandContext, CommandHelp, ModuleContext};
+use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 
 pub mod handler;
-pub mod scheduler;
 
 pub struct ReminderModule;
 
@@ -55,30 +55,25 @@ impl BotModule for ReminderModule {
         ctx: &CommandContext,
         services: &crate::application::AppServices,
         _db: &Database,
-        _broadcaster: Option<&EventBroadcaster>,
-    ) -> Option<String> {
-        handler::handle_reminder_command(&services.reminders, &services.settings, ctx).await
-    }
-
-    async fn spawn_background_workers(
-        &self,
-        ctx: &ModuleContext,
-    ) -> Vec<tokio::task::JoinHandle<()>> {
-        vec![scheduler::start_reminder_scheduler(ctx.clone())]
+    ) -> Option<Reply> {
+        handler::handle_reminder_command(&services.reminders, &services.settings, ctx)
+            .await
+            .map(Reply::from)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::modules::CommandContext;
+    use crate::interface::chat::CommandContext;
 
     fn ctx(body: &str) -> CommandContext {
         CommandContext {
-            room_id: "!room:a".to_string(),
-            sender_mxid: "@tester:x".to_string(),
-            owner_id: crate::domain::accounts::AccountId::new("@alice:a"),
-            sender_name: "alice".to_string(),
+            conversation: crate::domain::channels::ConversationAddress::Matrix(
+                "!room:a".to_string(),
+            ),
+            owner_id: crate::domain::accounts::AccountId::from_seed("@alice:a"),
+            sender: crate::interface::chat::test_support::sender("@tester:x", "alice"),
             command: body
                 .split_whitespace()
                 .next()
@@ -90,7 +85,8 @@ mod tests {
             is_direct: true,
             is_mentioned: false,
             quoted: None,
-            stage_reporter: None,
+            progress: None,
+            outbound: None,
         }
     }
 
@@ -120,8 +116,7 @@ mod tests {
             .handle_command(
                 &ctx("!remind list"),
                 &crate::application::AppServices::new(&db.pool),
-                &db,
-                None
+                &db
             )
             .await
             .is_some());
@@ -129,8 +124,7 @@ mod tests {
             .handle_command(
                 &ctx("!todo list"),
                 &crate::application::AppServices::new(&db.pool),
-                &db,
-                None
+                &db
             )
             .await
             .is_none());
@@ -138,8 +132,7 @@ mod tests {
             .handle_command(
                 &ctx("!expense list"),
                 &crate::application::AppServices::new(&db.pool),
-                &db,
-                None
+                &db
             )
             .await
             .is_none());

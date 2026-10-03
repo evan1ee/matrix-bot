@@ -55,7 +55,7 @@ pub async fn fetch_and_extract_metadata(
             if let Ok(parsed) = Url::parse(target_url) {
                 let path = parsed.path().trim_matches('/');
                 if !path.is_empty() {
-                    let segment = path.split('/').last().unwrap_or(path);
+                    let segment = path.split('/').next_back().unwrap_or(path);
                     return segment.replace(['-', '_'], " ");
                 }
             }

@@ -4,8 +4,8 @@ use axum::{
     http::{header, request::Parts, Method},
 };
 
-use crate::accounts::Credential;
 use crate::error::ApiError;
+use crate::interface::http::auth::credential::parse_credential;
 use crate::interface::http::auth::types::{ApiState, AuthUser};
 
 /// Whether a request method changes state.
@@ -24,7 +24,7 @@ where
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let api_state = ApiState::from_ref(state);
 
-        let credential = Credential::parse(&parts.headers)
+        let credential = parse_credential(&parts.headers)
             .ok_or_else(|| ApiError::unauthorized("Not signed in"))?;
 
         // A session cookie rides along automatically, so a cross-site request
@@ -56,12 +56,16 @@ where
             }
         }
 
-        crate::accounts::resolve_credential(&api_state.db.pool, &credential)
+        api_state
+            .services
+            .accounts
+            .resolve_credential(&credential)
             .await
             .map_err(|err| {
                 tracing::error!("Could not read the session: {:?}", err);
                 ApiError::internal("Could not read the session")
             })?
+            .map(AuthUser::from)
             .ok_or_else(|| ApiError::unauthorized("That session has expired"))
     }
 }

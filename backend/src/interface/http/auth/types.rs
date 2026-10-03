@@ -53,7 +53,7 @@ impl AuthUser {
     /// to reach a sensitive action however recently it authenticated.
     pub fn may_perform_sensitive_action(&self, now: chrono::DateTime<chrono::Utc>) -> bool {
         let recent = now.signed_duration_since(self.last_verified_at)
-            < chrono::Duration::minutes(crate::accounts::session::STEP_UP_WINDOW_MINUTES);
+            < chrono::Duration::minutes(crate::domain::accounts::STEP_UP_WINDOW_MINUTES);
         let restricted = self.restricted_until.is_some_and(|until| now < until);
 
         recent && !restricted
@@ -64,12 +64,29 @@ impl AuthUser {
     pub fn for_account(account_id: impl Into<AccountId>) -> Self {
         let account_id = account_id.into();
         Self {
-            display_name: account_id.trim_start_matches("acct_").to_string(),
+            display_name: account_id
+                .to_string()
+                .trim_start_matches("acct_")
+                .to_string(),
             account_id,
             session_id_hash: "test-session".to_string(),
             last_verified_at: chrono::Utc::now(),
             restricted_until: None,
         }
+    }
+
+    /// Test-only: [`Self::for_account`] for a fixture named by a label such as
+    /// `"acct_alice"`. The id is derived with `AccountId::from_seed`, so equal
+    /// labels give equal ids and no label is ever parsed as a real id.
+    #[cfg(test)]
+    pub fn for_seed(seed: &str) -> Self {
+        Self::for_account(AccountId::from_seed(seed))
+    }
+
+    /// Test-only: [`Self::named`] with the account derived from a label.
+    #[cfg(test)]
+    pub fn named_seed(display_name: impl Into<String>, seed: &str) -> Self {
+        Self::named(display_name, AccountId::from_seed(seed))
     }
 
     /// Test-only: a caller whose display name is set independently of the
@@ -83,13 +100,26 @@ impl AuthUser {
     }
 }
 
+impl From<crate::domain::accounts::Principal> for AuthUser {
+    fn from(principal: crate::domain::accounts::Principal) -> Self {
+        Self {
+            account_id: principal.account_id,
+            display_name: principal.display_name,
+            session_id_hash: principal.session_id_hash,
+            last_verified_at: principal.last_verified_at,
+            restricted_until: principal.restricted_until,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct ApiState {
     pub db: Database,
     /// Application services, built once in `app.rs`. Handlers call these
     /// instead of reaching repositories or the pool.
     pub services: crate::application::AppServices,
-    pub broadcaster: crate::events::EventBroadcaster,
+    /// This instance's SSE subscribers; the only path events take to a browser.
+    pub hub: crate::events::Hub,
     pub registration_secret: Option<String>,
     pub registration_open: bool,
     pub homeserver: String,
@@ -126,25 +156,20 @@ pub struct ApiState {
     /// The origin the SPA is served from, compared against `Origin` on every
     /// state-changing request.
     pub webauthn_origin: String,
-    /// Accounts with a merge awaiting confirmation, `into -> from`.
-    ///
-    /// Written when `!link` finds the MXID already attached to an unclaimed
-    /// account holding data, and read when the web UI asks what it should be
-    /// showing. In memory rather than a table because it is a handoff between
-    /// two halves of one flow: a stale entry should evaporate on restart rather
-    /// than linger as a standing authorisation to absorb an account.
-    pub pending_merges: std::sync::Arc<tokio::sync::RwLock<HashMap<String, String>>>,
     /// When the Matrix sync loop last completed a sync, read by `/health/ready`.
     pub sync_health: crate::interface::channels::matrix::sync_health::SyncHealth,
     /// The API server's shutdown token. Long-lived responses (SSE) end on it,
     /// or graceful shutdown would wait on every open browser tab.
     pub shutdown: tokio_util::sync::CancellationToken,
-    pub ocr_config: crate::modules::ocr::OcrConfig,
+    pub ocr_config: crate::interface::chat::ocr::OcrConfig,
     pub ocr: crate::infrastructure::inference::ocr::OcrClient,
-    pub voice_config: crate::modules::voice::VoiceConfig,
+    pub voice_config: crate::interface::chat::voice::VoiceConfig,
     pub stt: crate::infrastructure::inference::stt::SttClient,
     /// AI provider settings resolved once at boot. See `crate::config::AiEnvConfig`.
     pub ai: crate::config::AiEnvConfig,
+    /// The Telegram update queue, present only in webhook mode; `None` makes
+    /// `POST /api/webhooks/telegram` a 404.
+    pub telegram: Option<crate::interface::channels::telegram::ingress::TelegramIngress>,
 }
 
 /// A WebAuthn ceremony in flight.
@@ -155,8 +180,17 @@ pub enum Ceremony {
     /// handle and has to be inside the challenge, but the row is not written
     /// until `finish` — so an abandoned registration leaves nothing behind.
     Registration {
-        account_id: String,
+        account_id: crate::domain::accounts::AccountId,
         display_name: String,
+        state: webauthn_rs::prelude::PasskeyRegistration,
+    },
+    /// Registering a brand-new account's first passkey from a link token
+    /// (`/link/signup/*`). Bound to the token's hash so a challenge started
+    /// for one token cannot finish another.
+    LinkSignup {
+        account_id: crate::domain::accounts::AccountId,
+        display_name: String,
+        token_hash: String,
         state: webauthn_rs::prelude::PasskeyRegistration,
     },
     /// A usernameless login. Nobody is identified yet; the credential itself
@@ -182,15 +216,15 @@ impl ApiState {
     #[cfg(test)]
     pub fn new(
         db: Database,
-        broadcaster: crate::events::EventBroadcaster,
         registration_secret: Option<String>,
         homeserver: String,
         http_client: reqwest::Client,
     ) -> Self {
+        let services = crate::application::AppServices::new(&db.pool);
         Self {
-            services: crate::application::AppServices::with_events(&db.pool, &broadcaster),
+            hub: crate::events::Hub::new(services.outbox.clone(), 64),
+            services,
             db,
-            broadcaster,
             registration_secret,
             registration_open: true,
             homeserver,
@@ -206,18 +240,18 @@ impl ApiState {
             cookie_secure: false,
             trust_forwarded_for: false,
             webauthn_origin: "http://localhost:8080".to_string(),
-            pending_merges: std::sync::Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             sync_health: crate::interface::channels::matrix::sync_health::SyncHealth::default(),
             shutdown: tokio_util::sync::CancellationToken::new(),
-            ocr_config: crate::modules::ocr::OcrConfig::default(),
+            ocr_config: crate::interface::chat::ocr::OcrConfig::default(),
             ocr: crate::infrastructure::inference::ocr::OcrClient::new(None),
-            voice_config: crate::modules::voice::VoiceConfig::default(),
+            voice_config: crate::interface::chat::voice::VoiceConfig::default(),
             stt: crate::infrastructure::inference::stt::SttClient::new(
                 None,
                 None,
                 "sensevoice-small".to_string(),
             ),
             ai: crate::config::AiEnvConfig::default(),
+            telegram: None,
         }
     }
 
@@ -232,7 +266,7 @@ impl ApiState {
         config: &crate::config::Config,
         db: Database,
         services: crate::application::AppServices,
-        broadcaster: crate::events::EventBroadcaster,
+        hub: crate::events::Hub,
         handles: crate::interface::channels::matrix::handles::BotHandles,
         shutdown: tokio_util::sync::CancellationToken,
     ) -> anyhow::Result<Self> {
@@ -257,7 +291,7 @@ impl ApiState {
         Ok(Self {
             db,
             services,
-            broadcaster,
+            hub,
             registration_secret: config.registration_secret.clone(),
             registration_open: config.registration_open,
             homeserver: config.homeserver.clone(),
@@ -270,15 +304,14 @@ impl ApiState {
             cookie_secure: config.cookie_secure,
             trust_forwarded_for: config.trust_forwarded_for,
             webauthn_origin: config.webauthn_origin.trim_end_matches('/').to_string(),
-            pending_merges: handles.pending_merges,
             sync_health: handles.sync_health,
             shutdown,
-            ocr_config: crate::modules::ocr::OcrConfig {
+            ocr_config: crate::interface::chat::ocr::OcrConfig {
                 enabled: config.ocr_enabled,
                 base_url: config.ocr_base_url.clone(),
             },
             ocr: crate::infrastructure::inference::ocr::OcrClient::new(config.ocr_base_url.clone()),
-            voice_config: crate::modules::voice::VoiceConfig {
+            voice_config: crate::interface::chat::voice::VoiceConfig {
                 enabled: config.voice_enabled,
                 language: config.voice_language.clone(),
             },
@@ -288,6 +321,8 @@ impl ApiState {
                 config.stt_model.clone(),
             ),
             ai: config.ai.clone(),
+            // start_api_server hands the adapter's ingress in after from_config.
+            telegram: None,
         })
     }
 
@@ -302,8 +337,8 @@ impl ApiState {
     #[cfg(test)]
     pub fn with_ocr_and_voice(
         mut self,
-        ocr_config: crate::modules::ocr::OcrConfig,
-        voice_config: crate::modules::voice::VoiceConfig,
+        ocr_config: crate::interface::chat::ocr::OcrConfig,
+        voice_config: crate::interface::chat::voice::VoiceConfig,
     ) -> Self {
         self.ocr_config = ocr_config;
         self.voice_config = voice_config;
@@ -451,11 +486,17 @@ mod tests {
             registration_secret: None,
             registration_open: false,
             db_max_connections: 10,
+            job_workers: 4,
+            job_worker_host: "test".into(),
             cors_allowed_origins: Vec::new(),
             webauthn_rp_id: "bot.example.com".to_string(),
             webauthn_origin: "https://bot.example.com".to_string(),
             cookie_secure: true,
             web_url: "https://bot.example.com".to_string(),
+            link_signup_allowlist: Default::default(),
+            discord: None,
+            telegram: None,
+            email: None,
             ocr_enabled: false,
             ocr_base_url: None,
             voice_enabled: false,
@@ -487,7 +528,7 @@ mod tests {
             &config,
             crate::db::Database { pool: pool.clone() },
             crate::application::AppServices::new(&pool),
-            crate::events::EventBroadcaster::default(),
+            crate::events::Hub::new(crate::application::AppServices::new(&pool).outbox, 8),
             crate::interface::channels::matrix::handles::BotHandles::default(),
             tokio_util::sync::CancellationToken::new(),
         )
@@ -535,7 +576,7 @@ mod tests {
             &config,
             crate::db::Database { pool: pool.clone() },
             crate::application::AppServices::new(&pool),
-            crate::events::EventBroadcaster::default(),
+            crate::events::Hub::new(crate::application::AppServices::new(&pool).outbox, 8,),
             crate::interface::channels::matrix::handles::BotHandles::default(),
             tokio_util::sync::CancellationToken::new(),
         )

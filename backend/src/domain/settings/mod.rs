@@ -22,9 +22,10 @@
 //! caller passed in. A value read back from storage is accepted as-is (an
 //! unparseable stored timezone degrades to UTC in `tz()`, rather than being
 //! rejected). AI tools read the caller's settings and build a modified copy
-//! through `SettingsService::modify` (`modules/ai/tools/settings.rs`) — never
+//! through `SettingsService::modify` (`llm/tools/settings.rs`) — never
 //! straight from unvalidated model output.
 
+use chrono::{DateTime, NaiveDate, Timelike, Utc};
 use chrono_tz::Tz;
 use serde::Serialize;
 
@@ -87,7 +88,7 @@ pub struct UserSettings {
     /// Scheduled delivery time in 24-hour HH:MM format (e.g. 07:00).
     pub briefing_time: String,
     /// The voice `!say` speaks in, in whatever the configured provider calls
-    /// it. `None` means no preference, and `modules::tts` falls back to the
+    /// it. `None` means no preference, and `interface::chat::tts` falls back to the
     /// operator's `TTS_VOICE`: the same "no row until you change something"
     /// convention `dev_room_id` uses. `Some("0")` is a real Kokoro voice, not
     /// a stand-in for "unset". Shape-checked by `parse_tts_voice` on write.
@@ -201,7 +202,7 @@ pub fn parse_timezone(raw: &str) -> Option<Tz> {
 
 /// Normalises a currency code, rejecting anything that is not three letters.
 ///
-/// Deliberately not a call into `modules::finance::money`: that module's
+/// Deliberately not a call into `domain::finance::money`: that module's
 /// `normalise_currency` shares this exact rule, but reaching into finance for
 /// three lines of validation would make settings depend on a feature that
 /// depends on settings for nothing in return — see the Task 2 report for the
@@ -225,6 +226,31 @@ pub fn parse_max_history_turns(turns: i64) -> Result<i64, SettingsError> {
             max: MAX_MAX_HISTORY_TURNS,
         })
     }
+}
+
+/// The local date a briefing is due for at `now`, or None: enabled, local
+/// time within [briefing_time, briefing_time + 5 min) of the same hour, and
+/// not already sent that local day. Unparseable time -> 07:00 (frozen).
+///
+/// Frozen quirk kept from the old loop: the window is compared on the minute
+/// only, so it does not wrap past the hour (a 07:58 briefing is due at
+/// 07:58-07:59, not 08:00-08:02).
+pub fn briefing_due_date(
+    settings: &UserSettings,
+    now: DateTime<Utc>,
+    last_sent: Option<&str>,
+) -> Option<NaiveDate> {
+    if !settings.briefing_enabled {
+        return None;
+    }
+    let (hour, minute) = parse_briefing_time(&settings.briefing_time).unwrap_or((7, 0));
+    let local = now.with_timezone(&settings.tz());
+    let today = local.date_naive();
+    if last_sent == Some(today.format("%Y-%m-%d").to_string().as_str()) {
+        return None;
+    }
+    let in_window = local.hour() == hour && local.minute() >= minute && local.minute() < minute + 5;
+    in_window.then_some(today)
 }
 
 /// Validates and parses a 24-hour time string "HH:MM" -> (hour, minute).
@@ -455,6 +481,79 @@ mod tests {
         assert_eq!(
             err,
             SettingsError::HistoryTurnsOutOfRange { min: 1, max: 100 }
+        );
+    }
+
+    fn at(h: u32, m: u32) -> DateTime<Utc> {
+        chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 9, 29, h, m, 0).unwrap()
+    }
+
+    fn enabled(time: &str) -> UserSettings {
+        UserSettings {
+            briefing_enabled: true,
+            briefing_time: time.into(),
+            timezone: "UTC".into(),
+            ..Default::default()
+        }
+    }
+
+    fn day() -> NaiveDate {
+        NaiveDate::from_ymd_opt(2026, 9, 29).unwrap()
+    }
+
+    #[test]
+    fn due_inside_the_five_minute_window() {
+        assert_eq!(
+            briefing_due_date(&enabled("07:00"), at(7, 0), None),
+            Some(day())
+        );
+        assert_eq!(
+            briefing_due_date(&enabled("07:00"), at(7, 4), None),
+            Some(day())
+        );
+        assert_eq!(briefing_due_date(&enabled("07:00"), at(7, 5), None), None);
+        assert_eq!(briefing_due_date(&enabled("07:00"), at(6, 59), None), None);
+    }
+
+    #[test]
+    fn not_due_when_disabled_or_already_sent_today() {
+        let mut off = enabled("07:00");
+        off.briefing_enabled = false;
+        assert_eq!(briefing_due_date(&off, at(7, 1), None), None);
+        assert_eq!(
+            briefing_due_date(&enabled("07:00"), at(7, 1), Some("2026-09-29")),
+            None
+        );
+        assert_eq!(
+            briefing_due_date(&enabled("07:00"), at(7, 1), Some("2026-09-28")),
+            Some(day())
+        );
+    }
+
+    #[test]
+    fn uses_the_users_local_date_and_hour() {
+        let mut s = enabled("07:00");
+        s.timezone = "Asia/Shanghai".into();
+        // 07:02 in Shanghai on the 29th is 23:02 UTC on the 28th.
+        let now = chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 9, 28, 23, 2, 0).unwrap();
+        assert_eq!(briefing_due_date(&s, now, None), Some(day()));
+    }
+
+    /// Frozen: the window does not wrap past the hour (07:58 -> only :58-:59).
+    #[test]
+    fn the_window_does_not_wrap_the_hour() {
+        assert_eq!(briefing_due_date(&enabled("07:58"), at(8, 1), None), None);
+        assert_eq!(
+            briefing_due_date(&enabled("07:58"), at(7, 59), None),
+            Some(day())
+        );
+    }
+
+    #[test]
+    fn an_unparseable_time_falls_back_to_seven() {
+        assert_eq!(
+            briefing_due_date(&enabled("bogus"), at(7, 2), None),
+            Some(day())
         );
     }
 }

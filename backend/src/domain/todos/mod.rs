@@ -170,7 +170,7 @@ mod tests {
         let todo = TodoItem {
             id: 1,
             room_id: "!r:matrix.org".to_string(),
-            owner_id: AccountId::new("acct_1"),
+            owner_id: AccountId::from_seed("acct_1"),
             sender_name: "alice".to_string(),
             text: "Buy groceries".to_string(),
             priority: TodoPriority::Medium,

@@ -52,10 +52,10 @@ impl MergeService {
         let mut discarded = 0i64;
 
         for &table in OWNED_TABLES {
-            let updated = repo_merge::move_rows(&mut **tx, table, "owner_id", from, into).await?;
+            let updated = repo_merge::move_rows(tx, table, "owner_id", from, into).await?;
             moved.set(table, updated);
 
-            let leftover = repo_merge::delete_leftovers(&mut **tx, table, "owner_id", from).await?;
+            let leftover = repo_merge::delete_leftovers(tx, table, "owner_id", from).await?;
             discarded += leftover;
         }
 
@@ -63,24 +63,25 @@ impl MergeService {
         // trigger and every hash is bound to the owner, so it needs the routine
         // that knows how to rebuild it.
         let ledger_rows =
-            crate::modules::portfolio::audit::absorb_ledger(&mut *tx, from.as_str(), into.as_str())
-                .await?;
+            crate::infrastructure::postgres::repositories::portfolio::audit::absorb_ledger(
+                tx, from, into,
+            )
+            .await?;
         moved.set("portfolio_audit_log", ledger_rows);
 
         // Anything else pointing at the absorbed account follows it
         for &table in ACCOUNT_ID_FOLLOWS {
-            repo_merge::move_rows(&mut **tx, table, "account_id", from, into).await?;
-            let leftover =
-                repo_merge::delete_leftovers(&mut **tx, table, "account_id", from).await?;
+            repo_merge::move_rows(tx, table, "account_id", from, into).await?;
+            let leftover = repo_merge::delete_leftovers(tx, table, "account_id", from).await?;
             discarded += leftover;
         }
 
         // Credentials and ceremonies do NOT follow
         for &table in ACCOUNT_ID_DISCARDED {
-            repo_merge::discard_account_table(&mut **tx, table, from).await?;
+            repo_merge::discard_account_table(tx, table, from).await?;
         }
 
-        repo_merge::delete_account(&mut **tx, from).await?;
+        repo_merge::delete_account(tx, from).await?;
 
         Ok(MergeOutcome { moved, discarded })
     }
@@ -90,8 +91,14 @@ impl MergeService {
 mod tests {
     use super::*;
     use crate::domain::accounts::{STATUS_ACTIVE, STATUS_UNCLAIMED};
+    use crate::domain::channels::{Channel, PlatformIdentity};
     use crate::infrastructure::postgres::repositories::accounts::core as repo_core;
     use crate::infrastructure::postgres::repositories::accounts::sessions as repo_sessions;
+    use crate::infrastructure::postgres::repositories::identities;
+
+    fn evan() -> PlatformIdentity {
+        PlatformIdentity::matrix("@evan:mbm.one").unwrap()
+    }
 
     async fn db() -> PgPool {
         let pool = crate::db::pool::test_pool().await;
@@ -103,7 +110,7 @@ mod tests {
         sqlx::query!(
             "INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed) \
              VALUES ('!r:x', $1, 'someone', $2, 'medium', FALSE)",
-            owner.as_str(),
+            owner.as_uuid(),
             text
         )
         .execute(pool)
@@ -111,11 +118,15 @@ mod tests {
         .unwrap();
     }
 
-    async fn owner_of(pool: &PgPool, text: &str) -> String {
-        sqlx::query_scalar!("SELECT owner_id FROM todos WHERE text = $1", text)
-            .fetch_one(pool)
-            .await
-            .unwrap()
+    async fn owner_of(pool: &PgPool, text: &str) -> AccountId {
+        let u: uuid::Uuid = sqlx::query_scalar!(
+            r#"SELECT owner_id AS "owner_id: uuid::Uuid" FROM todos WHERE text = $1"#,
+            text
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap();
+        AccountId::from_uuid(u)
     }
 
     #[tokio::test]
@@ -129,7 +140,7 @@ mod tests {
         add_todo(&pool, &from, "two").await;
         sqlx::query!(
             "INSERT INTO user_settings (owner_id, timezone, currency) VALUES ($1, 'UTC', 'USD')",
-            from.as_str()
+            from.as_uuid()
         )
         .execute(&pool)
         .await
@@ -159,8 +170,8 @@ mod tests {
         assert_eq!(outcome.moved.todos, 1);
         assert_eq!(outcome.discarded, 0);
 
-        assert_eq!(owner_of(&pool, "from matrix").await, into.as_str());
-        assert_eq!(owner_of(&pool, "from the web").await, into.as_str());
+        assert_eq!(owner_of(&pool, "from matrix").await, into);
+        assert_eq!(owner_of(&pool, "from the web").await, into);
 
         assert!(repo_core::find(&pool, &from).await.unwrap().is_none());
         assert!(repo_core::find(&pool, &into).await.unwrap().is_some());
@@ -169,7 +180,7 @@ mod tests {
     #[tokio::test]
     async fn test_merge_carries_the_matrix_link_over() {
         let pool = db().await;
-        let from = repo_core::resolve_or_provision(&pool, "@evan:mbm.one")
+        let from = identities::resolve_or_provision(&pool, &evan())
             .await
             .unwrap();
         let into = repo_core::create(&pool, "web", STATUS_ACTIVE)
@@ -179,13 +190,13 @@ mod tests {
         MergeService::merge(&pool, &from, &into).await.unwrap();
 
         assert_eq!(
-            repo_core::find_by_mxid(&pool, "@evan:mbm.one")
-                .await
-                .unwrap(),
-            Some(into.clone())
+            identities::find_account(&pool, &evan()).await.unwrap(),
+            Some(into)
         );
         assert_eq!(
-            repo_core::linked_mxids(&pool, &into).await.unwrap(),
+            identities::user_ids(&pool, &into, Channel::Matrix)
+                .await
+                .unwrap(),
             vec!["@evan:mbm.one".to_string()]
         );
     }
@@ -203,7 +214,7 @@ mod tests {
         for (owner, tz) in [(&from, "Asia/Tokyo"), (&into, "Europe/Berlin")] {
             sqlx::query!(
                 "INSERT INTO user_settings (owner_id, timezone, currency) VALUES ($1, $2, 'USD')",
-                owner.as_str(),
+                owner.as_uuid(),
                 tz
             )
             .execute(&pool)
@@ -216,7 +227,7 @@ mod tests {
 
         let tz = sqlx::query_scalar!(
             "SELECT timezone FROM user_settings WHERE owner_id = $1",
-            into.as_str()
+            into.as_uuid()
         )
         .fetch_one(&pool)
         .await
@@ -277,7 +288,7 @@ mod tests {
         assert_eq!(outcome.moved.total(), 0);
 
         assert!(repo_core::find(&pool, &account).await.unwrap().is_some());
-        assert_eq!(owner_of(&pool, "keep me").await, account.as_str());
+        assert_eq!(owner_of(&pool, "keep me").await, account);
     }
 
     #[tokio::test]
@@ -295,7 +306,7 @@ mod tests {
         let second = MergeService::merge(&pool, &from, &into).await.unwrap();
 
         assert_eq!(second.moved.total(), 0);
-        assert_eq!(owner_of(&pool, "only me").await, into.as_str());
+        assert_eq!(owner_of(&pool, "only me").await, into);
     }
 
     #[tokio::test]
@@ -310,67 +321,66 @@ mod tests {
 
         // Put one row in every owned table
         add_todo(&pool, &from, "todo").await;
-        sqlx::query!("INSERT INTO reminders (room_id, owner_id, sender_name, message, trigger_at) VALUES ('!r:x', $1, 'a', 'm', CURRENT_TIMESTAMP)", from.as_str()).execute(&pool).await.unwrap();
-        sqlx::query!("INSERT INTO transactions (room_id, owner_id, sender_name, direction, amount_minor, currency, occurred_at) VALUES ('web', $1, 'a', 'expense', 100, 'USD', CURRENT_TIMESTAMP)", from.as_str()).execute(&pool).await.unwrap();
-        sqlx::query!("INSERT INTO recurring_bills (room_id, owner_id, sender_name, name, category, amount_minor, currency, next_due_at) VALUES ('web', $1, 'a', 'rent', 'home', 100, 'USD', CURRENT_TIMESTAMP)", from.as_str()).execute(&pool).await.unwrap();
-        sqlx::query!("INSERT INTO portfolio_holdings (owner_id, symbol, quantity_minor, avg_cost_minor, currency) VALUES ($1, 'AAPL', 100000000, 15000, 'USD')", from.as_str()).execute(&pool).await.unwrap();
-        sqlx::query!("INSERT INTO portfolio_cash_balances (owner_id, currency, balance_minor) VALUES ($1, 'USD', 5000)", from.as_str()).execute(&pool).await.unwrap();
-        sqlx::query!("INSERT INTO portfolio_daily_snapshots (owner_id, snapshot_date, currency, holdings_value_minor, cash_minor, total_net_worth_minor) VALUES ($1, '2026-09-06', 'USD', 100, 100, 200)", from.as_str()).execute(&pool).await.unwrap();
-        sqlx::query!("INSERT INTO portfolio_price_alerts (owner_id, symbol, target_price_minor, currency, condition) VALUES ($1, 'AAPL', 20000, 'USD', 'ABOVE')", from.as_str()).execute(&pool).await.unwrap();
+        sqlx::query!("INSERT INTO reminders (room_id, owner_id, sender_name, message, trigger_at) VALUES ('!r:x', $1, 'a', 'm', CURRENT_TIMESTAMP)", from.as_uuid()).execute(&pool).await.unwrap();
+        sqlx::query!("INSERT INTO transactions (room_id, owner_id, sender_name, direction, amount_minor, currency, occurred_at) VALUES ('web', $1, 'a', 'expense', 100, 'USD', CURRENT_TIMESTAMP)", from.as_uuid()).execute(&pool).await.unwrap();
+        sqlx::query!("INSERT INTO recurring_bills (room_id, owner_id, sender_name, name, category, amount_minor, currency, next_due_at) VALUES ('web', $1, 'a', 'rent', 'home', 100, 'USD', CURRENT_TIMESTAMP)", from.as_uuid()).execute(&pool).await.unwrap();
+        sqlx::query!("INSERT INTO portfolio_holdings (owner_id, symbol, quantity_minor, avg_cost_minor, currency) VALUES ($1, 'AAPL', 100000000, 15000, 'USD')", from.as_uuid()).execute(&pool).await.unwrap();
+        sqlx::query!("INSERT INTO portfolio_cash_balances (owner_id, currency, balance_minor) VALUES ($1, 'USD', 5000)", from.as_uuid()).execute(&pool).await.unwrap();
+        sqlx::query!("INSERT INTO portfolio_daily_snapshots (owner_id, snapshot_date, currency, holdings_value_minor, cash_minor, total_net_worth_minor) VALUES ($1, '2026-09-06', 'USD', 100, 100, 200)", from.as_uuid()).execute(&pool).await.unwrap();
+        sqlx::query!("INSERT INTO portfolio_price_alerts (owner_id, symbol, target_price_minor, currency, condition) VALUES ($1, 'AAPL', 20000, 'USD', 'ABOVE')", from.as_uuid()).execute(&pool).await.unwrap();
         sqlx::query!(
             "INSERT INTO finance_categories (owner_id, name) VALUES ($1, 'food')",
-            from.as_str()
+            from.as_uuid()
         )
         .execute(&pool)
         .await
         .unwrap();
         sqlx::query!(
             "INSERT INTO user_settings (owner_id, timezone, currency) VALUES ($1, 'UTC', 'USD')",
-            from.as_str()
+            from.as_uuid()
         )
         .execute(&pool)
         .await
         .unwrap();
-        sqlx::query!("INSERT INTO bookmarks (owner_id, url, title, domain) VALUES ($1, 'https://example.com', 'Example', 'example.com')", from.as_str()).execute(&pool).await.unwrap();
-        let habit_id = sqlx::query_scalar!("INSERT INTO habits (owner_id, name, frequency) VALUES ($1, 'Exercise', 'daily') RETURNING id", from.as_str()).fetch_one(&pool).await.unwrap();
+        sqlx::query!("INSERT INTO bookmarks (owner_id, url, title, domain) VALUES ($1, 'https://example.com', 'Example', 'example.com')", from.as_uuid()).execute(&pool).await.unwrap();
+        let habit_id = sqlx::query_scalar!("INSERT INTO habits (owner_id, name, frequency) VALUES ($1, 'Exercise', 'daily') RETURNING id", from.as_uuid()).fetch_one(&pool).await.unwrap();
         sqlx::query!(
             "INSERT INTO habit_logs (habit_id, owner_id, log_date) VALUES ($1, $2, '2026-09-06')",
             habit_id,
-            from.as_str()
+            from.as_uuid()
         )
         .execute(&pool)
         .await
         .unwrap();
-        sqlx::query!("INSERT INTO life_day_logs (owner_id, log_date, mood) VALUES ($1, '2026-09-06', 'happy')", from.as_str()).execute(&pool).await.unwrap();
-        sqlx::query!("INSERT INTO life_profiles (owner_id, birth_date, expected_lifespan_years) VALUES ($1, '1990-01-01', 90)", from.as_str()).execute(&pool).await.unwrap();
-        sqlx::query!("INSERT INTO footprints (owner_id, title, latitude, longitude, arrival_date) VALUES ($1, 'Paris', 48.8566, 2.3522, '2026-09-06')", from.as_str()).execute(&pool).await.unwrap();
+        sqlx::query!("INSERT INTO life_day_logs (owner_id, log_date, mood) VALUES ($1, '2026-09-06', 'happy')", from.as_uuid()).execute(&pool).await.unwrap();
+        sqlx::query!("INSERT INTO life_profiles (owner_id, birth_date, expected_lifespan_years) VALUES ($1, '1990-01-01', 90)", from.as_uuid()).execute(&pool).await.unwrap();
+        sqlx::query!("INSERT INTO footprints (owner_id, title, latitude, longitude, arrival_date) VALUES ($1, 'Paris', 48.8566, 2.3522, '2026-09-06')", from.as_uuid()).execute(&pool).await.unwrap();
         sqlx::query!(
             "INSERT INTO ai_conversations (id, owner_id, room_id) VALUES ('conv1', $1, '!r:x')",
-            from.as_str()
+            from.as_uuid()
         )
         .execute(&pool)
         .await
         .unwrap();
         sqlx::query!(
             "INSERT INTO ai_user_configs (owner_id, model_name) VALUES ($1, 'gemini')",
-            from.as_str()
+            from.as_uuid()
         )
         .execute(&pool)
         .await
         .unwrap();
-        sqlx::query!("INSERT INTO webhooks (id, owner_id, name, token_hash, token_prefix, default_room_id) VALUES ('wh1', $1, 'hook', 'thash', 'pref', '!r:x')", from.as_str()).execute(&pool).await.unwrap();
-        sqlx::query!("INSERT INTO webhook_outbox (id, webhook_id, owner_id, room_id, html_body, plain_body, next_attempt_at) VALUES ('out1', 'wh1', $1, '!r:x', 'html', 'plain', CURRENT_TIMESTAMP)", from.as_str()).execute(&pool).await.unwrap();
+        sqlx::query!("INSERT INTO webhooks (id, owner_id, name, token_hash, token_prefix, default_room_id) VALUES ('wh1', $1, 'hook', 'thash', 'pref', '!r:x')", from.as_uuid()).execute(&pool).await.unwrap();
         sqlx::query!(
             "INSERT INTO finance_shares (owner_id, token, is_enabled) VALUES ($1, 'tok1', TRUE)",
-            from.as_str()
+            from.as_uuid()
         )
         .execute(&pool)
         .await
         .unwrap();
-        sqlx::query!("INSERT INTO bot_message_targets (event_id, room_id, entity_type, entity_id, owner_id, title) VALUES ('ev1', '!r:x', 'todo', 1, $1, 'a todo')", from.as_str()).execute(&pool).await.unwrap();
+        sqlx::query!("INSERT INTO bot_message_targets (event_id, room_id, entity_type, entity_id, owner_id, title) VALUES ('ev1', '!r:x', 'todo', 1, $1, 'a todo')", from.as_uuid()).execute(&pool).await.unwrap();
 
         let preview = MergeService::preview(&pool, &from).await.unwrap();
-        assert_eq!(preview.total(), 22, "one row per owned table");
+        assert_eq!(preview.total(), 21, "one row per owned table");
 
         MergeService::merge(&pool, &from, &into).await.unwrap();
 
@@ -402,7 +412,7 @@ mod tests {
 
         sqlx::query!(
             "INSERT INTO finance_shares (owner_id, token, is_enabled) VALUES ($1, 'tok123', TRUE)",
-            from.as_str()
+            from.as_uuid()
         )
         .execute(&pool)
         .await
@@ -411,7 +421,7 @@ mod tests {
         sqlx::query!(
             "INSERT INTO bot_message_targets (event_id, room_id, entity_type, entity_id, owner_id, title) \
              VALUES ('ev1', '!r:x', 'todo', 1, $1, 'a todo')",
-            from.as_str()
+            from.as_uuid()
         )
         .execute(&pool)
         .await
@@ -419,19 +429,19 @@ mod tests {
 
         MergeService::merge(&pool, &from, &into).await.unwrap();
 
-        let share_owner =
+        let share_owner: uuid::Uuid =
             sqlx::query_scalar!("SELECT owner_id FROM finance_shares WHERE token = 'tok123'")
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        assert_eq!(share_owner, into.as_str());
+        assert_eq!(share_owner, *into.as_uuid());
 
-        let target_owner =
+        let target_owner: uuid::Uuid =
             sqlx::query_scalar!("SELECT owner_id FROM bot_message_targets WHERE event_id = 'ev1'")
                 .fetch_one(&pool)
                 .await
                 .unwrap();
-        assert_eq!(target_owner, into.as_str());
+        assert_eq!(target_owner, *into.as_uuid());
 
         for &table in &["finance_shares", "bot_message_targets"] {
             let stranded = repo_merge::count_rows(&pool, table, "owner_id", &from)
@@ -443,7 +453,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_a_merge_absorbs_the_audit_ledger() {
-        use crate::modules::portfolio::audit::record_audit_entry;
+        use crate::infrastructure::postgres::repositories::portfolio::audit::record_audit_entry;
 
         let pool = db().await;
         let from = repo_core::create(&pool, "old", STATUS_UNCLAIMED)
@@ -454,40 +464,18 @@ mod tests {
             .unwrap();
 
         record_audit_entry(
-            &pool,
-            into.as_str(),
-            "deposit",
-            None,
-            None,
-            None,
-            100000,
-            "USD",
-            2,
-            None,
-            None,
-            None,
+            &pool, &into, "deposit", None, None, None, 100000, "USD", 2, None, None, None,
+        )
+        .await
+        .unwrap();
+        record_audit_entry(
+            &pool, &from, "deposit", None, None, None, 50000, "USD", 2, None, None, None,
         )
         .await
         .unwrap();
         record_audit_entry(
             &pool,
-            from.as_str(),
-            "deposit",
-            None,
-            None,
-            None,
-            50000,
-            "USD",
-            2,
-            None,
-            None,
-            None,
-        )
-        .await
-        .unwrap();
-        record_audit_entry(
-            &pool,
-            from.as_str(),
+            &from,
             "buy",
             Some("AAPL"),
             Some(1_00000000),
@@ -508,7 +496,7 @@ mod tests {
 
         let stranded = sqlx::query_scalar!(
             "SELECT COUNT(*) FROM portfolio_audit_log WHERE owner_id = $1",
-            from.as_str()
+            from.as_uuid()
         )
         .fetch_one(&pool)
         .await
@@ -521,7 +509,7 @@ mod tests {
 
         let arrived = sqlx::query_scalar!(
             "SELECT COUNT(*) FROM portfolio_audit_log WHERE owner_id = $1",
-            into.as_str()
+            into.as_uuid()
         )
         .fetch_one(&pool)
         .await
@@ -532,7 +520,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_the_absorbed_ledger_still_verifies() {
-        use crate::modules::portfolio::audit::{record_audit_entry, verify_audit_chain};
+        use crate::infrastructure::postgres::repositories::portfolio::audit::{
+            record_audit_entry, verify_audit_chain,
+        };
 
         let pool = db().await;
         let from = repo_core::create(&pool, "old", STATUS_UNCLAIMED)
@@ -543,40 +533,18 @@ mod tests {
             .unwrap();
 
         record_audit_entry(
-            &pool,
-            into.as_str(),
-            "deposit",
-            None,
-            None,
-            None,
-            100000,
-            "USD",
-            2,
-            None,
-            None,
-            None,
+            &pool, &into, "deposit", None, None, None, 100000, "USD", 2, None, None, None,
+        )
+        .await
+        .unwrap();
+        record_audit_entry(
+            &pool, &from, "deposit", None, None, None, 50000, "USD", 2, None, None, None,
         )
         .await
         .unwrap();
         record_audit_entry(
             &pool,
-            from.as_str(),
-            "deposit",
-            None,
-            None,
-            None,
-            50000,
-            "USD",
-            2,
-            None,
-            None,
-            None,
-        )
-        .await
-        .unwrap();
-        record_audit_entry(
-            &pool,
-            from.as_str(),
+            &from,
             "buy",
             Some("AAPL"),
             Some(1_00000000),
@@ -593,14 +561,14 @@ mod tests {
 
         MergeService::merge(&pool, &from, &into).await.unwrap();
 
-        let report = verify_audit_chain(&pool, into.as_str()).await.unwrap();
+        let report = verify_audit_chain(&pool, &into).await.unwrap();
         assert!(report.is_valid, "{}", report.message);
         assert_eq!(report.total_verified, 4);
     }
 
     #[tokio::test]
     async fn test_the_merge_is_recorded_in_the_ledger() {
-        use crate::modules::portfolio::audit::record_audit_entry;
+        use crate::infrastructure::postgres::repositories::portfolio::audit::record_audit_entry;
 
         let pool = db().await;
         let from = repo_core::create(&pool, "old", STATUS_UNCLAIMED)
@@ -611,18 +579,7 @@ mod tests {
             .unwrap();
 
         record_audit_entry(
-            &pool,
-            from.as_str(),
-            "deposit",
-            None,
-            None,
-            None,
-            50000,
-            "USD",
-            2,
-            None,
-            None,
-            None,
+            &pool, &from, "deposit", None, None, None, 50000, "USD", 2, None, None, None,
         )
         .await
         .unwrap();
@@ -631,7 +588,7 @@ mod tests {
 
         let markers = sqlx::query!(
             "SELECT id, note FROM portfolio_audit_log WHERE owner_id = $1 AND action = 'merge'",
-            into.as_str()
+            into.as_uuid()
         )
         .fetch_all(&pool)
         .await
@@ -645,7 +602,7 @@ mod tests {
         let marker = &markers[0];
         let note = marker.note.as_deref().unwrap_or_default();
         assert!(
-            note.contains(from.as_str()),
+            note.contains(&from.to_string()),
             "note must name the source account"
         );
         assert!(
@@ -655,7 +612,7 @@ mod tests {
 
         let max_id = sqlx::query_scalar!(
             "SELECT MAX(id) FROM portfolio_audit_log WHERE owner_id = $1",
-            into.as_str()
+            into.as_uuid()
         )
         .fetch_one(&pool)
         .await
@@ -669,7 +626,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_the_immutability_trigger_survives_a_merge() {
-        use crate::modules::portfolio::audit::record_audit_entry;
+        use crate::infrastructure::postgres::repositories::portfolio::audit::record_audit_entry;
 
         let pool = db().await;
         let from = repo_core::create(&pool, "old", STATUS_UNCLAIMED)
@@ -680,18 +637,7 @@ mod tests {
             .unwrap();
 
         record_audit_entry(
-            &pool,
-            from.as_str(),
-            "deposit",
-            None,
-            None,
-            None,
-            50000,
-            "USD",
-            2,
-            None,
-            None,
-            None,
+            &pool, &from, "deposit", None, None, None, 50000, "USD", 2, None, None, None,
         )
         .await
         .unwrap();
@@ -700,7 +646,7 @@ mod tests {
 
         let result = sqlx::query!(
             "UPDATE portfolio_audit_log SET note = 'tampered' WHERE owner_id = $1",
-            into.as_str()
+            into.as_uuid()
         )
         .execute(&pool)
         .await;
@@ -712,7 +658,9 @@ mod tests {
 
     #[tokio::test]
     async fn test_a_merge_with_no_ledger_leaves_no_marker() {
-        use crate::modules::portfolio::audit::{record_audit_entry, verify_audit_chain};
+        use crate::infrastructure::postgres::repositories::portfolio::audit::{
+            record_audit_entry, verify_audit_chain,
+        };
 
         let pool = db().await;
         let from = repo_core::create(&pool, "old", STATUS_UNCLAIMED)
@@ -723,18 +671,7 @@ mod tests {
             .unwrap();
 
         record_audit_entry(
-            &pool,
-            into.as_str(),
-            "deposit",
-            None,
-            None,
-            None,
-            50000,
-            "USD",
-            2,
-            None,
-            None,
-            None,
+            &pool, &into, "deposit", None, None, None, 50000, "USD", 2, None, None, None,
         )
         .await
         .unwrap();
@@ -743,7 +680,7 @@ mod tests {
 
         let count = sqlx::query_scalar!(
             "SELECT COUNT(*) FROM portfolio_audit_log WHERE owner_id = $1",
-            into.as_str()
+            into.as_uuid()
         )
         .fetch_one(&pool)
         .await
@@ -756,7 +693,7 @@ mod tests {
 
         let marker_count = sqlx::query_scalar!(
             "SELECT COUNT(*) FROM portfolio_audit_log WHERE owner_id = $1 AND action = 'merge'",
-            into.as_str()
+            into.as_uuid()
         )
         .fetch_one(&pool)
         .await
@@ -764,13 +701,13 @@ mod tests {
         .unwrap_or(0);
         assert_eq!(marker_count, 0);
 
-        let report = verify_audit_chain(&pool, into.as_str()).await.unwrap();
+        let report = verify_audit_chain(&pool, &into).await.unwrap();
         assert!(report.is_valid, "an untouched chain must remain valid");
     }
 
     #[tokio::test]
     async fn test_a_rolled_back_merge_restores_the_trigger() {
-        use crate::modules::portfolio::audit::record_audit_entry;
+        use crate::infrastructure::postgres::repositories::portfolio::audit::record_audit_entry;
 
         let pool = db().await;
         let from = repo_core::create(&pool, "old", STATUS_UNCLAIMED)
@@ -781,18 +718,7 @@ mod tests {
             .unwrap();
 
         record_audit_entry(
-            &pool,
-            from.as_str(),
-            "deposit",
-            None,
-            None,
-            None,
-            50000,
-            "USD",
-            2,
-            None,
-            None,
-            None,
+            &pool, &from, "deposit", None, None, None, 50000, "USD", 2, None, None, None,
         )
         .await
         .unwrap();
@@ -805,7 +731,7 @@ mod tests {
 
         let result = sqlx::query!(
             "UPDATE portfolio_audit_log SET note = 'tampered' WHERE owner_id = $1",
-            from.as_str()
+            from.as_uuid()
         )
         .execute(&pool)
         .await;
@@ -814,15 +740,15 @@ mod tests {
             "the trigger must still be active after a rolled-back merge"
         );
 
-        let owner = sqlx::query_scalar!(
-            "SELECT owner_id FROM portfolio_audit_log WHERE action = 'deposit'"
+        let owner: uuid::Uuid = sqlx::query_scalar!(
+            r#"SELECT owner_id AS "owner_id: uuid::Uuid" FROM portfolio_audit_log WHERE action = 'deposit'"#
         )
         .fetch_one(&pool)
         .await
         .unwrap();
         assert_eq!(
             owner,
-            from.as_str(),
+            from.uuid(),
             "the ledger must still belong to the source account"
         );
     }
@@ -837,15 +763,15 @@ mod tests {
             .await
             .unwrap();
 
-        sqlx::query!("INSERT INTO account_rooms (account_id, room_id, name) VALUES ($1, '!shared:x', 'Shared')", from.as_str()).execute(&pool).await.unwrap();
-        sqlx::query!("INSERT INTO account_rooms (account_id, room_id, name) VALUES ($1, '!shared:x', 'Shared')", into.as_str()).execute(&pool).await.unwrap();
-        sqlx::query!("INSERT INTO account_rooms (account_id, room_id, name) VALUES ($1, '!only-from:x', 'Only from')", from.as_str()).execute(&pool).await.unwrap();
+        sqlx::query!("INSERT INTO account_rooms (account_id, room_id, name) VALUES ($1, '!shared:x', 'Shared')", from.as_uuid()).execute(&pool).await.unwrap();
+        sqlx::query!("INSERT INTO account_rooms (account_id, room_id, name) VALUES ($1, '!shared:x', 'Shared')", into.as_uuid()).execute(&pool).await.unwrap();
+        sqlx::query!("INSERT INTO account_rooms (account_id, room_id, name) VALUES ($1, '!only-from:x', 'Only from')", from.as_uuid()).execute(&pool).await.unwrap();
 
         MergeService::merge(&pool, &from, &into).await.unwrap();
 
         let shared_count = sqlx::query_scalar!(
             "SELECT COUNT(*) FROM account_rooms WHERE account_id = $1 AND room_id = '!shared:x'",
-            into.as_str()
+            into.as_uuid()
         )
         .fetch_one(&pool)
         .await
@@ -855,7 +781,7 @@ mod tests {
 
         let moved_count = sqlx::query_scalar!(
             "SELECT COUNT(*) FROM account_rooms WHERE account_id = $1 AND room_id = '!only-from:x'",
-            into.as_str()
+            into.as_uuid()
         )
         .fetch_one(&pool)
         .await
@@ -865,7 +791,7 @@ mod tests {
 
         let leftover = sqlx::query_scalar!(
             "SELECT COUNT(*) FROM account_rooms WHERE account_id = $1",
-            from.as_str()
+            from.as_uuid()
         )
         .fetch_one(&pool)
         .await
@@ -890,7 +816,7 @@ mod tests {
         sqlx::query!(
             "INSERT INTO mcp_tokens (id, account_id, name, token_hash, prefix) \
              VALUES ('tok1', $1, 'my token', 'hash123', 'mcp_')",
-            from.as_str()
+            from.as_uuid()
         )
         .execute(&pool)
         .await
@@ -900,7 +826,7 @@ mod tests {
 
         let remaining = sqlx::query_scalar!(
             "SELECT COUNT(*) FROM mcp_tokens WHERE account_id = $1",
-            from.as_str()
+            from.as_uuid()
         )
         .fetch_one(&pool)
         .await
@@ -910,7 +836,7 @@ mod tests {
 
         let survivor_has_it = sqlx::query_scalar!(
             "SELECT COUNT(*) FROM mcp_tokens WHERE account_id = $1",
-            into.as_str()
+            into.as_uuid()
         )
         .fetch_one(&pool)
         .await
@@ -939,7 +865,7 @@ mod tests {
             .unwrap();
         tx.rollback().await.unwrap();
 
-        assert_eq!(owner_of(&pool, "should not move").await, from.as_str());
+        assert_eq!(owner_of(&pool, "should not move").await, from);
         assert!(repo_core::find(&pool, &from).await.unwrap().is_some());
     }
 }

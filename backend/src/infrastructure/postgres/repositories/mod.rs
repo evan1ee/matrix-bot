@@ -4,8 +4,18 @@
 
 pub mod accounts;
 pub mod bookmarks;
+pub mod finance;
 pub mod footprints;
 pub mod habits;
+pub mod identities;
+pub mod jobs;
+pub mod life;
+pub mod link_tokens;
+pub mod llm;
+pub mod mcp;
+pub mod outbox;
+pub mod portfolio;
+pub mod reaction_targets;
 pub mod recurring_bills;
 pub mod reminders;
 pub mod rooms;

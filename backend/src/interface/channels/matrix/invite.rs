@@ -10,6 +10,8 @@ use matrix_sdk::{
 use tracing::{error, info, warn};
 
 use crate::db::Database;
+use crate::domain::channels::PlatformIdentity;
+use crate::infrastructure::postgres::repositories::identities;
 
 /// Registers the room member invitation event handler on the Matrix client.
 pub fn register_invite_handler(client: &Client, db: Database, allowlist: Vec<String>) {
@@ -20,15 +22,17 @@ pub fn register_invite_handler(client: &Client, db: Database, allowlist: Vec<Str
             if ev.content.membership == MembershipState::Invite {
                 let sender = ev.sender.as_str();
                 let is_allowlisted = allowlist.iter().any(|a| a == sender);
-                let is_linked = crate::db_scalar_optional!(
-                    &db.pool,
-                    i64,
-                    "SELECT CAST(1 AS BIGINT) FROM matrix_links WHERE mxid = ?",
-                    sender
-                )
-                .ok()
-                .flatten()
-                .is_some();
+                let is_linked = match PlatformIdentity::matrix(sender) {
+                    Ok(identity) => identities::find_account(&db.pool, &identity)
+                        .await
+                        .ok()
+                        .flatten()
+                        .is_some(),
+                    Err(err) => {
+                        warn!("Ignoring invite from malformed sender {sender}: {err}");
+                        false
+                    }
+                };
 
                 if is_allowlisted || is_linked {
                     info!(

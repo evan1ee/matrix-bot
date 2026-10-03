@@ -16,19 +16,18 @@
 //! `!export` deserves to know where to go.
 
 use async_trait::async_trait;
-use matrix_sdk::Client;
-use std::sync::Arc;
-use tokio::sync::RwLock;
 
-use crate::application::accounts::AccountService;
+use crate::interface::channels::message::Reply;
+use std::sync::Weak;
+
 use crate::application::AppServices;
 use crate::db::Database;
 use crate::domain::accounts::{
     AccountId, MaturedRecovery, SecurityEventKind, RECOVERY_DELAY_HOURS,
 };
-use crate::events::EventBroadcaster;
-use crate::interface::channels::matrix::notify::notify_account;
-use crate::modules::{BotModule, CommandContext, CommandHelp};
+use crate::interface::channels::matrix::notify::announce_account;
+use crate::interface::channels::registry::ChannelRegistry;
+use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 use crate::utils::html::html_escape as escape;
 
 /// Commands that exist on the web only, and what to say about each.
@@ -46,18 +45,35 @@ const WEB_ONLY: &[(&str, &str)] = &[
 ];
 
 pub struct AccountModule {
-    /// This generation's Matrix client, for sending notifications.
-    ///
-    /// Held behind the same shared handle the API uses, so a reconnect swaps it
-    /// out underneath rather than leaving this module holding a dead client.
-    client: Arc<RwLock<Option<Client>>>,
     /// Where to tell people to go. Shown in every refusal.
     web_url: String,
 }
 
 impl AccountModule {
-    pub fn new(client: Arc<RwLock<Option<Client>>>, web_url: String) -> Self {
-        Self { client, web_url }
+    pub fn new(web_url: String) -> Self {
+        Self { web_url }
+    }
+}
+
+impl AccountModule {
+    /// The command's HTML answer; `handle_command` wraps it in a [`Reply`].
+    async fn respond(&self, ctx: &CommandContext, services: &AppServices) -> Option<String> {
+        let command = ctx.command.to_lowercase();
+
+        if let Some((_, what)) = WEB_ONLY.iter().find(|(name, _)| *name == command) {
+            return Some(format!(
+                "<b>{}</b> needs a passkey, so it is only available in the web app.<br/>\
+                 Open <code>{}</code> to do it there.",
+                escape(what),
+                escape(&self.web_url)
+            ));
+        }
+
+        match command.as_str() {
+            "passkey" | "passkeys" | "web" => Some(self.handle_passkey(ctx, services).await),
+            "recover" => Some(self.handle_recover(ctx, services).await),
+            _ => None,
+        }
     }
 }
 
@@ -71,10 +87,10 @@ impl BotModule for AccountModule {
         vec![
             CommandHelp {
                 name: "link".to_string(),
-                usage: "!link <code>".to_string(),
+                usage: "!link".to_string(),
                 description: "Attach this Matrix account to your web account. \
-                              Get a code from the web app, then send it here in a \
-                              direct message."
+                              Send it in a direct message and open the link I reply \
+                              with."
                     .to_string(),
             },
             CommandHelp {
@@ -105,25 +121,9 @@ impl BotModule for AccountModule {
         &self,
         ctx: &CommandContext,
         services: &AppServices,
-        db: &Database,
-        _broadcaster: Option<&EventBroadcaster>,
-    ) -> Option<String> {
-        let command = ctx.command.to_lowercase();
-
-        if let Some((_, what)) = WEB_ONLY.iter().find(|(name, _)| *name == command) {
-            return Some(format!(
-                "<b>{}</b> needs a passkey, so it is only available in the web app.<br/>\
-                 Open <code>{}</code> to do it there.",
-                escape(what),
-                escape(&self.web_url)
-            ));
-        }
-
-        match command.as_str() {
-            "passkey" | "passkeys" | "web" => Some(self.handle_passkey(ctx, services).await),
-            "recover" => Some(self.handle_recover(ctx, services, db).await),
-            _ => None,
-        }
+        _db: &Database,
+    ) -> Option<Reply> {
+        self.respond(ctx, services).await.map(Reply::private)
     }
 }
 
@@ -132,12 +132,7 @@ impl AccountModule {
     ///
     /// Refused outside a direct message: the code is in the reply, and a reply
     /// in a shared room would hand it to everyone present.
-    async fn handle_recover(
-        &self,
-        ctx: &CommandContext,
-        services: &AppServices,
-        db: &Database,
-    ) -> String {
+    async fn handle_recover(&self, ctx: &CommandContext, services: &AppServices) -> String {
         if !ctx.is_direct {
             return "Send <code>!recover</code> in a direct message — the reply contains \
                     a code that must not be shown to a room."
@@ -161,7 +156,12 @@ impl AccountModule {
             );
         }
 
-        let (code, valid_after) = match services.accounts.request_recovery(&ctx.owner_id).await {
+        let detail = format!("requested from {}", ctx.sender.user_id().as_str());
+        let (code, valid_after) = match services
+            .accounts
+            .request_recovery(&ctx.owner_id, Some(&detail))
+            .await
+        {
             Ok(result) => result,
             Err(err) => {
                 tracing::error!("Could not start recovery for {}: {:?}", ctx.owner_id, err);
@@ -172,13 +172,12 @@ impl AccountModule {
         // Announced to *every* linked identity, not just this one. If someone
         // else started this, the real owner has to hear about it — on a channel
         // the attacker may not control.
-        let client = self.client.read().await.clone();
-        notify_account(
-            client.as_ref(),
-            db,
-            ctx.owner_id.as_str(),
+        announce_account(
+            ctx.outbound.as_ref(),
+            &services.identity,
+            &ctx.owner_id,
             SecurityEventKind::RecoveryRequested,
-            Some(&format!("requested from {}", ctx.sender_mxid)),
+            Some(&detail),
         )
         .await;
 
@@ -244,7 +243,7 @@ impl AccountModule {
                          Open this link on your device (iPhone, Mac, Android, Windows) to register Face ID, Touch ID, or Windows Hello:<br/>\
                          <a href=\"{}\">{}</a><br/><br/>\
                          <i>Expires in 10 minutes and can be used once. Add more passkeys later from the web app.</i>",
-                        escape(&ctx.sender_mxid),
+                        escape(ctx.sender_mxid().unwrap_or_default()),
                         escape(&enroll_url),
                         escape(&enroll_url),
                     )
@@ -267,13 +266,13 @@ impl AccountModule {
                         format!(
                             "You have no passkeys linked to <code>{}</code> yet.<br/><br/>\
                              Send <code>!passkey add</code> in a direct message to link this device using Face ID, Touch ID, or Windows Hello.",
-                            escape(&ctx.sender_mxid)
+                            escape(ctx.sender.user_id().as_str())
                         )
                     } else {
                         let mut lines = Vec::new();
                         lines.push(format!(
                             "<b>Linked Passkeys for <code>{}</code>:</b><br/>",
-                            escape(&ctx.sender_mxid)
+                            escape(ctx.sender.user_id().as_str())
                         ));
                         for (idx, cred) in creds.iter().enumerate() {
                             let created_str = cred
@@ -319,17 +318,16 @@ impl AccountModule {
 
 /// Redeems a matured recovery code presented in the web UI.
 pub async fn redeem_matured_recovery(
-    accounts: &AccountService,
-    db: &Database,
-    client: Option<&Client>,
+    services: &AppServices,
+    outbound: Option<&Weak<ChannelRegistry>>,
     code: &str,
 ) -> Result<AccountId, RecoveryRejection> {
-    match accounts.redeem_recovery_request(code).await {
+    match services.accounts.redeem_recovery_request(code).await {
         Ok(MaturedRecovery::Ready { account_id }) => {
-            notify_account(
-                client,
-                db,
-                account_id.as_str(),
+            announce_account(
+                outbound,
+                &services.identity,
+                &account_id,
                 SecurityEventKind::RecoveryCompleted,
                 None,
             )
@@ -355,7 +353,22 @@ pub enum RecoveryRejection {
 mod tests {
     use super::*;
     use crate::domain::accounts::{STATUS_ACTIVE, STATUS_UNCLAIMED};
+    use crate::domain::channels::Channel;
     use crate::infrastructure::postgres::repositories::accounts as repo;
+
+    async fn bind_matrix(
+        pool: &sqlx::PgPool,
+        account: &crate::domain::accounts::AccountId,
+        mxid: &str,
+    ) {
+        crate::infrastructure::postgres::repositories::identities::bind(
+            pool,
+            account,
+            &crate::domain::channels::PlatformIdentity::matrix(mxid).unwrap(),
+        )
+        .await
+        .unwrap();
+    }
 
     async fn setup() -> (Database, AppServices) {
         let pool = crate::db::pool::test_pool().await;
@@ -365,29 +378,26 @@ mod tests {
     }
 
     fn module() -> AccountModule {
-        AccountModule::new(
-            Arc::new(RwLock::new(None)),
-            "https://bot.mbm.one".to_string(),
-        )
+        AccountModule::new("https://bot.mbm.one".to_string())
     }
 
     fn ctx(command: &str, owner_id: &AccountId, is_direct: bool) -> CommandContext {
         CommandContext {
-            room_id: if is_direct {
+            conversation: crate::domain::channels::ConversationAddress::Matrix(if is_direct {
                 "!dm:x".into()
             } else {
                 "!public:x".into()
-            },
-            owner_id: owner_id.clone(),
-            sender_mxid: "@evan:mbm.one".to_string(),
-            sender_name: "evan".to_string(),
+            }),
+            owner_id: *owner_id,
+            sender: crate::interface::chat::test_support::sender("@evan:mbm.one", "evan"),
             command: command.to_string(),
             raw_args: String::new(),
             full_body: format!("!{command}"),
             is_direct,
             is_mentioned: false,
             quoted: None,
-            stage_reporter: None,
+            progress: None,
+            outbound: None,
         }
     }
 
@@ -395,13 +405,15 @@ mod tests {
     async fn test_sensitive_commands_are_refused_with_a_pointer() {
         let (db, services) = setup().await;
         let module = module();
-        let acct = AccountId::from("acct_evan");
+        let acct = AccountId::from_seed("acct_evan");
 
         for (command, _) in WEB_ONLY {
             let reply = module
-                .handle_command(&ctx(command, &acct, true), &services, &db, None)
+                .handle_command(&ctx(command, &acct, true), &services, &db)
                 .await
-                .unwrap_or_else(|| panic!("`!{command}` must be answered, not ignored"));
+                .unwrap_or_else(|| panic!("`!{command}` must be answered, not ignored"))
+                .html_body()
+                .to_owned();
 
             assert!(
                 reply.contains("web app"),
@@ -417,9 +429,9 @@ mod tests {
     #[tokio::test]
     async fn test_unrelated_commands_are_not_claimed() {
         let (db, services) = setup().await;
-        let acct = AccountId::from("acct_evan");
+        let acct = AccountId::from_seed("acct_evan");
         assert!(module()
-            .handle_command(&ctx("todo", &acct, true), &services, &db, None,)
+            .handle_command(&ctx("todo", &acct, true), &services, &db)
             .await
             .is_none());
     }
@@ -434,9 +446,11 @@ mod tests {
             .unwrap();
 
         let reply = module()
-            .handle_command(&ctx("recover", &account, false), &services, &db, None)
+            .handle_command(&ctx("recover", &account, false), &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
 
         assert!(reply.contains("direct message"));
         assert!(
@@ -460,9 +474,11 @@ mod tests {
             .unwrap();
 
         let reply = module()
-            .handle_command(&ctx("recover", &account, true), &services, &db, None)
+            .handle_command(&ctx("recover", &account, true), &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
 
         assert!(reply.contains("!link"), "it should say how to link instead");
         assert!(services
@@ -483,9 +499,11 @@ mod tests {
             .unwrap();
 
         let reply = module()
-            .handle_command(&ctx("recover", &account, true), &services, &db, None)
+            .handle_command(&ctx("recover", &account, true), &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
 
         assert!(
             reply.contains("24 hours"),
@@ -509,16 +527,20 @@ mod tests {
 
     #[tokio::test]
     async fn test_a_premature_code_is_refused_in_the_web_ui_too() {
-        let (db, services) = setup().await;
+        let (_db, services) = setup().await;
         let account = services
             .accounts
             .create("evan", STATUS_ACTIVE)
             .await
             .unwrap();
-        let (code, _) = services.accounts.request_recovery(&account).await.unwrap();
+        let (code, _) = services
+            .accounts
+            .request_recovery(&account, None)
+            .await
+            .unwrap();
 
         assert_eq!(
-            redeem_matured_recovery(&services.accounts, &db, None, &code)
+            redeem_matured_recovery(&services, None, &code)
                 .await
                 .unwrap_err(),
             RecoveryRejection::TooEarly
@@ -533,7 +555,11 @@ mod tests {
             .create("evan", STATUS_ACTIVE)
             .await
             .unwrap();
-        let (code, _) = services.accounts.request_recovery(&account).await.unwrap();
+        let (code, _) = services
+            .accounts
+            .request_recovery(&account, None)
+            .await
+            .unwrap();
 
         repo::recovery::set_valid_after(
             &db.pool,
@@ -544,7 +570,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            redeem_matured_recovery(&services.accounts, &db, None, &code)
+            redeem_matured_recovery(&services, None, &code)
                 .await
                 .unwrap(),
             account
@@ -556,6 +582,81 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(events[0].kind, "recovery_completed");
+    }
+
+    async fn audit_rows(
+        services: &AppServices,
+        account: &AccountId,
+    ) -> Vec<(String, Option<String>)> {
+        let mut rows: Vec<_> = services
+            .accounts
+            .list_security_events(account, 50)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|e| (e.kind, e.detail))
+            .collect();
+        rows.sort();
+        rows
+    }
+
+    /// `!recover` leaves exactly one `recovery_requested` row, carrying who asked.
+    #[tokio::test]
+    async fn test_recover_records_one_request_row_with_the_requester() {
+        let (db, services) = setup().await;
+        let account = services
+            .accounts
+            .create("evan", STATUS_ACTIVE)
+            .await
+            .unwrap();
+
+        module()
+            .handle_command(&ctx("recover", &account, true), &services, &db)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            audit_rows(&services, &account).await,
+            vec![(
+                "recovery_requested".to_string(),
+                Some("requested from @evan:mbm.one".to_string())
+            )]
+        );
+    }
+
+    /// Redeeming a matured code is one recovery: one `recovery_completed` row.
+    #[tokio::test]
+    async fn test_a_matured_code_records_recovery_completed_exactly_once() {
+        let (db, services) = setup().await;
+        let account = services
+            .accounts
+            .create("evan", STATUS_ACTIVE)
+            .await
+            .unwrap();
+        let (code, _) = services
+            .accounts
+            .request_recovery(&account, None)
+            .await
+            .unwrap();
+        repo::recovery::set_valid_after(
+            &db.pool,
+            &account,
+            chrono::Utc::now() - chrono::Duration::minutes(1),
+        )
+        .await
+        .unwrap();
+
+        redeem_matured_recovery(&services, None, &code)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            audit_rows(&services, &account).await,
+            vec![
+                ("recovery_completed".to_string(), None),
+                ("recovery_requested".to_string(), None),
+            ]
+        );
     }
 
     #[tokio::test]
@@ -571,18 +672,22 @@ mod tests {
         let mut public_ctx = ctx("passkey", &account, false);
         public_ctx.raw_args = "add".into();
         let reply = module()
-            .handle_command(&public_ctx, &services, &db, None)
+            .handle_command(&public_ctx, &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(reply.contains("direct message"));
 
         // In DM: generates ?enroll= token link
         let mut dm_ctx = ctx("passkey", &account, true);
         dm_ctx.raw_args = "add".into();
         let reply = module()
-            .handle_command(&dm_ctx, &services, &db, None)
+            .handle_command(&dm_ctx, &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(reply.contains("?enroll="));
         assert!(reply.contains("bot.mbm.one"));
     }
@@ -606,9 +711,11 @@ mod tests {
             let mut dm = ctx(command, &account, true);
             dm.raw_args = args.into();
             let reply = module()
-                .handle_command(&dm, &services, &db, None)
+                .handle_command(&dm, &services, &db)
                 .await
-                .unwrap();
+                .unwrap()
+                .html_body()
+                .to_owned();
 
             assert!(
                 !reply.contains("?enroll="),
@@ -635,12 +742,8 @@ mod tests {
             .await
             .unwrap();
 
-        repo::linking::link(&db.pool, &account, "@evan:mbm.one")
-            .await
-            .unwrap();
-        repo::linking::link(&db.pool, &account, "@evan:other.org")
-            .await
-            .unwrap();
+        bind_matrix(&db.pool, &account, "@evan:mbm.one").await;
+        bind_matrix(&db.pool, &account, "@evan:other.org").await;
 
         let session = services
             .accounts
@@ -652,9 +755,11 @@ mod tests {
             let mut dm = ctx("unlink", &account, true);
             dm.raw_args = args.into();
             let reply = module()
-                .handle_command(&dm, &services, &db, None)
+                .handle_command(&dm, &services, &db)
                 .await
-                .unwrap();
+                .unwrap()
+                .html_body()
+                .to_owned();
             assert!(
                 reply.contains("web app"),
                 "`!unlink {args}` must point to the web app: {reply}"
@@ -670,7 +775,11 @@ mod tests {
                 .is_some(),
             "the web session must survive"
         );
-        let links = services.accounts.linked_mxids(&account).await.unwrap();
+        let links = services
+            .identity
+            .user_ids(&account, Channel::Matrix)
+            .await
+            .unwrap();
         assert_eq!(links.len(), 2, "the second identity must stay linked");
     }
 
@@ -686,15 +795,15 @@ mod tests {
         // Initially no passkeys
         let list_ctx = ctx("passkeys", &account, true);
         let reply = module()
-            .handle_command(&list_ctx, &services, &db, None)
+            .handle_command(&list_ctx, &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(reply.contains("no passkeys linked"));
 
         // Insert two passkeys and a matrix link
-        repo::linking::link(&db.pool, &account, "@evan:mbm.one")
-            .await
-            .unwrap();
+        bind_matrix(&db.pool, &account, "@evan:mbm.one").await;
         services
             .accounts
             .add_passkey(&account, "pk1", "{}", "MacBook")
@@ -708,9 +817,11 @@ mod tests {
 
         // List passkeys
         let reply = module()
-            .handle_command(&list_ctx, &services, &db, None)
+            .handle_command(&list_ctx, &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(reply.contains("MacBook"));
         assert!(reply.contains("iPhone"));
 
@@ -718,9 +829,11 @@ mod tests {
         let mut remove_ctx = ctx("passkey", &account, true);
         remove_ctx.raw_args = "rm 1".into();
         let reply = module()
-            .handle_command(&remove_ctx, &services, &db, None)
+            .handle_command(&remove_ctx, &services, &db)
             .await
-            .unwrap();
+            .unwrap()
+            .html_body()
+            .to_owned();
         assert!(reply.contains("Passkey Removal Requires Verification"));
         assert!(reply.contains("/account"));
 

@@ -3,32 +3,32 @@
 use chrono::Utc;
 use sqlx::PgPool;
 
+use crate::application::finance::FinanceService;
 use crate::application::reminders::ReminderService;
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
+use crate::domain::events::SystemEvent;
+use crate::domain::finance::{Direction, NewTransaction, Transaction, TransactionSource};
 use crate::domain::recurring_bills::{
     advance_due_date, reminder_room, wanted_trigger, NewRecurringBill, RecurringBill,
     RecurringBillPatch,
 };
 use crate::domain::reminders::{ReminderPlan, ReminderSource, SyncOutcome};
-use crate::events::{EventBroadcaster, SystemEvent};
-use crate::infrastructure::postgres::repositories;
-use crate::modules::finance::models::TransactionSource;
-use crate::modules::finance::service as finance_service;
+use crate::infrastructure::postgres::repositories::{self, outbox};
 
 #[derive(Clone)]
 pub struct RecurringBillsService {
     pool: PgPool,
-    events: EventBroadcaster,
     reminders: ReminderService,
+    finance: FinanceService,
 }
 
 impl RecurringBillsService {
-    pub fn new(pool: PgPool, events: EventBroadcaster, reminders: ReminderService) -> Self {
+    pub fn new(pool: PgPool, reminders: ReminderService, finance: FinanceService) -> Self {
         Self {
             pool,
-            events,
             reminders,
+            finance,
         }
     }
 
@@ -39,10 +39,12 @@ impl RecurringBillsService {
     ) -> Result<(RecurringBill, SyncOutcome), AppError> {
         input.validate()?;
 
-        let bill = repositories::recurring_bills::create(&self.pool, owner_id, &input).await?;
-        let sync_outcome = self.sync_reminder_for_bill(&bill).await?;
+        let mut tx = self.pool.begin().await?;
+        let bill = repositories::recurring_bills::create(&mut *tx, owner_id, &input).await?;
+        outbox::publish(&mut tx, &SystemEvent::RecurringBillCreated(bill.clone())).await?;
+        tx.commit().await?;
 
-        self.broadcast_created(&bill);
+        let sync_outcome = self.sync_reminder_for_bill(&bill).await?;
 
         Ok((bill, sync_outcome))
     }
@@ -77,15 +79,16 @@ impl RecurringBillsService {
     ) -> Result<(RecurringBill, SyncOutcome), AppError> {
         patch.validate()?;
 
-        let updated = repositories::recurring_bills::update(&self.pool, owner_id, id, &patch)
+        let mut tx = self.pool.begin().await?;
+        let updated = repositories::recurring_bills::update(&mut *tx, owner_id, id, &patch)
             .await?
             .ok_or_else(|| {
                 AppError::NotFound("Recurring bill not found or access denied".to_string())
             })?;
+        outbox::publish(&mut tx, &SystemEvent::RecurringBillUpdated(updated.clone())).await?;
+        tx.commit().await?;
 
         let sync_outcome = self.sync_reminder_for_bill(&updated).await?;
-
-        self.broadcast_updated(&updated);
 
         Ok((updated, sync_outcome))
     }
@@ -99,12 +102,14 @@ impl RecurringBillsService {
             .cancel_due_reminder(ReminderSource::RecurringBill, id)
             .await?;
 
-        repositories::recurring_bills::delete(&self.pool, owner_id, id).await?;
-
-        self.events.send(SystemEvent::RecurringBillDeleted {
+        let mut tx = self.pool.begin().await?;
+        repositories::recurring_bills::delete(&mut *tx, owner_id, id).await?;
+        let event = SystemEvent::RecurringBillDeleted {
             id,
-            owner_id: owner_id.to_string(),
-        });
+            owner_id: *owner_id,
+        };
+        outbox::publish(&mut tx, &event).await?;
+        tx.commit().await?;
 
         Ok(())
     }
@@ -113,14 +118,7 @@ impl RecurringBillsService {
         &self,
         owner_id: &AccountId,
         id: i64,
-    ) -> Result<
-        (
-            RecurringBill,
-            crate::modules::finance::models::Transaction,
-            SyncOutcome,
-        ),
-        AppError,
-    > {
+    ) -> Result<(RecurringBill, Transaction, SyncOutcome), AppError> {
         let bill = self.find_owned(owner_id, id).await?.ok_or_else(|| {
             AppError::NotFound("Recurring bill not found or access denied".to_string())
         })?;
@@ -137,8 +135,9 @@ impl RecurringBillsService {
 
         let next_due = advance_due_date(&bill.next_due_at, &bill.frequency);
 
+        let mut db_tx = self.pool.begin().await?;
         let updated = repositories::recurring_bills::record_payment(
-            &self.pool,
+            &mut *db_tx,
             owner_id,
             id,
             &next_due,
@@ -149,37 +148,35 @@ impl RecurringBillsService {
         .ok_or_else(|| {
             AppError::NotFound("Recurring bill not found or access denied".to_string())
         })?;
+        outbox::publish(
+            &mut db_tx,
+            &SystemEvent::RecurringBillUpdated(updated.clone()),
+        )
+        .await?;
+        db_tx.commit().await?;
 
         let sync_outcome = self.sync_reminder_for_bill(&updated).await?;
 
         let note = format!("Recurring bill: {}", bill.name);
-        let tx = finance_service::create_transaction(
-            &self.pool,
-            Some(&self.events),
-            bill.owner_id.as_str(),
-            finance_service::NewTransaction {
-                direction: "expense",
-                amount_minor: bill.amount_minor,
-                currency: &bill.currency,
-                currency_exponent: bill.currency_exponent,
-                category: Some(&bill.category),
-                note: Some(&note),
-                room_id: &bill.room_id,
-                sender_name: &bill.sender_name,
-                occurred_at: Utc::now(),
-                source: Some((TransactionSource::RecurringBill.as_str(), bill.id)),
-                create_missing_category: true,
-            },
-        )
-        .await
-        .map_err(|e| {
-            AppError::Database(sqlx::Error::Protocol(format!(
-                "Failed to record bill transaction: {}",
-                e
-            )))
-        })?;
-
-        self.broadcast_updated(&updated);
+        let tx = self
+            .finance
+            .create_transaction(
+                &bill.owner_id,
+                NewTransaction {
+                    direction: Direction::Expense,
+                    amount_minor: bill.amount_minor,
+                    currency: &bill.currency,
+                    currency_exponent: bill.currency_exponent,
+                    category: Some(&bill.category),
+                    note: Some(&note),
+                    room_id: &bill.room_id,
+                    sender_name: &bill.sender_name,
+                    occurred_at: Utc::now(),
+                    source: Some((TransactionSource::RecurringBill.as_str(), bill.id)),
+                    create_missing_category: true,
+                },
+            )
+            .await?;
 
         Ok((updated, tx, sync_outcome))
     }
@@ -196,7 +193,7 @@ impl RecurringBillsService {
         let plan = ReminderPlan {
             source: ReminderSource::RecurringBill,
             source_id: bill.id,
-            owner_id: bill.owner_id.clone(),
+            owner_id: bill.owner_id,
             owner_name: bill.sender_name.clone(),
             room_id: room_id.to_string(),
             message: format!(
@@ -208,14 +205,60 @@ impl RecurringBillsService {
 
         self.reminders.sync_due_reminder(&plan).await
     }
+}
 
-    fn broadcast_created(&self, bill: &RecurringBill) {
-        self.events
-            .send(SystemEvent::RecurringBillCreated(bill.clone()));
-    }
+#[cfg(test)]
+mod tests {
+    use crate::application::AppServices;
+    use crate::domain::accounts::AccountId;
+    use crate::domain::recurring_bills::NewRecurringBill;
+    use crate::infrastructure::postgres::repositories;
 
-    fn broadcast_updated(&self, bill: &RecurringBill) {
-        self.events
-            .send(SystemEvent::RecurringBillUpdated(bill.clone()));
+    /// Given a bill, When it is deleted, Then RecurringBillDeleted is in the
+    /// outbox.
+    #[tokio::test]
+    async fn delete_writes_recurring_bill_deleted_to_the_outbox() {
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let owner = AccountId::from_seed("bill_outbox_delete");
+        crate::db::pool::seed_account(&pool, &owner).await;
+        let services = AppServices::new(&pool);
+        let (bill, _) = services
+            .recurring_bills
+            .create(
+                &owner,
+                NewRecurringBill {
+                    room_id: "web".to_string(),
+                    sender_name: "alice".to_string(),
+                    name: "Spotify".to_string(),
+                    category: "Entertainment".to_string(),
+                    amount_minor: 999,
+                    currency: "USD".to_string(),
+                    currency_exponent: 2,
+                    frequency: "monthly".to_string(),
+                    due_day: Some(1),
+                    next_due_at: "2026-06-01 00:00:00".to_string(),
+                    total_installments: None,
+                    auto_pay: false,
+                    notes: None,
+                    remind_before_minutes: None,
+                    remind_room_id: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        services
+            .recurring_bills
+            .delete(&owner, bill.id)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            repositories::outbox::event_types_for(&pool, &owner)
+                .await
+                .unwrap(),
+            vec!["RecurringBillCreated", "RecurringBillDeleted"]
+        );
     }
 }

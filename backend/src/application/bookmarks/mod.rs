@@ -6,12 +6,13 @@ use sqlx::PgPool;
 
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
+use crate::domain::bookmarks::BookmarkFields;
 use crate::domain::bookmarks::{
     Bookmark, BookmarkError, BookmarkQuery, BookmarkStats, CreateBookmark, ExtractedMetadata,
     UpdateBookmark,
 };
-use crate::events::{EventBroadcaster, SystemEvent};
-use crate::infrastructure::postgres::repositories;
+use crate::domain::events::SystemEvent;
+use crate::infrastructure::postgres::repositories::{self, outbox};
 
 impl From<BookmarkError> for AppError {
     fn from(err: BookmarkError) -> Self {
@@ -25,12 +26,11 @@ impl From<BookmarkError> for AppError {
 #[derive(Clone)]
 pub struct BookmarkService {
     pool: PgPool,
-    events: EventBroadcaster,
 }
 
 impl BookmarkService {
-    pub fn new(pool: PgPool, events: EventBroadcaster) -> Self {
-        Self { pool, events }
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
     }
 
     /// Creates and persists a new bookmark, then announces `SystemEvent::BookmarkCreated`.
@@ -43,10 +43,10 @@ impl BookmarkService {
         meta: ExtractedMetadata,
     ) -> Result<Bookmark, AppError> {
         let input = CreateBookmark::new(url, meta, user_title, tags)?;
-        let bookmark = repositories::bookmarks::create(&self.pool, owner, &input).await?;
-
-        self.events
-            .send(SystemEvent::BookmarkCreated(bookmark.clone()));
+        let mut tx = self.pool.begin().await?;
+        let bookmark = repositories::bookmarks::create(&mut *tx, owner, &input).await?;
+        outbox::publish(&mut tx, &SystemEvent::BookmarkCreated(bookmark.clone())).await?;
+        tx.commit().await?;
 
         Ok(bookmark)
     }
@@ -98,60 +98,71 @@ impl BookmarkService {
             .map(|t| t.join(","))
             .unwrap_or(existing.tags);
 
+        let mut tx = self.pool.begin().await?;
         let updated = repositories::bookmarks::update_fields(
-            &self.pool,
+            &mut *tx,
             id,
             owner,
-            title,
-            description,
-            is_favorite,
-            is_archived,
-            &tags_str,
+            BookmarkFields {
+                title,
+                description,
+                is_favorite,
+                is_archived,
+                tags: &tags_str,
+            },
         )
         .await?
         .ok_or_else(|| AppError::NotFound("Bookmark not found".to_string()))?;
 
-        self.events
-            .send(SystemEvent::BookmarkUpdated(updated.clone()));
+        outbox::publish(&mut tx, &SystemEvent::BookmarkUpdated(updated.clone())).await?;
+        tx.commit().await?;
 
         Ok(updated)
     }
 
     /// Toggles the favorite status of a bookmark.
     pub async fn toggle_favorite(&self, owner: &AccountId, id: i64) -> Result<Bookmark, AppError> {
-        let updated = repositories::bookmarks::toggle_favorite(&self.pool, id, owner)
+        let mut tx = self.pool.begin().await?;
+        let updated = repositories::bookmarks::toggle_favorite(&mut *tx, id, owner)
             .await?
             .ok_or_else(|| AppError::NotFound("Bookmark not found".to_string()))?;
 
-        self.events
-            .send(SystemEvent::BookmarkUpdated(updated.clone()));
+        outbox::publish(&mut tx, &SystemEvent::BookmarkUpdated(updated.clone())).await?;
+        tx.commit().await?;
 
         Ok(updated)
     }
 
     /// Toggles the archived status of a bookmark.
     pub async fn toggle_archived(&self, owner: &AccountId, id: i64) -> Result<Bookmark, AppError> {
-        let updated = repositories::bookmarks::toggle_archived(&self.pool, id, owner)
+        let mut tx = self.pool.begin().await?;
+        let updated = repositories::bookmarks::toggle_archived(&mut *tx, id, owner)
             .await?
             .ok_or_else(|| AppError::NotFound("Bookmark not found".to_string()))?;
 
-        self.events
-            .send(SystemEvent::BookmarkUpdated(updated.clone()));
+        outbox::publish(&mut tx, &SystemEvent::BookmarkUpdated(updated.clone())).await?;
+        tx.commit().await?;
 
         Ok(updated)
     }
 
     /// Deletes a bookmark by ID, announcing `SystemEvent::BookmarkDeleted`.
     pub async fn delete(&self, owner: &AccountId, id: i64) -> Result<(), AppError> {
-        let deleted = repositories::bookmarks::delete(&self.pool, id, owner).await?;
+        let mut tx = self.pool.begin().await?;
+        let deleted = repositories::bookmarks::delete(&mut *tx, id, owner).await?;
         if !deleted {
             return Err(AppError::NotFound("Bookmark not found".to_string()));
         }
 
-        self.events.send(SystemEvent::BookmarkDeleted {
-            id,
-            owner_id: owner.to_string(),
-        });
+        outbox::publish(
+            &mut tx,
+            &SystemEvent::BookmarkDeleted {
+                id,
+                owner_id: *owner,
+            },
+        )
+        .await?;
+        tx.commit().await?;
 
         Ok(())
     }
@@ -167,22 +178,20 @@ impl BookmarkService {
 mod tests {
     use super::*;
 
-    async fn setup() -> (BookmarkService, AccountId, EventBroadcaster) {
+    async fn setup() -> (BookmarkService, AccountId) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        let owner =
-            crate::accounts::AccountRepository::resolve_or_provision(&pool, "@alice:mbm.one")
-                .await
-                .unwrap();
-        let events = EventBroadcaster::default();
-        let service = BookmarkService::new(pool, events.clone());
-        (service, AccountId::new(owner), events)
+        let owner = crate::application::AppServices::new(&pool)
+            .identity
+            .provision_matrix_for_test("@alice:mbm.one")
+            .await;
+        let service = BookmarkService::new(pool);
+        (service, owner)
     }
 
     #[tokio::test]
     async fn test_service_crud_and_events() {
-        let (service, owner, events) = setup().await;
-        let mut rx = events.subscribe();
+        let (service, owner) = setup().await;
 
         let meta = ExtractedMetadata {
             title: "Rust Programming".to_string(),
@@ -202,33 +211,75 @@ mod tests {
             .await
             .unwrap();
 
-        match rx.recv().await.unwrap() {
-            SystemEvent::BookmarkCreated(created) => {
-                assert_eq!(created.id, b.id);
-                assert_eq!(created.owner_id, owner);
-            }
-            other => panic!("Unexpected event: {other:?}"),
-        }
-
-        // Toggle favorite
         let fav = service.toggle_favorite(&owner, b.id).await.unwrap();
         assert!(fav.is_favorite);
-        match rx.recv().await.unwrap() {
-            SystemEvent::BookmarkUpdated(updated) => {
-                assert_eq!(updated.id, b.id);
-                assert!(updated.is_favorite);
-            }
-            other => panic!("Unexpected event: {other:?}"),
-        }
 
-        // Delete
         service.delete(&owner, b.id).await.unwrap();
-        match rx.recv().await.unwrap() {
-            SystemEvent::BookmarkDeleted { id, owner_id } => {
-                assert_eq!(id, b.id);
-                assert_eq!(owner_id, owner.as_str());
-            }
-            other => panic!("Unexpected event: {other:?}"),
-        }
+
+        assert_eq!(
+            repositories::outbox::event_types_for(&service.pool, &owner)
+                .await
+                .unwrap(),
+            vec!["BookmarkCreated", "BookmarkUpdated", "BookmarkDeleted"]
+        );
+    }
+
+    /// Given an owner, When a bookmark is created, Then BookmarkCreated is in the outbox.
+    #[tokio::test]
+    async fn create_writes_bookmark_created_to_the_outbox() {
+        let (service, owner) = setup().await;
+
+        service
+            .create(
+                &owner,
+                "https://rust-lang.org",
+                None,
+                None,
+                ExtractedMetadata {
+                    title: "Rust".to_string(),
+                    domain: "rust-lang.org".to_string(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(
+            repositories::outbox::event_types_for(&service.pool, &owner)
+                .await
+                .unwrap(),
+            vec!["BookmarkCreated"]
+        );
+    }
+
+    /// Given the outbox insert failing, When create runs, Then the bookmark
+    /// row is rolled back and the call errors.
+    #[tokio::test]
+    async fn a_failed_create_leaves_no_row_and_no_event() {
+        let (service, owner) = setup().await;
+        repositories::outbox::fail_every_publish(&service.pool).await;
+
+        assert!(service
+            .create(
+                &owner,
+                "https://rust-lang.org",
+                Some("title"),
+                None,
+                ExtractedMetadata::default(),
+            )
+            .await
+            .is_err());
+
+        assert_eq!(
+            service
+                .count(&owner, &BookmarkQuery::default())
+                .await
+                .unwrap(),
+            0
+        );
+        assert!(repositories::outbox::event_types_for(&service.pool, &owner)
+            .await
+            .unwrap()
+            .is_empty());
     }
 }

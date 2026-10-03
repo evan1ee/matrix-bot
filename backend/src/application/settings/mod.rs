@@ -12,10 +12,11 @@ use sqlx::PgPool;
 
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
+use crate::domain::events::SystemEvent;
 use crate::domain::settings::{
     parse_currency, parse_timezone, RawSettingsUpdate, SettingsError, UserSettings,
 };
-use crate::events::{EventBroadcaster, SystemEvent};
+use crate::infrastructure::postgres::repositories::outbox;
 use crate::infrastructure::postgres::repositories::settings as repo;
 
 impl From<SettingsError> for AppError {
@@ -39,20 +40,17 @@ fn validate(settings: &UserSettings) -> Result<(), SettingsError> {
 #[derive(Clone)]
 pub struct SettingsService {
     pool: PgPool,
-    events: EventBroadcaster,
 }
 
 impl SettingsService {
-    pub fn new(pool: PgPool, events: EventBroadcaster) -> Self {
-        Self { pool, events }
+    pub fn new(pool: PgPool) -> Self {
+        Self { pool }
     }
 
     /// The caller's settings, or the documented defaults if they have never
     /// saved any (AGENTS.md: a missing row means defaults, never an error).
     pub async fn get(&self, owner_id: &AccountId) -> Result<UserSettings, AppError> {
-        Ok(repo::get(&self.pool, owner_id.as_str())
-            .await?
-            .unwrap_or_default())
+        Ok(repo::get(&self.pool, owner_id).await?.unwrap_or_default())
     }
 
     /// Reads settings for a caller that cannot fail its own work over a
@@ -75,7 +73,7 @@ impl SettingsService {
     /// caller doing read-modify-write should use [`Self::modify`] instead, or
     /// it risks the lost-update race `modify`'s row lock closes.
     ///
-    /// The broadcast is what keeps an open web tab honest: every timestamp it
+    /// The published event is what keeps an open web tab honest: every timestamp it
     /// shows is formatted against these settings, so a change made over
     /// Matrix or the AI tools has to reach the SSE stream or the browser
     /// silently keeps rendering the old values.
@@ -85,11 +83,17 @@ impl SettingsService {
         settings: UserSettings,
     ) -> Result<UserSettings, AppError> {
         validate(&settings)?;
-        repo::upsert(&self.pool, owner_id.as_str(), &settings).await?;
-        self.events.send(SystemEvent::SettingsUpdated {
-            owner_id: owner_id.to_string(),
-            settings: settings.clone(),
-        });
+        let mut tx = self.pool.begin().await?;
+        repo::upsert(&mut *tx, owner_id, &settings).await?;
+        outbox::publish(
+            &mut tx,
+            &SystemEvent::SettingsUpdated {
+                owner_id: *owner_id,
+                settings: settings.clone(),
+            },
+        )
+        .await?;
+        tx.commit().await?;
         Ok(settings)
     }
 
@@ -113,17 +117,21 @@ impl SettingsService {
         F: FnOnce(&mut UserSettings) -> Result<(), SettingsError>,
     {
         let mut tx = self.pool.begin().await?;
-        let mut settings = repo::get_for_update(&mut *tx, owner_id.as_str())
+        let mut settings = repo::get_for_update(&mut *tx, owner_id)
             .await?
             .unwrap_or_default();
         f(&mut settings)?;
         validate(&settings)?;
-        repo::upsert(&mut *tx, owner_id.as_str(), &settings).await?;
+        repo::upsert(&mut *tx, owner_id, &settings).await?;
+        outbox::publish(
+            &mut tx,
+            &SystemEvent::SettingsUpdated {
+                owner_id: *owner_id,
+                settings: settings.clone(),
+            },
+        )
+        .await?;
         tx.commit().await?;
-        self.events.send(SystemEvent::SettingsUpdated {
-            owner_id: owner_id.to_string(),
-            settings: settings.clone(),
-        });
         Ok(settings)
     }
 
@@ -147,7 +155,7 @@ impl SettingsService {
     /// delivered today" rather than skipping every account because one read
     /// failed.
     pub async fn get_last_briefing_date(&self, owner_id: &AccountId) -> Option<String> {
-        repo::get_last_briefing_date(&self.pool, owner_id.as_str())
+        self.try_last_briefing_date(owner_id)
             .await
             .unwrap_or_else(|err| {
                 tracing::warn!("Could not read last briefing date for {owner_id}: {err:?}");
@@ -155,20 +163,21 @@ impl SettingsService {
             })
     }
 
+    /// [`Self::get_last_briefing_date`] for a caller that must tell "never
+    /// sent" from "could not read" (the job handler retries on the latter).
+    pub async fn try_last_briefing_date(
+        &self,
+        owner_id: &AccountId,
+    ) -> Result<Option<String>, AppError> {
+        Ok(repo::get_last_briefing_date(&self.pool, owner_id).await?)
+    }
+
     pub async fn update_last_briefing_date(
         &self,
         owner_id: &AccountId,
         date_str: &str,
     ) -> Result<(), AppError> {
-        Ok(repo::update_last_briefing_date(&self.pool, owner_id.as_str(), date_str).await?)
-    }
-
-    /// Subscribes to the events this service publishes. Test-only: a
-    /// production caller that needs the stream subscribes to the same
-    /// `EventBroadcaster` it built this service with instead.
-    #[cfg(test)]
-    pub fn subscribe(&self) -> tokio::sync::broadcast::Receiver<SystemEvent> {
-        self.events.subscribe()
+        Ok(repo::update_last_briefing_date(&self.pool, owner_id, date_str).await?)
     }
 }
 
@@ -179,13 +188,13 @@ mod tests {
     async fn service() -> SettingsService {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        SettingsService::new(pool, EventBroadcaster::default())
+        SettingsService::new(pool)
     }
 
     #[tokio::test]
     async fn a_caller_with_no_saved_row_gets_the_defaults() {
         let service = service().await;
-        let owner = AccountId::new("@evan:mbm.one");
+        let owner = AccountId::from_seed("@evan:mbm.one");
         assert_eq!(service.get(&owner).await.unwrap(), UserSettings::default());
         assert_eq!(
             service.get_or_default(&owner).await,
@@ -196,7 +205,7 @@ mod tests {
     #[tokio::test]
     async fn get_or_default_degrades_instead_of_failing_on_a_closed_pool() {
         let service = service().await;
-        let owner = AccountId::new("@evan:mbm.one");
+        let owner = AccountId::from_seed("@evan:mbm.one");
         service.pool.close().await;
 
         assert_eq!(
@@ -209,11 +218,21 @@ mod tests {
         ));
     }
 
+    async fn ensure_account(pool: &PgPool, owner: &AccountId) {
+        sqlx::query!(
+            "INSERT INTO accounts (id, display_name, status) VALUES ($1, 'test', 'active') ON CONFLICT DO NOTHING",
+            owner.as_uuid()
+        )
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
     #[tokio::test]
-    async fn save_persists_and_broadcasts_to_the_owner() {
+    async fn save_persists_and_writes_the_event_to_the_outbox() {
         let service = service().await;
-        let mut rx = service.events.subscribe();
-        let owner = AccountId::new("@evan:mbm.one");
+        let owner = AccountId::from_seed("@evan:mbm.one");
+        ensure_account(&service.pool, &owner).await;
 
         let saved = service
             .save(
@@ -231,15 +250,22 @@ mod tests {
         let read_back = service.get(&owner).await.unwrap();
         assert_eq!(read_back, saved);
 
-        let event = rx.try_recv().unwrap();
-        assert_eq!(event.owner_id(), "@evan:mbm.one");
-        assert!(matches!(event, SystemEvent::SettingsUpdated { .. }));
+        assert_eq!(
+            crate::infrastructure::postgres::repositories::outbox::event_types_for(
+                &service.pool,
+                &owner
+            )
+            .await
+            .unwrap(),
+            vec!["SettingsUpdated"]
+        );
     }
 
     #[tokio::test]
     async fn update_validates_before_saving_anything() {
         let service = service().await;
-        let owner = AccountId::new("@evan:mbm.one");
+        let owner = AccountId::from_seed("@evan:mbm.one");
+        ensure_account(&service.pool, &owner).await;
         service
             .save(
                 &owner,
@@ -276,7 +302,8 @@ mod tests {
     #[tokio::test]
     async fn update_merges_with_the_current_row() {
         let service = service().await;
-        let owner = AccountId::new("@evan:mbm.one");
+        let owner = AccountId::from_seed("@evan:mbm.one");
+        ensure_account(&service.pool, &owner).await;
         service
             .save(
                 &owner,
@@ -313,7 +340,8 @@ mod tests {
     #[tokio::test]
     async fn last_briefing_date_round_trips() {
         let service = service().await;
-        let owner = AccountId::new("@evan:mbm.one");
+        let owner = AccountId::from_seed("@evan:mbm.one");
+        ensure_account(&service.pool, &owner).await;
         assert_eq!(service.get_last_briefing_date(&owner).await, None);
 
         service
@@ -330,7 +358,7 @@ mod tests {
     #[tokio::test]
     async fn save_rejects_an_invalid_timezone_without_persisting_anything() {
         let service = service().await;
-        let owner = AccountId::new("@evan:mbm.one");
+        let owner = AccountId::from_seed("@evan:mbm.one");
         let err = service
             .save(
                 &owner,
@@ -352,7 +380,7 @@ mod tests {
     #[tokio::test]
     async fn save_rejects_an_invalid_currency() {
         let service = service().await;
-        let owner = AccountId::new("@evan:mbm.one");
+        let owner = AccountId::from_seed("@evan:mbm.one");
         let err = service
             .save(
                 &owner,
@@ -369,7 +397,8 @@ mod tests {
     #[tokio::test]
     async fn concurrent_modifies_do_not_lose_an_update() {
         let service = service().await;
-        let owner = AccountId::new("@evan:mbm.one");
+        let owner = AccountId::from_seed("@evan:mbm.one");
+        ensure_account(&service.pool, &owner).await;
         service
             .save(
                 &owner,
@@ -399,7 +428,7 @@ mod tests {
     #[tokio::test]
     async fn update_on_a_closed_pool_fails_and_writes_nothing() {
         let service = service().await;
-        let owner = AccountId::new("@evan:mbm.one");
+        let owner = AccountId::from_seed("@evan:mbm.one");
         service.pool.close().await;
 
         let err = service
@@ -418,5 +447,86 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(err, AppError::Database(_)));
+    }
+
+    /// Given a caller, When modify commits, Then SettingsUpdated is in the outbox.
+    #[tokio::test]
+    async fn modify_writes_settings_updated_to_the_outbox() {
+        let service = service().await;
+        let owner = AccountId::from_seed("settings_outbox_modify");
+        ensure_account(&service.pool, &owner).await;
+
+        service
+            .modify(&owner, |s| {
+                s.max_history_turns = 7;
+                Ok(())
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            crate::infrastructure::postgres::repositories::outbox::event_types_for(
+                &service.pool,
+                &owner
+            )
+            .await
+            .unwrap(),
+            vec!["SettingsUpdated"]
+        );
+    }
+
+    /// Given a caller, When save commits, Then SettingsUpdated is in the outbox.
+    #[tokio::test]
+    async fn save_writes_settings_updated_to_the_outbox() {
+        let service = service().await;
+        let owner = AccountId::from_seed("settings_outbox_save");
+        ensure_account(&service.pool, &owner).await;
+
+        service.save(&owner, UserSettings::default()).await.unwrap();
+
+        assert_eq!(
+            crate::infrastructure::postgres::repositories::outbox::event_types_for(
+                &service.pool,
+                &owner
+            )
+            .await
+            .unwrap(),
+            vec!["SettingsUpdated"]
+        );
+    }
+
+    /// Given saved settings and a failing outbox insert, When modify changes
+    /// them, Then the upsert is rolled back: the old value stays and the call
+    /// errors.
+    #[tokio::test]
+    async fn a_failed_publish_rolls_the_modify_back() {
+        let service = service().await;
+        let owner = AccountId::from_seed("settings_outbox_atomic");
+        ensure_account(&service.pool, &owner).await;
+        service
+            .modify(&owner, |s| {
+                s.briefing_time = "07:30".into();
+                Ok(())
+            })
+            .await
+            .unwrap();
+        outbox::fail_every_publish(&service.pool).await;
+
+        let res = service
+            .modify(&owner, |s| {
+                s.briefing_time = "08:45".into();
+                Ok(())
+            })
+            .await;
+
+        assert!(res.is_err());
+        assert_eq!(service.get(&owner).await.unwrap().briefing_time, "07:30");
+        assert_eq!(
+            outbox::event_types_for(&service.pool, &owner)
+                .await
+                .unwrap(),
+            vec!["SettingsUpdated"],
+            "only the first, successful modify published"
+        );
     }
 }

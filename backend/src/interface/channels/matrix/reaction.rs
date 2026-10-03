@@ -9,8 +9,9 @@
 use crate::application::{AppError, AppServices};
 use crate::db::Database;
 use crate::db::DbPool;
-use crate::domain::accounts::AccountId;
+use crate::domain::channels::PlatformIdentity;
 use crate::domain::todos::TodoPatch;
+use crate::infrastructure::postgres::repositories::identities;
 use crate::interface::channels::matrix::reaction_targets::{
     delete_target_by_entity, get_target, BotMessageTarget,
 };
@@ -83,12 +84,14 @@ pub fn register_reaction_handler(client: &Client, db: Database, services: AppSer
                 None => return,
             };
 
-            let sender_owner_id = match crate::accounts::AccountRepository::resolve_or_provision(
-                &db.pool,
-                ev.sender.as_str(),
-            )
-            .await
-            {
+            let sender = match PlatformIdentity::matrix(ev.sender.as_str()) {
+                Ok(identity) => identity,
+                Err(err) => {
+                    warn!("Ignoring reaction from malformed sender {}: {err}", ev.sender);
+                    return;
+                }
+            };
+            let sender_owner_id = match identities::resolve_or_provision(&db.pool, &sender).await {
                 Ok(oid) => oid,
                 Err(err) => {
                     warn!(
@@ -182,7 +185,7 @@ pub async fn apply_reaction(
 }
 
 async fn handle_done(services: &AppServices, target: &BotMessageTarget) -> Option<ReactionOutcome> {
-    let owner_id = AccountId::from(target.owner_id.clone());
+    let owner_id = target.owner_id;
     match target.entity_type.as_str() {
         "todo" => match services
             .todos
@@ -232,7 +235,7 @@ async fn handle_delete(
     services: &AppServices,
     target: &BotMessageTarget,
 ) -> Option<ReactionOutcome> {
-    let owner_id = AccountId::from(target.owner_id.clone());
+    let owner_id = target.owner_id;
     match target.entity_type.as_str() {
         "todo" => match services.todos.delete(&owner_id, target.entity_id).await {
             Ok(_) => {
@@ -290,7 +293,7 @@ async fn handle_delay(
     services: &AppServices,
     target: &BotMessageTarget,
 ) -> Option<ReactionOutcome> {
-    let owner_id = AccountId::from(target.owner_id.clone());
+    let owner_id = target.owner_id;
     match target.entity_type.as_str() {
         "todo" => match services.todos.find_owned(&owner_id, target.entity_id).await {
             Ok(Some(item)) => {
@@ -375,7 +378,7 @@ async fn handle_celebrate(
     services: &AppServices,
     target: &BotMessageTarget,
 ) -> Option<ReactionOutcome> {
-    let owner_id = AccountId::from(target.owner_id.clone());
+    let owner_id = target.owner_id;
     match target.entity_type.as_str() {
         "todo" => match services
             .todos
@@ -446,6 +449,7 @@ async fn send_reply(room: &Room, html: &str) -> Option<matrix_sdk::ruma::OwnedEv
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::accounts::AccountId;
     use crate::domain::reminders::{RecurrencePattern, ReminderSource, ReminderStatus};
     use crate::domain::todos::{NewTodo, TodoPriority};
     use crate::infrastructure::postgres::repositories;
@@ -454,6 +458,10 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         pool
+    }
+
+    async fn ensure_account(pool: &DbPool, account_id: &AccountId) {
+        crate::db::pool::seed_account(pool, account_id).await;
     }
 
     #[test]
@@ -476,7 +484,8 @@ mod tests {
     async fn test_reaction_actions_on_todo() {
         let pool = setup_pool().await;
         let services = AppServices::new(&pool);
-        let alice = AccountId::from("@alice:x");
+        let alice = AccountId::from_seed("@alice:x");
+        ensure_account(&pool, &alice).await;
 
         let (todo, _) = services
             .todos
@@ -500,7 +509,7 @@ mod tests {
             room_id: "!room:x".to_string(),
             entity_type: "todo".to_string(),
             entity_id: todo.id,
-            owner_id: "@alice:x".to_string(),
+            owner_id: alice,
             title: todo.text.clone(),
         };
 
@@ -560,7 +569,8 @@ mod tests {
     async fn test_completing_by_reaction_cancels_the_reminder() {
         let pool = setup_pool().await;
         let services = AppServices::new(&pool);
-        let alice = AccountId::from("@alice:x");
+        let alice = AccountId::from_seed("@alice:x");
+        ensure_account(&pool, &alice).await;
 
         let due = Utc::now() + Duration::hours(4);
         let (todo, _) = services
@@ -593,7 +603,7 @@ mod tests {
             room_id: "!room:x".to_string(),
             entity_type: "todo".to_string(),
             entity_id: todo.id,
-            owner_id: "@alice:x".to_string(),
+            owner_id: alice,
             title: todo.text.clone(),
         };
 
@@ -615,7 +625,8 @@ mod tests {
     async fn test_reaction_actions_on_reminder() {
         let pool = setup_pool().await;
         let services = AppServices::new(&pool);
-        let bob = AccountId::from("@bob:x");
+        let bob = AccountId::from_seed("@bob:x");
+        ensure_account(&pool, &bob).await;
 
         let initial_trigger = Utc::now() + Duration::hours(2);
         let rem = services
@@ -639,7 +650,7 @@ mod tests {
             room_id: "!room:x".to_string(),
             entity_type: "reminder".to_string(),
             entity_id: rem.id,
-            owner_id: "@bob:x".to_string(),
+            owner_id: bob,
             title: rem.message.clone(),
         };
 

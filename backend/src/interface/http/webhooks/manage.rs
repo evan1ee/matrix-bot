@@ -58,7 +58,7 @@ pub async fn create_webhook(
     }
 
     let client_guard = state.bot_client.read().await;
-    let is_auth = crate::interface::chat::rooms::is_room_authorized_for_account(
+    let is_auth = crate::interface::channels::matrix::rooms::is_room_authorized_for_account(
         &state.services.rooms,
         client_guard.as_ref(),
         &user.account_id,
@@ -110,7 +110,7 @@ pub async fn update_webhook(
 ) -> Result<Json<Webhook>, ApiError> {
     if let Some(ref new_room) = input.default_room_id {
         let client_guard = state.bot_client.read().await;
-        let is_auth = crate::interface::chat::rooms::is_room_authorized_for_account(
+        let is_auth = crate::interface::channels::matrix::rooms::is_room_authorized_for_account(
             &state.services.rooms,
             client_guard.as_ref(),
             &user.account_id,
@@ -269,12 +269,10 @@ pub async fn get_webhook_logs(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::accounts::{AccountRepository, STATUS_ACTIVE};
-    use crate::domain::accounts::AccountId;
-    use crate::events::EventBroadcaster;
+    use crate::domain::accounts::STATUS_ACTIVE;
     use crate::interface::http::webhooks::dto::{InboundPayload, TelegramQuery};
     use crate::interface::http::webhooks::inbound::inbound_webhook;
-    use crate::interface::http::webhooks_telegram::telegram_send_message_get;
+    use crate::interface::http::webhooks::telegram_compat::telegram_send_message_get;
     use axum::body::Bytes;
     use axum::http::HeaderMap;
 
@@ -282,8 +280,7 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         ApiState::new(
-            crate::db::Database { pool: pool },
-            EventBroadcaster::new(32),
+            crate::db::Database { pool },
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
@@ -293,12 +290,14 @@ mod tests {
     #[tokio::test]
     async fn test_webhook_api_flow() {
         let state = test_state().await;
-        let acct_str = AccountRepository::create(&state.db.pool, "alice", STATUS_ACTIVE)
+        let acct = state
+            .services
+            .accounts
+            .create("alice", STATUS_ACTIVE)
             .await
             .unwrap();
-        let acct = AccountId::from(acct_str);
-        let user = AuthUser::for_account(acct.clone());
-        let verified = VerifiedUser(AuthUser::for_account(acct.clone()));
+        let user = AuthUser::for_account(acct);
+        let verified = VerifiedUser(AuthUser::for_account(acct));
 
         // 0. Ensure unauthorized room creation is rejected
         let unauth = create_webhook(

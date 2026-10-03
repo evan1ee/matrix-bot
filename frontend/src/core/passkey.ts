@@ -225,6 +225,38 @@ export async function addPasskey(): Promise<AccountSummary> {
 }
 
 /**
+ * Creates an account and its first passkey from a `/link` token, binding the
+ * chat identity the token was issued for in the same step.
+ *
+ * Only an allowlisted identity gets this far; the server refuses the start
+ * otherwise, and nothing exists until the finish succeeds.
+ */
+export async function signUpWithLink(token: string): Promise<AccountSummary> {
+  const start = await fetchApi<CeremonyStart>('/link/signup/start', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  });
+
+  const credential = (await navigator.credentials.create(
+    toCreationOptions(start.options)
+  )) as PublicKeyCredential | null;
+
+  if (!credential) {
+    throw new Error('No passkey was created');
+  }
+
+  return fetchApi<AccountSummary>('/link/signup/finish', {
+    method: 'POST',
+    body: JSON.stringify({
+      ceremony_id: start.ceremony_id,
+      token,
+      credential: serialiseRegistration(credential),
+      label: passkeyLabel(),
+    }),
+  });
+}
+
+/**
  * A recognisable name for the device being registered.
  *
  * Best-effort and cosmetic: it only has to help someone spot which entry to

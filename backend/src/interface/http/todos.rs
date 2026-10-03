@@ -57,7 +57,7 @@ impl From<crate::domain::todos::TodoItem> for TodoItem {
         Self {
             id: item.id,
             room_id: item.room_id,
-            owner_id: item.owner_id.into_inner(),
+            owner_id: item.owner_id.to_string(),
             sender_name: item.sender_name,
             text: item.text,
             priority: item.priority.as_str().to_string(),
@@ -301,7 +301,6 @@ pub async fn delete_todo(
 mod tests {
     use super::*;
     use crate::domain::reminders::{ReminderSource, MAX_LEAD_MINUTES};
-    use crate::events::EventBroadcaster;
     use crate::infrastructure::postgres::repositories::reminders as ReminderRepository;
 
     /// `total` must count only the requested completion state.
@@ -313,14 +312,23 @@ mod tests {
     async fn test_completed_filter_narrows_both_items_and_total() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(
+            &pool,
+            &[
+                "acct_alice",
+                "acct_bob",
+                "acct_from_matrix",
+                "acct_from_web",
+            ],
+        )
+        .await;
         let state = ApiState::new(
-            crate::db::Database { pool: pool },
-            EventBroadcaster::default(),
+            crate::db::Database { pool },
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
-        let alice = AuthUser::named("alice", "acct_alice");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
 
         let mut ids = Vec::new();
         for text in ["one", "two", "three"] {
@@ -395,15 +403,24 @@ mod tests {
     async fn test_todo_api_crud_and_isolation() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(
+            &pool,
+            &[
+                "acct_alice",
+                "acct_bob",
+                "acct_from_matrix",
+                "acct_from_web",
+            ],
+        )
+        .await;
         let state = ApiState::new(
-            crate::db::Database { pool: pool },
-            EventBroadcaster::default(),
+            crate::db::Database { pool },
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
-        let alice = AuthUser::named("alice", "acct_alice");
-        let bob = AuthUser::named("bob", "acct_bob");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
+        let bob = AuthUser::named_seed("bob", "acct_bob");
 
         // Alice creates todo
         let req = CreateTodoRequest {
@@ -469,14 +486,23 @@ mod tests {
     async fn test_completion_can_be_toggled_back_off() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(
+            &pool,
+            &[
+                "acct_alice",
+                "acct_bob",
+                "acct_from_matrix",
+                "acct_from_web",
+            ],
+        )
+        .await;
         let state = ApiState::new(
-            crate::db::Database { pool: pool },
-            EventBroadcaster::default(),
+            crate::db::Database { pool },
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
         );
-        let alice = AuthUser::named("alice", "acct_alice");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
 
         let created = create_todo(
             State(state.clone()),
@@ -548,9 +574,18 @@ mod tests {
     async fn test_local_account_cannot_reach_matrix_user_data() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(
+            &pool,
+            &[
+                "acct_alice",
+                "acct_bob",
+                "acct_from_matrix",
+                "acct_from_web",
+            ],
+        )
+        .await;
         let state = ApiState::new(
-            crate::db::Database { pool: pool },
-            EventBroadcaster::default(),
+            crate::db::Database { pool },
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
@@ -559,8 +594,8 @@ mod tests {
         // Two accounts whose users call themselves the same thing. The display
         // name is what a room shows and what a person recognises; it has never
         // been an ownership key, and this proves it still is not.
-        let matrix_evan = AuthUser::named("evan", "acct_from_matrix");
-        let impostor = AuthUser::named("evan", "acct_from_web");
+        let matrix_evan = AuthUser::named_seed("evan", "acct_from_matrix");
+        let impostor = AuthUser::named_seed("evan", "acct_from_web");
 
         assert_eq!(matrix_evan.display_name, impostor.display_name);
         assert_ne!(matrix_evan.owner_id(), impostor.owner_id());
@@ -657,9 +692,18 @@ mod tests {
     async fn due_reminder_state() -> ApiState {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
+        crate::db::pool::seed_accounts(
+            &pool,
+            &[
+                "acct_alice",
+                "acct_bob",
+                "acct_from_matrix",
+                "acct_from_web",
+            ],
+        )
+        .await;
         ApiState::new(
-            crate::db::Database { pool: pool },
-            EventBroadcaster::default(),
+            crate::db::Database { pool },
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
@@ -684,7 +728,7 @@ mod tests {
     #[tokio::test]
     async fn test_create_with_due_date_schedules_a_linked_reminder() {
         let state = due_reminder_state().await;
-        let alice = AuthUser::named("alice", "acct_alice");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
         let due = crate::utils::time::now_at_storage_precision() + chrono::Duration::hours(6);
 
         let created = create_todo(
@@ -717,7 +761,7 @@ mod tests {
         let state = due_reminder_state().await;
         let err = create_todo(
             State(state),
-            AuthUser::named("alice", "acct_alice"),
+            AuthUser::named_seed("alice", "acct_alice"),
             Json(create_with_due(None, Some(60), Some("!room:1"))),
         )
         .await
@@ -733,7 +777,7 @@ mod tests {
         let state = due_reminder_state().await;
         let err = create_todo(
             State(state),
-            AuthUser::named("alice", "acct_alice"),
+            AuthUser::named_seed("alice", "acct_alice"),
             Json(create_with_due(
                 Some(crate::utils::time::now_at_storage_precision() + chrono::Duration::hours(6)),
                 Some(60),
@@ -754,7 +798,7 @@ mod tests {
         for bad in [0, -5, MAX_LEAD_MINUTES + 1] {
             let err = create_todo(
                 State(state.clone()),
-                AuthUser::named("alice", "acct_alice"),
+                AuthUser::named_seed("alice", "acct_alice"),
                 Json(create_with_due(due, Some(bad), Some("!room:1"))),
             )
             .await
@@ -772,7 +816,7 @@ mod tests {
     #[tokio::test]
     async fn test_patch_null_clears_the_due_date_and_its_reminder() {
         let state = due_reminder_state().await;
-        let alice = AuthUser::named("alice", "acct_alice");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
         let due = crate::utils::time::now_at_storage_precision() + chrono::Duration::hours(6);
 
         let created = create_todo(
@@ -839,7 +883,7 @@ mod tests {
     #[tokio::test]
     async fn test_editing_other_fields_keeps_the_reminder_and_its_room() {
         let state = due_reminder_state().await;
-        let alice = AuthUser::named("alice", "acct_alice");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
         let due = crate::utils::time::now_at_storage_precision() + chrono::Duration::hours(6);
 
         let created = create_todo(
@@ -889,7 +933,7 @@ mod tests {
     #[tokio::test]
     async fn test_changing_the_lead_time_reschedules_in_place() {
         let state = due_reminder_state().await;
-        let alice = AuthUser::named("alice", "acct_alice");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
         let due = crate::utils::time::now_at_storage_precision() + chrono::Duration::days(2);
 
         let created = create_todo(
@@ -931,7 +975,7 @@ mod tests {
     #[tokio::test]
     async fn test_deleting_a_task_cancels_its_reminder() {
         let state = due_reminder_state().await;
-        let alice = AuthUser::named("alice", "acct_alice");
+        let alice = AuthUser::named_seed("alice", "acct_alice");
 
         let created = create_todo(
             State(state.clone()),

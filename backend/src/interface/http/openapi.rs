@@ -3,6 +3,13 @@ use utoipa::openapi::security::SecurityScheme;
 use utoipa::{Modify, OpenApi};
 
 use crate::error::ApiErrorResponse;
+use crate::interface::http::finance::{CategoryTotal, CurrencySummary, Direction, Transaction};
+use crate::interface::http::finance_analytics::{
+    ExpenseCategorySlice, FinanceAnalyticsReport, FinanceShare, MonthlyCashflowBucket,
+    PublicFinanceReport, PublicTransaction,
+};
+use crate::interface::http::finance_categories::Category;
+use crate::interface::http::finance_net_worth::{CurrencyNetWorthBreakdown, NetWorthResponse};
 use crate::interface::http::footprints::{
     CreateFootprintRequest, Footprint, FootprintCurrencySpend, FootprintsSummary,
     UpdateFootprintRequest,
@@ -11,6 +18,12 @@ use crate::interface::http::habits::{
     CreateHabitRequest, DayStatus, Habit, HabitStatsSummary, HabitWithStatus, HeatmapDay,
     ToggleHabitRequest, UpdateHabitRequest,
 };
+use crate::interface::http::life::{
+    LifeDayLog, LifeHorizonDay, LifeProfile, LifeProfileStats, LifeYearView,
+    UpdateTimeAllocationInput, UpsertLifeDayLogInput, UpsertLifeProfileInput,
+};
+use crate::interface::http::life_activity::{ActivityEvent, ActivityStats, DayActivityResponse};
+use crate::interface::http::portfolio::{CashBalance, Holding, PortfolioCurrencySummary};
 use crate::interface::http::recurring_bills::{
     CreateBillPayload, RecurringBill, UpdateBillPayload,
 };
@@ -18,20 +31,11 @@ use crate::interface::http::reminders::{RecurrencePattern, Reminder, ReminderSta
 use crate::interface::http::todos::{TodoItem, TodoPriority};
 use crate::interface::http::webhooks::{TelegramMessageResult, TelegramQuery, TelegramResponse};
 use crate::interface::http::{
-    account, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_net_worth,
-    footprints, habits, health, life, life_activity, mcp, ocr, portfolio, portfolio_alerts,
-    portfolio_cash, portfolio_history, portfolio_prices, recurring_bills, reminders, rooms,
-    settings, sse, todos, voice, webhooks, webhooks_telegram,
+    account, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_categories,
+    finance_net_worth, footprints, habits, health, identities, life, life_activity, link, mcp, ocr,
+    portfolio, portfolio_alerts, portfolio_cash, portfolio_history, portfolio_prices,
+    recurring_bills, reminders, rooms, settings, sse, todos, voice, webhooks,
 };
-use crate::modules::finance::models::{
-    Category, CategoryTotal, CurrencySummary, Direction, Transaction,
-};
-use crate::modules::life::activity::{ActivityEvent, ActivityStats, DayActivityResponse};
-use crate::modules::life::models::{
-    LifeDayLog, LifeHorizonDay, LifeProfile, LifeProfileStats, LifeYearView,
-    UpdateTimeAllocationInput, UpsertLifeDayLogInput, UpsertLifeProfileInput,
-};
-use crate::modules::portfolio::models::{CashBalance, Holding, PortfolioCurrencySummary};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -51,11 +55,12 @@ use crate::modules::portfolio::models::{CashBalance, Holding, PortfolioCurrencyS
         account::passkeys::add_passkey_start,
         account::passkeys::rename_passkey,
         account::passkeys::delete_passkey,
-        account::links::list_links,
-        account::links::start_link,
-        account::links::pending_merge,
-        account::links::confirm_merge,
-        account::links::unlink,
+        identities::list_identities,
+        identities::unlink_identity,
+        link::inspect,
+        link::claim,
+        link::signup_start,
+        link::signup_finish,
         account::sessions::list_sessions,
         account::sessions::revoke_other_sessions,
         account::sessions::revoke_session,
@@ -85,9 +90,9 @@ use crate::modules::portfolio::models::{CashBalance, Holding, PortfolioCurrencyS
         finance::delete_transaction,
         finance::summary,
         finance_net_worth::get_net_worth,
-        finance::list_categories,
-        finance::create_category,
-        finance::delete_category,
+        finance_categories::list_categories,
+        finance_categories::create_category,
+        finance_categories::delete_category,
         finance_analytics::get_analytics,
         finance_analytics::get_share,
         finance_analytics::upsert_share,
@@ -173,8 +178,8 @@ use crate::modules::portfolio::models::{CashBalance, Holding, PortfolioCurrencyS
         life::get_day,
         life::delete_day,
         life_activity::get_day_activity,
-        webhooks_telegram::telegram_send_message_get,
-        webhooks_telegram::telegram_send_message_post
+        webhooks::telegram_compat::telegram_send_message_get,
+        webhooks::telegram_compat::telegram_send_message_post
     ),
     components(
         schemas(
@@ -195,22 +200,27 @@ use crate::modules::portfolio::models::{CashBalance, Holding, PortfolioCurrencyS
             auth::recovery::RedeemRecoveryRequest,
             account::PasskeySummary,
             account::SessionSummary,
-            account::LinkCodeResponse,
-            account::UnlinkRequest,
-            account::PendingMerge,
-            account::ConfirmMergeRequest,
+            identities::IdentityDto,
+            identities::IdentityListResponse,
+            identities::UnlinkIdentityRequest,
+            identities::UnlinkIdentityResponse,
+            link::LinkTokenRequest,
+            link::LinkSignupFinishRequest,
+            link::LinkPreviewState,
+            link::LinkPreviewDto,
+            link::LinkClaimOutcome,
+            link::LinkClaimResponse,
             account::RecoveryCodesResponse,
             account::RenamePasskeyRequest,
-            account::MergePreview,
-            crate::accounts::security_events::SecurityEvent,
+            account::SecurityEvent,
             auth::UserProfileResponse,
             auth::MediaProxyQuery,
             rooms::JoinedRoomInfo,
             settings::UserSettings,
             settings::UpdateSettingsRequest,
-            crate::modules::briefing::models::BriefingPayload,
-            crate::modules::briefing::models::BriefingSummary,
-            crate::modules::briefing::models::TickerPerformance,
+            briefing::BriefingPayload,
+            briefing::BriefingSummary,
+            briefing::TickerPerformance,
             TodoItem,
             TodoPriority,
             todos::TodoQuery,
@@ -235,14 +245,14 @@ use crate::modules::portfolio::models::{CashBalance, Holding, PortfolioCurrencyS
             finance::CategoryRequest,
             finance::LedgerResponse,
             finance::CategoryDeletedResponse,
-            crate::modules::finance::net_worth::NetWorthResponse,
-            crate::modules::finance::net_worth::CurrencyNetWorthBreakdown,
-            crate::modules::finance::analytics::MonthlyCashflowBucket,
-            crate::modules::finance::analytics::ExpenseCategorySlice,
-            crate::modules::finance::analytics::FinanceAnalyticsReport,
-            crate::modules::finance::analytics::FinanceShare,
-            crate::modules::finance::analytics::PublicTransaction,
-            crate::modules::finance::analytics::PublicFinanceReport,
+            NetWorthResponse,
+            CurrencyNetWorthBreakdown,
+            MonthlyCashflowBucket,
+            ExpenseCategorySlice,
+            FinanceAnalyticsReport,
+            FinanceShare,
+            PublicTransaction,
+            PublicFinanceReport,
             finance_analytics::AnalyticsQuery,
             finance_analytics::PublicQuery,
             finance_analytics::ShareRequest,
@@ -256,17 +266,17 @@ use crate::modules::portfolio::models::{CashBalance, Holding, PortfolioCurrencyS
             portfolio::SetNoteRequest,
             portfolio::SellResponse,
             portfolio_cash::CashAmountRequest,
-            crate::modules::portfolio::price_feed::RefreshSummary,
-            crate::modules::portfolio::price_feed::TickerSearchResult,
+            portfolio_prices::RefreshSummary,
+            portfolio_prices::TickerSearchResult,
             portfolio_prices::UpdateSymbolRequest,
             portfolio_prices::SymbolQuoteResponse,
             portfolio_alerts::CreateAlertRequest,
-            crate::modules::portfolio::alerts::PriceAlert,
-            crate::modules::portfolio::alerts::AlertCondition,
-            crate::modules::portfolio::history::PortfolioHistoryResponse,
-            crate::modules::portfolio::history::PortfolioHistoryPoint,
-            crate::modules::portfolio::audit::PortfolioAuditEntry,
-            crate::modules::portfolio::audit::AuditVerificationResult,
+            portfolio_alerts::PriceAlert,
+            portfolio_alerts::AlertCondition,
+            portfolio_history::PortfolioHistoryResponse,
+            portfolio_history::PortfolioHistoryPoint,
+            portfolio_prices::PortfolioAuditEntry,
+            portfolio_prices::AuditVerificationResult,
             RecurringBill,
             CreateBillPayload,
             UpdateBillPayload,
@@ -279,25 +289,25 @@ use crate::modules::portfolio::models::{CashBalance, Holding, PortfolioCurrencyS
             crate::interface::http::webhooks::InboundPayload,
             crate::interface::http::webhooks::InboundAcceptedResponse,
             crate::interface::http::webhooks::WebhookLogsResponse,
-            crate::modules::ai::models::AiUserConfig,
-            crate::modules::ai::models::UpdateAiConfigInput,
-            crate::modules::ai::models::VerifyAiKeyInput,
-            crate::modules::ai::models::VerifyAiKeyResponse,
-            crate::modules::ai::models::AiConversation,
-            crate::modules::ai::models::AiMessage,
-            crate::modules::ai::models::AiChatRequest,
-            crate::modules::ai::models::AiChatResponse,
-            crate::modules::ai::retrospective::WeeklyRetrospective,
-            crate::modules::ai::retrospective::CurrencySpendSummary,
-            crate::modules::ai::retrospective::UpcomingBillsSummary,
+            crate::llm::models::AiUserConfig,
+            crate::llm::models::UpdateAiConfigInput,
+            crate::llm::models::VerifyAiKeyInput,
+            crate::llm::models::VerifyAiKeyResponse,
+            crate::llm::models::AiConversation,
+            crate::llm::models::AiMessage,
+            crate::llm::models::AiChatRequest,
+            crate::llm::models::AiChatResponse,
+            crate::llm::retrospective::WeeklyRetrospective,
+            crate::llm::retrospective::CurrencySpendSummary,
+            crate::llm::retrospective::UpcomingBillsSummary,
             bookmarks::Bookmark,
             bookmarks::CreateBookmarkInput,
             bookmarks::UpdateBookmarkInput,
             bookmarks::BookmarkStats,
             bookmarks::DomainCount,
-            crate::modules::mcp::models::CreateMcpTokenRequest,
-            crate::modules::mcp::models::CreateMcpTokenResponse,
-            crate::modules::mcp::models::McpTokenSummary,
+            crate::interface::mcp::models::CreateMcpTokenRequest,
+            crate::interface::mcp::models::CreateMcpTokenResponse,
+            crate::interface::mcp::models::McpTokenSummary,
             ocr::OcrScanResponse,
             ocr::OcrBlockDto,
             ocr::ReceiptExtractionDto,
@@ -355,7 +365,7 @@ impl Modify for SecurityAddon {
             "session_cookie",
             SecurityScheme::ApiKey(utoipa::openapi::security::ApiKey::Cookie(
                 utoipa::openapi::security::ApiKeyValue::with_description(
-                    crate::accounts::session::COOKIE_NAME,
+                    crate::domain::accounts::COOKIE_NAME,
                     "Session cookie set by the passkey sign-in endpoints. HttpOnly, so \
                      it is sent by the browser automatically and is not readable by \
                      JavaScript.",

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE platform_identities SET display_name = $3, updated_at = now()\n         WHERE platform = $1 AND platform_user_id = $2 AND display_name IS DISTINCT FROM $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "88f0bb91ca69cfd170ac85040bf7eb1774fd2878655c40cb0c8de356127cc059"
+}

@@ -1,0 +1,39 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT c.name AS \"category_name?\", CAST(SUM(t.amount_minor) AS BIGINT) AS total\n        FROM transactions t\n        LEFT JOIN finance_categories c ON c.id = t.category_id\n        WHERE t.owner_id = $1\n          AND t.currency = $2\n          AND t.direction = 'expense'\n          AND ($3::bigint IS NULL OR t.category_id = $3)\n          AND ($4::timestamptz IS NULL OR t.occurred_at >= $4)\n          AND ($5::timestamptz IS NULL OR t.occurred_at <= $5)\n        GROUP BY c.name\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "category_name?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "finance_categories",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "total",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int8",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "cac4b14c07a010d78a3ceb588cadd3be2d7bd03ec133f02de3b8e8fef221f46a"
+}

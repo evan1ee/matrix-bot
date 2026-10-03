@@ -16,7 +16,6 @@ use tracing::info;
 
 use crate::config::Config;
 use crate::db::Database;
-use crate::events::EventBroadcaster;
 
 pub mod account;
 pub mod ai;
@@ -26,12 +25,17 @@ pub mod bookmarks;
 pub mod briefing;
 pub mod finance;
 pub mod finance_analytics;
+pub mod finance_categories;
 pub mod finance_net_worth;
 pub mod footprints;
 pub mod habits;
 pub mod health;
+pub mod identities;
+#[cfg(test)]
+mod identity_api_tests;
 pub mod life;
 pub mod life_activity;
+pub mod link;
 pub mod mcp;
 pub mod ocr;
 pub mod openapi;
@@ -48,10 +52,10 @@ pub mod routes;
 pub mod settings;
 pub mod sse;
 pub mod static_files;
+pub mod telegram_webhook;
 pub mod todos;
 pub mod voice;
 pub mod webhooks;
-pub mod webhooks_telegram;
 
 pub use routes::api_routes;
 
@@ -88,17 +92,20 @@ pub async fn bind(config: &Config) -> anyhow::Result<TcpListener> {
 /// it completes once graceful shutdown has drained open connections. SSE
 /// streams end on the same token (see `sse.rs`), so an open browser tab does
 /// not hold the drain open.
+#[allow(clippy::too_many_arguments)]
 pub fn start_api_server(
     config: &Config,
     db: Database,
     services: crate::application::AppServices,
-    broadcaster: EventBroadcaster,
+    hub: crate::events::Hub,
     handles: crate::interface::channels::matrix::handles::BotHandles,
+    telegram: Option<crate::interface::channels::telegram::ingress::TelegramIngress>,
     listener: TcpListener,
     shutdown: CancellationToken,
 ) -> anyhow::Result<JoinHandle<()>> {
-    let state =
-        auth::ApiState::from_config(config, db, services, broadcaster, handles, shutdown.clone())?;
+    let mut state =
+        auth::ApiState::from_config(config, db, services, hub, handles, shutdown.clone())?;
+    state.telegram = telegram;
 
     // Same-origin by default. `Any`/`Any`/`Any` let any site on the internet
     // script authenticated calls against this API using a token it had obtained;
@@ -151,6 +158,11 @@ pub fn start_api_server(
             get(webhooks::telegram_send_message_get).post(webhooks::telegram_send_message_post),
         )
         .route("/webhooks/:token", post(webhooks::inbound_webhook))
+        // Not in OpenAPI (T12); 404 unless Telegram runs in webhook mode.
+        .route(
+            "/api/webhooks/telegram",
+            post(telegram_webhook::telegram_update),
+        )
         .route("/api-docs/openapi.json", get(openapi::openapi_json))
         // Infrastructure surface, not application API: no auth, not under
         // `/api/v1`, so a load balancer or orchestrator probe needs no session.
@@ -182,8 +194,7 @@ pub fn start_api_server(
 #[cfg(test)]
 mod step_up_tests {
     use super::*;
-    use crate::accounts::{AccountRepository, SessionRepository, STATUS_ACTIVE};
-    use crate::events::EventBroadcaster;
+    use crate::domain::accounts::STATUS_ACTIVE;
     use axum::body::Body;
     use axum::http::{Request, StatusCode};
     use tower::ServiceExt;
@@ -197,9 +208,8 @@ mod step_up_tests {
     /// the only thing keeping "sensitive actions need a recent passkey" true
     /// rather than aspirational.
     const SENSITIVE: &[(&str, &str)] = &[
-        ("POST", "/api/v1/account/matrix/link"),
-        ("POST", "/api/v1/account/matrix/unlink"),
-        ("POST", "/api/v1/account/matrix/confirm-merge"),
+        ("POST", "/api/v1/account/identities/unlink"),
+        ("POST", "/api/v1/link/claim"),
         ("POST", "/api/v1/account/sessions/revoke-others"),
         ("DELETE", "/api/v1/account/sessions/some-id"),
         ("POST", "/api/v1/account/recovery-codes"),
@@ -210,6 +220,7 @@ mod step_up_tests {
     /// Routes an ordinary, hours-old session must still be able to use.
     const ORDINARY: &[(&str, &str)] = &[
         ("GET", "/api/v1/account/passkeys"),
+        ("GET", "/api/v1/account/identities"),
         ("GET", "/api/v1/account/sessions"),
         ("GET", "/api/v1/account/security-events"),
         ("GET", "/api/v1/account/recovery-status"),
@@ -224,28 +235,27 @@ mod step_up_tests {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
 
-        let account = AccountRepository::create(&pool, "evan", STATUS_ACTIVE)
-            .await
-            .unwrap();
-        let token = SessionRepository::create(&pool, &account, None, None, None)
-            .await
-            .unwrap();
-
-        crate::db_execute!(
-            &pool,
-            "UPDATE sessions SET last_verified_at = ? WHERE account_id = ?",
-            chrono::Utc::now() - chrono::Duration::minutes(verified_minutes_ago),
-            &account
-        )
-        .unwrap();
-
         let state = auth::ApiState::new(
-            crate::db::Database { pool: pool },
-            EventBroadcaster::default(),
+            crate::db::Database { pool },
             None,
             "https://mbm.one".to_string(),
             reqwest::Client::new(),
         );
+
+        let accounts = &state.services.accounts;
+        let account = accounts.create("evan", STATUS_ACTIVE).await.unwrap();
+        let token = accounts
+            .create_session(&account, None, None, None)
+            .await
+            .unwrap();
+
+        accounts
+            .update_last_verified_at(
+                &account,
+                chrono::Utc::now() - chrono::Duration::minutes(verified_minutes_ago),
+            )
+            .await
+            .unwrap();
 
         let app = Router::new()
             .nest("/api/v1", api_routes())
@@ -385,11 +395,17 @@ mod server_shutdown_tests {
             registration_secret: None,
             registration_open: false,
             db_max_connections: 1,
+            job_workers: 4,
+            job_worker_host: "test".into(),
             cors_allowed_origins: Vec::new(),
             webauthn_rp_id: "localhost".to_string(),
             webauthn_origin: "http://localhost:8080".to_string(),
             cookie_secure: false,
             web_url: "http://localhost:8080".to_string(),
+            link_signup_allowlist: Default::default(),
+            discord: None,
+            telegram: None,
+            email: None,
             ocr_enabled: false,
             ocr_base_url: None,
             voice_enabled: false,
@@ -414,9 +430,7 @@ mod server_shutdown_tests {
     async fn test_server_task_completes_promptly_after_cancel() {
         let config = local_config();
         // Lazy: nothing here touches the database, so the test needs no server.
-        let pool = sqlx::postgres::PgPoolOptions::new()
-            .connect_lazy(&config.database_url)
-            .unwrap();
+        let pool = crate::db::pool::lazy_pool(&config.database_url);
         let listener = bind(&config).await.unwrap();
         let addr = listener.local_addr().unwrap();
         let shutdown = CancellationToken::new();
@@ -425,8 +439,9 @@ mod server_shutdown_tests {
             &config,
             Database { pool: pool.clone() },
             crate::application::AppServices::new(&pool),
-            EventBroadcaster::default(),
+            crate::events::Hub::new(crate::application::AppServices::new(&pool).outbox, 8),
             crate::interface::channels::matrix::handles::BotHandles::default(),
+            None,
             listener,
             shutdown.clone(),
         )

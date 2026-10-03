@@ -2,15 +2,16 @@
 //! the bot, and resolving the room an action is delivered to.
 //!
 //! Discovering rooms needs a live Matrix client, so it happens in the Matrix
-//! adapter (`interface/chat/rooms.rs`), which hands the result here.
+//! adapter (`interface/channels/matrix/rooms.rs`), which hands the result here.
 
 use sqlx::PgPool;
 use tracing::warn;
 
-use crate::application::accounts::AccountService;
+use crate::application::identity::IdentityService;
 use crate::application::settings::SettingsService;
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
+use crate::domain::channels::Channel;
 use crate::domain::rooms::{self as domain, CachedRoom, JoinedRoom, RoomTarget, WEB_ROOM};
 use crate::infrastructure::postgres::repositories::rooms as repo;
 
@@ -26,21 +27,21 @@ pub enum PickerRooms {
 pub struct RoomService {
     pool: PgPool,
     settings: SettingsService,
-    accounts: AccountService,
+    identity: IdentityService,
 }
 
 impl RoomService {
-    pub fn new(pool: PgPool, settings: SettingsService, accounts: AccountService) -> Self {
+    pub fn new(pool: PgPool, settings: SettingsService, identity: IdentityService) -> Self {
         Self {
             pool,
             settings,
-            accounts,
+            identity,
         }
     }
 
     /// The account's cached rooms, in picker order.
     pub async fn cached_rooms(&self, account_id: &AccountId) -> Result<Vec<CachedRoom>, AppError> {
-        Ok(repo::list_for_account(&self.pool, account_id.as_str()).await?)
+        Ok(repo::list_for_account(&self.pool, account_id).await?)
     }
 
     /// Replaces the account's cache with a fresh discovery and returns the
@@ -54,9 +55,9 @@ impl RoomService {
         rooms: &[JoinedRoom],
     ) -> Result<Vec<CachedRoom>, AppError> {
         let mut tx = self.pool.begin().await?;
-        repo::delete_for_account(&mut *tx, account_id.as_str()).await?;
+        repo::delete_for_account(&mut *tx, account_id).await?;
         for room in rooms {
-            repo::insert(&mut *tx, account_id.as_str(), room).await?;
+            repo::insert(&mut *tx, account_id, room).await?;
         }
         tx.commit().await?;
         self.cached_rooms(account_id).await
@@ -85,7 +86,7 @@ impl RoomService {
     }
 
     pub async fn is_cached(&self, account_id: &AccountId, room_id: &str) -> Result<bool, AppError> {
-        Ok(repo::is_cached(&self.pool, account_id.as_str(), room_id).await?)
+        Ok(repo::is_cached(&self.pool, account_id, room_id).await?)
     }
 
     /// Caches a room whose membership the caller has just proven live, so the
@@ -95,13 +96,13 @@ impl RoomService {
         account_id: &AccountId,
         room: &JoinedRoom,
     ) -> Result<(), AppError> {
-        Ok(repo::insert(&self.pool, account_id.as_str(), room).await?)
+        Ok(repo::insert(&self.pool, account_id, room).await?)
     }
 
     /// The Matrix identities linked to the account: a room is reachable for
     /// the account when one of them has joined it.
     pub async fn linked_mxids(&self, account_id: &AccountId) -> Result<Vec<String>, AppError> {
-        self.accounts.linked_mxids(account_id).await
+        self.identity.user_ids(account_id, Channel::Matrix).await
     }
 
     /// The room an action is delivered to when it names none; see
@@ -113,14 +114,14 @@ impl RoomService {
     pub async fn default_room(&self, account_id: &AccountId) -> Option<String> {
         let rooms = self.cached_rooms_or_empty(account_id).await;
         let mxids = logged_or_default(
-            self.accounts.linked_mxids(account_id).await,
+            self.identity.user_ids(account_id, Channel::Matrix).await,
             "linked Matrix ids",
-            account_id.as_str(),
+            account_id,
         );
         let dev_room_id = logged_or_default(
             self.settings.get(account_id).await.map(|s| s.dev_room_id),
             "dev room setting",
-            account_id.as_str(),
+            account_id,
         );
         domain::default_room(&rooms, &mxids, dev_room_id.as_deref()).map(str::to_owned)
     }
@@ -144,9 +145,9 @@ impl RoomService {
 
     async fn cached_rooms_or_empty(&self, account_id: &AccountId) -> Vec<CachedRoom> {
         logged_or_default(
-            repo::list_for_account(&self.pool, account_id.as_str()).await,
+            repo::list_for_account(&self.pool, account_id).await,
             "room cache",
-            account_id.as_str(),
+            account_id,
         )
     }
 }
@@ -157,10 +158,10 @@ impl RoomService {
 fn logged_or_default<T: Default, E: std::fmt::Display>(
     result: Result<T, E>,
     input: &str,
-    account_id: &str,
+    account_id: &AccountId,
 ) -> T {
     result.unwrap_or_else(|err| {
-        warn!(account_id, error = %err, "Resolving a room without the {input}");
+        warn!(%account_id, error = %err, "Resolving a room without the {input}");
         T::default()
     })
 }
@@ -168,21 +169,21 @@ fn logged_or_default<T: Default, E: std::fmt::Display>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::application::accounts::AccountService;
     use crate::domain::settings::UserSettings;
-    use crate::events::EventBroadcaster;
 
     async fn service_with_account(account_id: &AccountId) -> RoomService {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        let accounts = AccountService::new(pool.clone(), EventBroadcaster::default());
+        let accounts = AccountService::new(pool.clone());
         accounts
             .create_with_id(account_id, "Tester", crate::domain::accounts::STATUS_ACTIVE)
             .await
             .unwrap();
         RoomService::new(
             pool.clone(),
-            SettingsService::new(pool, EventBroadcaster::default()),
-            accounts,
+            SettingsService::new(pool.clone()),
+            IdentityService::new(pool),
         )
     }
 
@@ -196,7 +197,7 @@ mod tests {
 
     #[tokio::test]
     async fn replacing_the_cache_drops_rooms_no_longer_discovered() {
-        let acct = AccountId::new("acct_a");
+        let acct = AccountId::from_seed("acct_a");
         let service = service_with_account(&acct).await;
         service
             .replace_cached(&acct, &[room("!old:x", "old", false)])
@@ -213,7 +214,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_failed_replacement_keeps_the_previous_cache_whole() {
-        let acct = AccountId::new("acct_a");
+        let acct = AccountId::from_seed("acct_a");
         let service = service_with_account(&acct).await;
         service
             .replace_cached(&acct, &[room("!kept:x", "kept", false)])
@@ -236,7 +237,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_adopted_discovery_is_cached() {
-        let acct = AccountId::new("acct_a");
+        let acct = AccountId::from_seed("acct_a");
         let service = service_with_account(&acct).await;
         let adopted = service
             .adopt_discovery(
@@ -253,7 +254,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_discovery_that_cannot_be_cached_is_returned_in_picker_order() {
-        let acct = AccountId::new("acct_a");
+        let acct = AccountId::from_seed("acct_a");
         let service = service_with_account(&acct).await;
         service.pool.close().await;
 
@@ -275,7 +276,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_empty_discovery_leaves_the_cache_alone() {
-        let acct = AccountId::new("acct_a");
+        let acct = AccountId::from_seed("acct_a");
         let service = service_with_account(&acct).await;
         service
             .replace_cached(&acct, &[room("!kept:x", "kept", false)])
@@ -293,7 +294,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_remembered_room_is_cached() {
-        let acct = AccountId::new("acct_a");
+        let acct = AccountId::from_seed("acct_a");
         let service = service_with_account(&acct).await;
         assert!(!service.is_cached(&acct, "!r:x").await.unwrap());
 
@@ -307,7 +308,7 @@ mod tests {
 
     #[tokio::test]
     async fn targets_resolve_against_the_cache() {
-        let acct = AccountId::new("acct_a");
+        let acct = AccountId::from_seed("acct_a");
         let service = service_with_account(&acct).await;
         assert_eq!(service.resolve_target_room(&acct, None).await, WEB_ROOM);
 
@@ -342,13 +343,10 @@ mod tests {
     async fn the_default_room_reads_linked_ids_and_settings() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        let accounts = AccountService::new(pool.clone(), EventBroadcaster::default());
-        let account = accounts
-            .resolve_or_provision("@evan:mbm.one")
-            .await
-            .unwrap();
-        let settings_service = SettingsService::new(pool.clone(), EventBroadcaster::default());
-        let service = RoomService::new(pool.clone(), settings_service.clone(), accounts);
+        let identity = IdentityService::new(pool.clone());
+        let account = identity.provision_matrix_for_test("@evan:mbm.one").await;
+        let settings_service = SettingsService::new(pool.clone());
+        let service = RoomService::new(pool.clone(), settings_service.clone(), identity);
         let settings = UserSettings {
             dev_room_id: Some("!dev:x".to_string()),
             ..UserSettings::default()
@@ -371,7 +369,7 @@ mod tests {
 
     #[tokio::test]
     async fn an_unreadable_database_resolves_to_the_web_room() {
-        let acct = AccountId::new("acct_a");
+        let acct = AccountId::from_seed("acct_a");
         let service = service_with_account(&acct).await;
         service.pool.close().await;
 

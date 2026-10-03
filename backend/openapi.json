@@ -67,22 +67,19 @@
         ]
       }
     },
-    "/api/v1/account/matrix": {
+    "/api/v1/account/identities": {
       "get": {
         "tags": [
           "account"
         ],
-        "operationId": "list_links",
+        "operationId": "list_identities",
         "responses": {
           "200": {
-            "description": "",
+            "description": "Identities linked to this account",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "type": "string"
-                  }
+                  "$ref": "#/components/schemas/IdentityListResponse"
                 }
               }
             }
@@ -95,17 +92,17 @@
         ]
       }
     },
-    "/api/v1/account/matrix/confirm-merge": {
+    "/api/v1/account/identities/unlink": {
       "post": {
         "tags": [
           "account"
         ],
-        "operationId": "confirm_merge",
+        "operationId": "unlink_identity",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/ConfirmMergeRequest"
+                "$ref": "#/components/schemas/UnlinkIdentityRequest"
               }
             }
           },
@@ -113,99 +110,44 @@
         },
         "responses": {
           "200": {
-            "description": "",
+            "description": "Unlinked, or not linked here",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MergePreview"
+                  "$ref": "#/components/schemas/UnlinkIdentityResponse"
                 }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_cookie": []
-          }
-        ]
-      }
-    },
-    "/api/v1/account/matrix/link": {
-      "post": {
-        "tags": [
-          "account"
-        ],
-        "operationId": "start_link",
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LinkCodeResponse"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_cookie": []
-          }
-        ]
-      }
-    },
-    "/api/v1/account/matrix/pending-merge": {
-      "get": {
-        "tags": [
-          "account"
-        ],
-        "summary": "Whether a merge is waiting on this account's confirmation.",
-        "description": "Set when `!link` found the MXID already attached to an unclaimed account\nholding data — the user is told to come back here, where the counts can\nactually be shown before they agree to move anything.",
-        "operationId": "pending_merge",
-        "responses": {
-          "200": {
-            "description": "",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "allOf": [
-                    {
-                      "$ref": "#/components/schemas/PendingMerge"
-                    }
-                  ],
-                  "nullable": true
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "session_cookie": []
-          }
-        ]
-      }
-    },
-    "/api/v1/account/matrix/unlink": {
-      "post": {
-        "tags": [
-          "account"
-        ],
-        "operationId": "unlink",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UnlinkRequest"
               }
             }
           },
-          "required": true
-        },
-        "responses": {
-          "204": {
-            "description": "Unlinked"
+          "400": {
+            "description": "Unknown channel or oversized field",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Passkey confirmation required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "That is the only way to sign in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
           }
         },
         "security": [
@@ -3651,6 +3593,221 @@
         ]
       }
     },
+    "/api/v1/link/claim": {
+      "post": {
+        "tags": [
+          "link"
+        ],
+        "operationId": "claim",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Outcome of the claim",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkClaimResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Passkey confirmation required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/link/inspect": {
+      "post": {
+        "tags": [
+          "link"
+        ],
+        "operationId": "inspect",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "What claiming the token would do for this viewer",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkPreviewDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/link/signup/finish": {
+      "post": {
+        "tags": [
+          "link"
+        ],
+        "operationId": "signup_finish",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkSignupFinishRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Account created, identity linked and signed in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Ceremony expired, credential rejected or link no longer valid",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "This identity may not register an account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Someone else linked this identity first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/link/signup/start": {
+      "post": {
+        "tags": [
+          "link"
+        ],
+        "operationId": "signup_start",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkTokenRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Challenge to pass to navigator.credentials.create",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CeremonyStart"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "This identity may not register an account",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/mcp/tokens": {
       "get": {
         "tags": [
@@ -7076,17 +7233,6 @@
           }
         }
       },
-      "ConfirmMergeRequest": {
-        "type": "object",
-        "required": [
-          "from_account"
-        ],
-        "properties": {
-          "from_account": {
-            "type": "string"
-          }
-        }
-      },
       "CreateAlertRequest": {
         "type": "object",
         "required": [
@@ -8123,6 +8269,45 @@
           }
         }
       },
+      "IdentityDto": {
+        "type": "object",
+        "required": [
+          "channel",
+          "user_id",
+          "linked_at"
+        ],
+        "properties": {
+          "channel": {
+            "type": "string",
+            "description": "`matrix`, `discord`, `telegram` or `email`."
+          },
+          "display_name": {
+            "type": "string",
+            "nullable": true
+          },
+          "linked_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        }
+      },
+      "IdentityListResponse": {
+        "type": "object",
+        "required": [
+          "identities"
+        ],
+        "properties": {
+          "identities": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/IdentityDto"
+            }
+          }
+        }
+      },
       "InboundAcceptedResponse": {
         "type": "object",
         "required": [
@@ -8424,19 +8609,97 @@
           }
         }
       },
-      "LinkCodeResponse": {
+      "LinkClaimOutcome": {
+        "type": "string",
+        "enum": [
+          "linked",
+          "already_yours",
+          "merged",
+          "owned_elsewhere",
+          "expired"
+        ]
+      },
+      "LinkClaimResponse": {
         "type": "object",
         "required": [
-          "code",
-          "expires_in_seconds"
+          "outcome"
         ],
         "properties": {
-          "code": {
-            "type": "string"
+          "outcome": {
+            "$ref": "#/components/schemas/LinkClaimOutcome"
+          }
+        }
+      },
+      "LinkPreviewDto": {
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "properties": {
+          "channel": {
+            "type": "string",
+            "nullable": true
           },
-          "expires_in_seconds": {
+          "merge_item_count": {
             "type": "integer",
-            "format": "int64"
+            "format": "int64",
+            "description": "Rows a merge would move; only for `needs_merge`.",
+            "nullable": true
+          },
+          "state": {
+            "$ref": "#/components/schemas/LinkPreviewState"
+          },
+          "user_id": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "LinkPreviewState": {
+        "type": "string",
+        "enum": [
+          "bind",
+          "already_yours",
+          "needs_merge",
+          "owned_elsewhere",
+          "signup_allowed",
+          "sign_in_required",
+          "expired"
+        ]
+      },
+      "LinkSignupFinishRequest": {
+        "type": "object",
+        "required": [
+          "ceremony_id",
+          "token",
+          "credential"
+        ],
+        "properties": {
+          "ceremony_id": {
+            "type": "string",
+            "description": "From `/link/signup/start`."
+          },
+          "credential": {
+            "type": "object",
+            "description": "The authenticator's response, verbatim."
+          },
+          "label": {
+            "type": "string",
+            "nullable": true
+          },
+          "token": {
+            "type": "string"
+          }
+        }
+      },
+      "LinkTokenRequest": {
+        "type": "object",
+        "required": [
+          "token"
+        ],
+        "properties": {
+          "token": {
+            "type": "string"
           }
         }
       },
@@ -8569,99 +8832,6 @@
           },
           "server": {
             "type": "string"
-          }
-        }
-      },
-      "MergePreview": {
-        "type": "object",
-        "description": "How many rows each table would contribute to a merge.\n\nShown to the user before they confirm, because \"this will move 47 todos and\n132 transactions into your account\" is a decision someone should get to\nmake with the numbers in front of them.",
-        "required": [
-          "todos",
-          "reminders",
-          "transactions",
-          "recurring_bills",
-          "portfolio_holdings",
-          "portfolio_cash_balances",
-          "finance_categories",
-          "user_settings",
-          "bookmarks",
-          "habits",
-          "habit_logs",
-          "life_day_logs",
-          "life_profiles",
-          "footprints",
-          "ai_conversations",
-          "webhooks",
-          "other"
-        ],
-        "properties": {
-          "ai_conversations": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "bookmarks": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "finance_categories": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "footprints": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "habit_logs": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "habits": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "life_day_logs": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "life_profiles": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "other": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "portfolio_cash_balances": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "portfolio_holdings": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "recurring_bills": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "reminders": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "todos": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "transactions": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "user_settings": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "webhooks": {
-            "type": "integer",
-            "format": "int64"
           }
         }
       },
@@ -8820,21 +8990,6 @@
             "type": "string",
             "format": "date-time",
             "nullable": true
-          }
-        }
-      },
-      "PendingMerge": {
-        "type": "object",
-        "required": [
-          "from_account",
-          "preview"
-        ],
-        "properties": {
-          "from_account": {
-            "type": "string"
-          },
-          "preview": {
-            "$ref": "#/components/schemas/MergePreview"
           }
         }
       },
@@ -10153,14 +10308,30 @@
           }
         }
       },
-      "UnlinkRequest": {
+      "UnlinkIdentityRequest": {
         "type": "object",
         "required": [
-          "mxid"
+          "channel",
+          "user_id"
         ],
         "properties": {
-          "mxid": {
+          "channel": {
             "type": "string"
+          },
+          "user_id": {
+            "type": "string"
+          }
+        }
+      },
+      "UnlinkIdentityResponse": {
+        "type": "object",
+        "required": [
+          "unlinked"
+        ],
+        "properties": {
+          "unlinked": {
+            "type": "boolean",
+            "description": "`false` when the account did not hold that identity."
           }
         }
       },

@@ -135,7 +135,9 @@ export const PerformanceChart: React.FC<PerformanceChartProps> = ({
               </span>
             )}
           </div>
-          <div className="flex items-baseline gap-2 mt-1 flex-wrap">
+          {/* Stacked below sm: a wrapping row re-flows whenever the hovered point's
+              amount changes width, which makes the whole card jump. */}
+          <div className="flex flex-col items-start gap-0.5 mt-1 sm:flex-row sm:items-baseline sm:gap-2 sm:flex-wrap">
             <span className="text-xl sm:text-2xl font-bold text-neutral-900 dark:text-neutral-100 font-sans whitespace-nowrap">
               {formatAmount(displayTotal, currencyExponent)} {currency}
             </span>
@@ -255,20 +257,20 @@ export const PerformanceChart: React.FC<PerformanceChartProps> = ({
       {activePoint && (
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-2 border-t border-neutral-100 dark:border-neutral-800/80 text-xs">
           <div>
-            <span className="text-[10px] uppercase font-mono text-neutral-400 block">Invested Holdings</span>
-            <span className="font-semibold text-neutral-800 dark:text-neutral-200 font-mono">
+            <span className="text-[10px] uppercase font-mono text-neutral-400 block leading-4">Invested Holdings</span>
+            <span className="block leading-4 font-semibold text-neutral-800 dark:text-neutral-200 font-mono">
               {formatAmount(activePoint.holdings_value_minor, currencyExponent)} {currency}
             </span>
           </div>
           <div>
-            <span className="text-[10px] uppercase font-mono text-neutral-400 block">Available Cash</span>
-            <span className="font-semibold text-neutral-800 dark:text-neutral-200 font-mono">
+            <span className="text-[10px] uppercase font-mono text-neutral-400 block leading-4">Available Cash</span>
+            <span className="block leading-4 font-semibold text-neutral-800 dark:text-neutral-200 font-mono">
               {formatAmount(activePoint.cash_minor, currencyExponent)} {currency}
             </span>
           </div>
           <div className="col-span-2 sm:col-span-1">
-            <span className="text-[10px] uppercase font-mono text-neutral-400 block">Total Value</span>
-            <span className="font-bold text-neutral-900 dark:text-neutral-100 font-mono">
+            <span className="text-[10px] uppercase font-mono text-neutral-400 block leading-4">Total Value</span>
+            <span className="block leading-4 font-bold text-neutral-900 dark:text-neutral-100 font-mono">
               {formatAmount(activePoint.total_net_worth_minor, currencyExponent)} {currency}
             </span>
           </div>

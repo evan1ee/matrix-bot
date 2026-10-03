@@ -1,4 +1,7 @@
+pub mod fx;
 pub mod metadata;
+pub mod portfolio_feed;
+pub mod portfolio_history_feed;
 pub mod ssrf;
 
 pub use metadata::fetch_and_extract_metadata;

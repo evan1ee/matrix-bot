@@ -25,10 +25,7 @@ pub async fn add_passkey_start(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<CeremonyStart>, ApiError> {
-    let handle = user
-        .account_id
-        .to_handle()
-        .ok_or_else(|| ApiError::internal("Account has no valid handle"))?;
+    let handle = user.account_id.to_handle();
 
     let stored = state
         .services
@@ -57,7 +54,7 @@ pub async fn add_passkey_start(
 
     let ceremony_id = state
         .stash_ceremony(Ceremony::Registration {
-            account_id: user.account_id.to_string(),
+            account_id: user.account_id,
             display_name: user.display_name,
             state: reg_state,
         })

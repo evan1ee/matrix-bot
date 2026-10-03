@@ -20,14 +20,14 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/account/matrix": {
+    "/api/v1/account/identities": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        get: operations["list_links"];
+        get: operations["list_identities"];
         put?: never;
         post?: never;
         delete?: never;
@@ -36,7 +36,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/account/matrix/confirm-merge": {
+    "/api/v1/account/identities/unlink": {
         parameters: {
             query?: never;
             header?: never;
@@ -45,61 +45,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        post: operations["confirm_merge"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/account/matrix/link": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["start_link"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/account/matrix/pending-merge": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Whether a merge is waiting on this account's confirmation.
-         * @description Set when `!link` found the MXID already attached to an unclaimed account
-         *     holding data — the user is told to come back here, where the counts can
-         *     actually be shown before they agree to move anything.
-         */
-        get: operations["pending_merge"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/account/matrix/unlink": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["unlink"];
+        post: operations["unlink_identity"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1123,6 +1069,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/link/claim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["claim"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/link/inspect": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["inspect"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/link/signup/finish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["signup_finish"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/link/signup/start": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["signup_start"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/mcp/tokens": {
         parameters: {
             query?: never;
@@ -2021,9 +2031,6 @@ export interface components {
             /** @description The raw WebAuthn options, passed to `navigator.credentials`. */
             options: Record<string, never>;
         };
-        ConfirmMergeRequest: {
-            from_account: string;
-        };
         CreateAlertRequest: {
             condition: components["schemas"]["AlertCondition"];
             /** @description Currency, e.g. "USD". Defaults to "USD" if omitted. */
@@ -2385,6 +2392,17 @@ export interface components {
             /** Format: date-time */
             updated_at?: string | null;
         };
+        IdentityDto: {
+            /** @description `matrix`, `discord`, `telegram` or `email`. */
+            channel: string;
+            display_name?: string | null;
+            /** Format: date-time */
+            linked_at: string;
+            user_id: string;
+        };
+        IdentityListResponse: {
+            identities: components["schemas"]["IdentityDto"][];
+        };
         InboundAcceptedResponse: {
             outbox_id: string;
             status: string;
@@ -2474,10 +2492,33 @@ export interface components {
             /** Format: int64 */
             year: number;
         };
-        LinkCodeResponse: {
-            code: string;
-            /** Format: int64 */
-            expires_in_seconds: number;
+        /** @enum {string} */
+        LinkClaimOutcome: "linked" | "already_yours" | "merged" | "owned_elsewhere" | "expired";
+        LinkClaimResponse: {
+            outcome: components["schemas"]["LinkClaimOutcome"];
+        };
+        LinkPreviewDto: {
+            channel?: string | null;
+            /**
+             * Format: int64
+             * @description Rows a merge would move; only for `needs_merge`.
+             */
+            merge_item_count?: number | null;
+            state: components["schemas"]["LinkPreviewState"];
+            user_id?: string | null;
+        };
+        /** @enum {string} */
+        LinkPreviewState: "bind" | "already_yours" | "needs_merge" | "owned_elsewhere" | "signup_allowed" | "sign_in_required" | "expired";
+        LinkSignupFinishRequest: {
+            /** @description From `/link/signup/start`. */
+            ceremony_id: string;
+            /** @description The authenticator's response, verbatim. */
+            credential: Record<string, never>;
+            label?: string | null;
+            token: string;
+        };
+        LinkTokenRequest: {
+            token: string;
         };
         LiveResponse: {
             status: string;
@@ -2521,49 +2562,6 @@ export interface components {
         MediaProxyQuery: {
             media_id: string;
             server: string;
-        };
-        /**
-         * @description How many rows each table would contribute to a merge.
-         *
-         *     Shown to the user before they confirm, because "this will move 47 todos and
-         *     132 transactions into your account" is a decision someone should get to
-         *     make with the numbers in front of them.
-         */
-        MergePreview: {
-            /** Format: int64 */
-            ai_conversations: number;
-            /** Format: int64 */
-            bookmarks: number;
-            /** Format: int64 */
-            finance_categories: number;
-            /** Format: int64 */
-            footprints: number;
-            /** Format: int64 */
-            habit_logs: number;
-            /** Format: int64 */
-            habits: number;
-            /** Format: int64 */
-            life_day_logs: number;
-            /** Format: int64 */
-            life_profiles: number;
-            /** Format: int64 */
-            other: number;
-            /** Format: int64 */
-            portfolio_cash_balances: number;
-            /** Format: int64 */
-            portfolio_holdings: number;
-            /** Format: int64 */
-            recurring_bills: number;
-            /** Format: int64 */
-            reminders: number;
-            /** Format: int64 */
-            todos: number;
-            /** Format: int64 */
-            transactions: number;
-            /** Format: int64 */
-            user_settings: number;
-            /** Format: int64 */
-            webhooks: number;
         };
         MonthlyCashflowBucket: {
             currency: string;
@@ -2613,10 +2611,6 @@ export interface components {
             label: string;
             /** Format: date-time */
             last_used_at?: string | null;
-        };
-        PendingMerge: {
-            from_account: string;
-            preview: components["schemas"]["MergePreview"];
         };
         /** @description An immutable, cryptographically signed record of a portfolio activity. */
         PortfolioAuditEntry: {
@@ -3123,8 +3117,13 @@ export interface components {
             occurred_at?: string | null;
             room_id?: string | null;
         };
-        UnlinkRequest: {
-            mxid: string;
+        UnlinkIdentityRequest: {
+            channel: string;
+            user_id: string;
+        };
+        UnlinkIdentityResponse: {
+            /** @description `false` when the account did not hold that identity. */
+            unlinked: boolean;
         };
         UpcomingBillsSummary: {
             currency: string;
@@ -3473,7 +3472,7 @@ export interface operations {
             };
         };
     };
-    list_links: {
+    list_identities: {
         parameters: {
             query?: never;
             header?: never;
@@ -3482,17 +3481,18 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
+            /** @description Identities linked to this account */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": string[];
+                    "application/json": components["schemas"]["IdentityListResponse"];
                 };
             };
         };
     };
-    confirm_merge: {
+    unlink_identity: {
         parameters: {
             query?: never;
             header?: never;
@@ -3501,77 +3501,45 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["ConfirmMergeRequest"];
+                "application/json": components["schemas"]["UnlinkIdentityRequest"];
             };
         };
         responses: {
+            /** @description Unlinked, or not linked here */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["MergePreview"];
+                    "application/json": components["schemas"]["UnlinkIdentityResponse"];
                 };
             };
-        };
-    };
-    start_link: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
+            /** @description Unknown channel or oversized field */
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["LinkCodeResponse"];
+                    "application/json": components["schemas"]["ApiErrorResponse"];
                 };
             };
-        };
-    };
-    pending_merge: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            200: {
+            /** @description Passkey confirmation required */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["PendingMerge"] | null;
+                    "application/json": components["schemas"]["ApiErrorResponse"];
                 };
             };
-        };
-    };
-    unlink: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UnlinkRequest"];
-            };
-        };
-        responses: {
-            /** @description Unlinked */
-            204: {
+            /** @description That is the only way to sign in */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
             };
         };
     };
@@ -6020,6 +5988,183 @@ export interface operations {
             };
             /** @description Unauthorized */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    claim: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LinkTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description Outcome of the claim */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkClaimResponse"];
+                };
+            };
+            /** @description Malformed token */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Passkey confirmation required */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    inspect: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LinkTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description What claiming the token would do for this viewer */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkPreviewDto"];
+                };
+            };
+            /** @description Malformed token */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    signup_finish: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LinkSignupFinishRequest"];
+            };
+        };
+        responses: {
+            /** @description Account created, identity linked and signed in */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionResponse"];
+                };
+            };
+            /** @description Ceremony expired, credential rejected or link no longer valid */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description This identity may not register an account */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Someone else linked this identity first */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    signup_start: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LinkTokenRequest"];
+            };
+        };
+        responses: {
+            /** @description Challenge to pass to navigator.credentials.create */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CeremonyStart"];
+                };
+            };
+            /** @description This identity may not register an account */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

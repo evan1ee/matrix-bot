@@ -1,6 +1,7 @@
 use matrix_sdk::ruma::UserId;
 
-use crate::modules::ParsedCommand;
+use crate::domain::channels::{ConversationAddress, PlatformIdentity};
+use crate::interface::chat::ParsedCommand;
 
 pub struct CommandParser;
 
@@ -16,7 +17,7 @@ impl CommandParser {
         formatted_body: Option<&str>,
         own_id: &UserId,
         room_id: &str,
-        sender_localpart: &str,
+        sender: &PlatformIdentity,
     ) -> Option<ParsedCommand> {
         let (quoted, prompt) = crate::interface::channels::matrix::quote::extract_quote_and_prompt(
             body,
@@ -90,8 +91,8 @@ impl CommandParser {
         };
 
         Some(ParsedCommand {
-            room_id: room_id.to_string(),
-            sender_name: sender_localpart.to_string(),
+            conversation: ConversationAddress::Matrix(room_id.to_string()),
+            sender: sender.clone(),
             command: raw_command,
             raw_args,
             full_body: clean_body,
@@ -111,12 +112,10 @@ impl CommandParser {
         formatted_body: Option<&str>,
         own_id: &UserId,
         room_id: &str,
-        sender_localpart: &str,
+        sender: &PlatformIdentity,
         is_direct: bool,
     ) -> Option<ParsedCommand> {
-        if let Some(parsed) =
-            Self::parse_message(body, formatted_body, own_id, room_id, sender_localpart)
-        {
+        if let Some(parsed) = Self::parse_message(body, formatted_body, own_id, room_id, sender) {
             return Some(parsed);
         }
 
@@ -128,8 +127,8 @@ impl CommandParser {
                     formatted_body,
                 );
             Some(ParsedCommand {
-                room_id: room_id.to_string(),
-                sender_name: sender_localpart.to_string(),
+                conversation: ConversationAddress::Matrix(room_id.to_string()),
+                sender: sender.clone(),
                 command: "ai".to_string(),
                 raw_args: prompt.clone(),
                 full_body: prompt,
@@ -199,6 +198,10 @@ impl CommandParser {
 mod tests {
     use super::*;
 
+    fn alice() -> PlatformIdentity {
+        PlatformIdentity::matrix("@alice:matrix.org").unwrap()
+    }
+
     #[test]
     fn test_parse_message_exclamation_command() {
         let bot_id = UserId::parse("@hellobot:matrix.org").unwrap();
@@ -207,13 +210,13 @@ mod tests {
             None,
             &bot_id,
             "!room:matrix.org",
-            "alice",
+            &PlatformIdentity::matrix("@alice:matrix.org").unwrap(),
         )
         .unwrap();
 
         assert_eq!(ctx.command, "todo");
         assert_eq!(ctx.raw_args, "add Buy milk");
-        assert_eq!(ctx.sender_name, "alice");
+        assert_eq!(ctx.sender_name(), "alice");
     }
 
     #[test]
@@ -224,13 +227,13 @@ mod tests {
             None,
             &bot_id,
             "!room:matrix.org",
-            "bob",
+            &PlatformIdentity::matrix("@bob:matrix.org").unwrap(),
         )
         .unwrap();
 
         assert_eq!(ctx.command, "remind");
         assert_eq!(ctx.raw_args, "10s test");
-        assert_eq!(ctx.sender_name, "bob");
+        assert_eq!(ctx.sender_name(), "bob");
     }
 
     #[test]
@@ -241,7 +244,7 @@ mod tests {
             None,
             &bot_id,
             "!room:matrix.org",
-            "charlie",
+            &PlatformIdentity::matrix("@charlie:matrix.org").unwrap(),
         );
         assert!(res.is_none());
     }
@@ -252,7 +255,7 @@ mod tests {
         let msg =
             "> <@bob:matrix.org> The moon is made of green cheese.\n\n@hellobot fact check this";
         let ctx =
-            CommandParser::parse_message(msg, None, &bot_id, "!room:matrix.org", "alice").unwrap();
+            CommandParser::parse_message(msg, None, &bot_id, "!room:matrix.org", &alice()).unwrap();
 
         assert_eq!(ctx.command, "fact");
         assert_eq!(ctx.raw_args, "check this");
@@ -269,7 +272,7 @@ mod tests {
         let bot_id = UserId::parse("@hellobot:matrix.org").unwrap();
         let msg = "> Review security audit before Monday\n\n@hellobot add todo";
         let ctx =
-            CommandParser::parse_message(msg, None, &bot_id, "!room:matrix.org", "alice").unwrap();
+            CommandParser::parse_message(msg, None, &bot_id, "!room:matrix.org", &alice()).unwrap();
 
         assert_eq!(ctx.command, "add");
         assert_eq!(ctx.raw_args, "todo");
@@ -283,7 +286,7 @@ mod tests {
         let bot_id = UserId::parse("@hellobot:matrix.org").unwrap();
         let msg = "> Important news snippet\n\n@hellobot";
         let ctx =
-            CommandParser::parse_message(msg, None, &bot_id, "!room:matrix.org", "alice").unwrap();
+            CommandParser::parse_message(msg, None, &bot_id, "!room:matrix.org", &alice()).unwrap();
 
         assert_eq!(ctx.command, "ai");
         assert!(ctx.quoted.is_some());
@@ -294,7 +297,7 @@ mod tests {
     fn test_parse_quoted_message_without_bot_mention_is_ignored() {
         let bot_id = UserId::parse("@hellobot:matrix.org").unwrap();
         let msg = "> Quoted chat\n\nI disagree with your point.";
-        let res = CommandParser::parse_message(msg, None, &bot_id, "!room:matrix.org", "alice");
+        let res = CommandParser::parse_message(msg, None, &bot_id, "!room:matrix.org", &alice());
         assert!(res.is_none());
     }
 
@@ -306,7 +309,7 @@ mod tests {
             None,
             &bot_id,
             "!room:matrix.org",
-            "alice",
+            &PlatformIdentity::matrix("@alice:matrix.org").unwrap(),
             true,
         )
         .unwrap();
@@ -323,7 +326,7 @@ mod tests {
             None,
             &bot_id,
             "!room:matrix.org",
-            "alice",
+            &PlatformIdentity::matrix("@alice:matrix.org").unwrap(),
             true,
         )
         .unwrap();
@@ -343,7 +346,7 @@ mod tests {
             None,
             &bot_id,
             "!room:matrix.org",
-            "charlie",
+            &PlatformIdentity::matrix("@charlie:matrix.org").unwrap(),
             false,
         );
         assert!(res.is_none());
@@ -357,7 +360,7 @@ mod tests {
             None,
             &bot_id,
             "!room:matrix.org",
-            "alice",
+            &PlatformIdentity::matrix("@alice:matrix.org").unwrap(),
             true,
         );
         assert!(res.is_none());

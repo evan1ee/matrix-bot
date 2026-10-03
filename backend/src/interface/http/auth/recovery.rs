@@ -6,13 +6,12 @@ use axum::{
     response::Response,
     Json,
 };
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use serde::Deserialize;
 use std::net::SocketAddr;
 use utoipa::ToSchema;
 
-use crate::accounts::RECOVERY_RESTRICTION_HOURS;
-use crate::domain::accounts::SecurityEventKind;
+use crate::domain::accounts::{hash_token, restriction_expiry, COOKIE_NAME};
 use crate::error::ApiError;
 use crate::interface::http::auth::types::ApiState;
 use crate::interface::http::auth::webauthn::{with_session_cookie, SessionResponse};
@@ -35,7 +34,7 @@ fn is_trusted_private_ip(ip: std::net::IpAddr) -> bool {
 /// By default, rate-limiting keys on the peer socket address from `connect_info`.
 /// Forwarded headers (`X-Forwarded-For`, `X-Real-IP`) are ONLY trusted if
 /// `trust_forwarded` is enabled AND the connecting peer is a private/loopback reverse proxy.
-fn extract_client_ip(
+pub(crate) fn extract_client_ip(
     connect_info: Option<&ConnectInfo<SocketAddr>>,
     headers: &HeaderMap,
     trust_forwarded: bool,
@@ -109,13 +108,9 @@ pub async fn redeem_recovery(
 
     // 2. If not found in static codes, try 24-hour matured recovery requests
     if resolved_account_id.is_none() {
-        if let Ok(account_id) = crate::interface::chat::account::redeem_matured_recovery(
-            &state.services.accounts,
-            &state.db,
-            None,
-            code,
-        )
-        .await
+        if let Ok(account_id) =
+            crate::interface::chat::account::redeem_matured_recovery(&state.services, None, code)
+                .await
         {
             resolved_account_id = Some(account_id);
         }
@@ -137,15 +132,20 @@ pub async fn redeem_recovery(
         .get(axum::http::header::COOKIE)
         .and_then(|v| v.to_str().ok())
     {
-        if let Some(old_token) =
-            crate::accounts::principal::cookie_value(cookies, crate::accounts::session::COOKIE_NAME)
-        {
-            let old_id_hash = crate::accounts::session::hash_token(old_token);
-            let _ = state
-                .services
-                .accounts
-                .revoke_session(&account_id, &old_id_hash)
-                .await;
+        if let Some(old_token) = crate::domain::accounts::cookie_value(cookies, COOKIE_NAME) {
+            let old_id_hash = hash_token(old_token);
+            // Whatever session the browser presents must die. The scoped,
+            // audited revoke covers the account's own session; anything
+            // else (another account's cookie) falls back to the unscoped,
+            // unaudited hash revoke. Errors are ignored: the response
+            // replaces the cookie either way.
+            let accounts = &state.services.accounts;
+            if !matches!(
+                accounts.revoke_session(&account_id, &old_id_hash).await,
+                Ok(true)
+            ) {
+                let _ = accounts.end_session(&old_id_hash).await;
+            }
         }
     }
 
@@ -154,7 +154,7 @@ pub async fn redeem_recovery(
         .and_then(|v| v.to_str().ok());
 
     // Mint a restricted session (restricted to registering a new passkey)
-    let restricted_until = Utc::now() + Duration::hours(RECOVERY_RESTRICTION_HOURS);
+    let restricted_until = restriction_expiry(Utc::now());
     let token = state
         .services
         .accounts
@@ -167,13 +167,6 @@ pub async fn redeem_recovery(
         .await
         .map_err(|err| ApiError::internal(format!("Could not open restricted session: {err}")))?;
 
-    // Record security event
-    state
-        .services
-        .accounts
-        .record_security_event(&account_id, SecurityEventKind::RecoveryCompleted, None)
-        .await;
-
     let body = Json(SessionResponse {
         account_id: account_id.to_string(),
         display_name: account.display_name,
@@ -185,8 +178,8 @@ pub async fn redeem_recovery(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::events::EventBroadcaster;
     use axum::http::StatusCode;
+    use chrono::Duration;
 
     #[tokio::test]
     async fn test_recovery_redemption_flow() {
@@ -194,7 +187,6 @@ mod tests {
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let state = ApiState::new(
             crate::db::Database { pool: pool.clone() },
-            EventBroadcaster::default(),
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
@@ -252,13 +244,159 @@ mod tests {
         assert!(res_bad.is_err());
     }
 
+    async fn state_with_account() -> (ApiState, crate::domain::accounts::AccountId) {
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let state = ApiState::new(
+            crate::db::Database { pool },
+            None,
+            "https://matrix.org".to_string(),
+            reqwest::Client::new(),
+        );
+        let account_id = state
+            .services
+            .accounts
+            .create("Recovery User", crate::domain::accounts::STATUS_ACTIVE)
+            .await
+            .unwrap();
+        (state, account_id)
+    }
+
+    async fn audit_kinds(
+        state: &ApiState,
+        account_id: &crate::domain::accounts::AccountId,
+    ) -> Vec<String> {
+        let mut kinds: Vec<String> = state
+            .services
+            .accounts
+            .list_security_events(account_id, 50)
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|e| e.kind)
+            .collect();
+        kinds.sort();
+        kinds
+    }
+
+    fn redeem_request(code: &str) -> Json<RedeemRecoveryRequest> {
+        Json(RedeemRecoveryRequest {
+            code: code.to_string(),
+        })
+    }
+
+    #[tokio::test]
+    async fn redeeming_a_code_records_exactly_the_events_it_did_before() {
+        let (state, account_id) = state_with_account().await;
+        let codes = state
+            .services
+            .accounts
+            .issue_recovery_codes(&account_id)
+            .await
+            .unwrap();
+
+        redeem_recovery(
+            State(state.clone()),
+            None,
+            HeaderMap::new(),
+            redeem_request(&codes[0]),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            audit_kinds(&state, &account_id).await,
+            vec![
+                "recovery_code_used",
+                "recovery_codes_issued",
+                "recovery_completed"
+            ]
+        );
+    }
+
+    /// A matured `!recover` code used through the web is one recovery, so it
+    /// leaves one `recovery_completed` row, whichever layer announced it.
+    #[tokio::test]
+    async fn a_matured_request_records_recovery_completed_once() {
+        let (state, account_id) = state_with_account().await;
+        let (code, _) = state
+            .services
+            .accounts
+            .request_recovery(&account_id, None)
+            .await
+            .unwrap();
+        crate::infrastructure::postgres::repositories::accounts::recovery::set_valid_after(
+            &state.db.pool,
+            &account_id,
+            Utc::now() - Duration::minutes(1),
+        )
+        .await
+        .unwrap();
+
+        redeem_recovery(
+            State(state.clone()),
+            None,
+            HeaderMap::new(),
+            redeem_request(&code),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(
+            audit_kinds(&state, &account_id).await,
+            vec!["recovery_completed", "recovery_requested"]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_recovery_session_is_restricted_for_72_hours() {
+        let (state, account_id) = state_with_account().await;
+        let codes = state
+            .services
+            .accounts
+            .issue_recovery_codes(&account_id)
+            .await
+            .unwrap();
+        let before = Utc::now();
+
+        let response = redeem_recovery(
+            State(state.clone()),
+            None,
+            HeaderMap::new(),
+            redeem_request(&codes[0]),
+        )
+        .await
+        .unwrap();
+
+        let set_cookie = response
+            .headers()
+            .get(axum::http::header::SET_COOKIE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap();
+        let token = crate::domain::accounts::cookie_value(set_cookie, COOKIE_NAME).unwrap();
+        let session = state
+            .services
+            .accounts
+            .resolve_session(token)
+            .await
+            .unwrap()
+            .unwrap();
+        let expected = crate::domain::accounts::restriction_expiry(before);
+        let restricted_until = session
+            .restricted_until
+            .expect("session must be restricted");
+        assert!(
+            (restricted_until - expected).num_seconds().abs() <= 5,
+            "restricted_until {restricted_until} should be ~{expected}"
+        );
+    }
+
     #[tokio::test]
     async fn test_recovery_rate_limit_cannot_be_bypassed_with_spoofed_headers() {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         let state = ApiState::new(
-            crate::db::Database { pool: pool },
-            EventBroadcaster::default(),
+            crate::db::Database { pool },
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
@@ -304,5 +442,137 @@ mod tests {
             panic!("expected rate limit error")
         };
         assert_eq!(err.status, StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    struct Fixture {
+        state: ApiState,
+        account: crate::domain::accounts::AccountId,
+        code: String,
+    }
+
+    async fn fixture() -> Fixture {
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let state = ApiState::new(
+            crate::db::Database { pool },
+            None,
+            "https://matrix.org".to_string(),
+            reqwest::Client::new(),
+        );
+        let accounts = &state.services.accounts;
+        let account = accounts
+            .create("Recoverer", crate::domain::accounts::STATUS_ACTIVE)
+            .await
+            .unwrap();
+        let code = accounts
+            .issue_recovery_codes(&account)
+            .await
+            .unwrap()
+            .remove(0);
+        Fixture {
+            state,
+            account,
+            code,
+        }
+    }
+
+    /// Redeems `f.code` from a distinct client IP (the recovery limiter is
+    /// process-wide) presenting `cookie` as the browser's old session.
+    async fn redeem_with_cookie(f: &Fixture, ip_last_octet: u8, cookie: &str) {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            axum::http::header::COOKIE,
+            format!("{COOKIE_NAME}={cookie}").parse().unwrap(),
+        );
+        let peer: SocketAddr = format!("203.0.113.{ip_last_octet}:4000").parse().unwrap();
+        redeem_recovery(
+            State(f.state.clone()),
+            Some(ConnectInfo(peer)),
+            headers,
+            Json(RedeemRecoveryRequest {
+                code: f.code.clone(),
+            }),
+        )
+        .await
+        .expect("recovery succeeds");
+    }
+
+    async fn is_live(f: &Fixture, token: &str) -> bool {
+        f.state
+            .services
+            .accounts
+            .resolve_credential(&crate::domain::accounts::Credential::Cookie(token))
+            .await
+            .unwrap()
+            .is_some()
+    }
+
+    async fn revoke_rows(f: &Fixture, account: &crate::domain::accounts::AccountId) -> usize {
+        f.state
+            .services
+            .accounts
+            .list_security_events(account, 100)
+            .await
+            .unwrap()
+            .iter()
+            .filter(|e| e.kind == "sessions_revoked")
+            .count()
+    }
+
+    /// Given the recovering account's own live cookie, When it redeems a
+    /// code, Then that session is revoked with exactly one audit row.
+    #[tokio::test]
+    async fn recovery_revokes_the_accounts_own_cookie_with_one_audit_row() {
+        let f = fixture().await;
+        let accounts = &f.state.services.accounts;
+        let token = accounts
+            .create_session(&f.account, None, None, None)
+            .await
+            .unwrap();
+
+        redeem_with_cookie(&f, 11, &token).await;
+
+        assert!(!is_live(&f, &token).await);
+        assert_eq!(revoke_rows(&f, &f.account).await, 1);
+    }
+
+    /// Given a cookie belonging to a DIFFERENT account, When a recovery is
+    /// redeemed, Then that session is still killed and neither account gets
+    /// an audit row.
+    #[tokio::test]
+    async fn recovery_still_revokes_a_foreign_cookie_without_auditing() {
+        let f = fixture().await;
+        let accounts = &f.state.services.accounts;
+        let other = accounts
+            .create("Other", crate::domain::accounts::STATUS_ACTIVE)
+            .await
+            .unwrap();
+        let foreign = accounts
+            .create_session(&other, None, None, None)
+            .await
+            .unwrap();
+
+        redeem_with_cookie(&f, 12, &foreign).await;
+
+        assert!(!is_live(&f, &foreign).await, "a presented session dies");
+        assert_eq!(revoke_rows(&f, &f.account).await, 0);
+        assert_eq!(revoke_rows(&f, &other).await, 0);
+    }
+
+    /// Given an unknown cookie, When a recovery is redeemed, Then nothing
+    /// changes: no audit row, and the account's other live session survives.
+    #[tokio::test]
+    async fn recovery_with_an_unknown_cookie_changes_nothing() {
+        let f = fixture().await;
+        let accounts = &f.state.services.accounts;
+        let bystander = accounts
+            .create_session(&f.account, None, None, None)
+            .await
+            .unwrap();
+
+        redeem_with_cookie(&f, 13, "no-such-token").await;
+
+        assert!(is_live(&f, &bystander).await);
+        assert_eq!(revoke_rows(&f, &f.account).await, 0);
     }
 }

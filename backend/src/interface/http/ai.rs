@@ -6,17 +6,16 @@ use axum::{
 use tracing::error;
 
 use crate::error::ApiError;
-use crate::events::SystemEvent;
+use crate::infrastructure::postgres::repositories::llm as llm_repo;
 use crate::interface::http::auth::{ApiState, AuthUser};
-use crate::modules::ai::error::AiError;
-use crate::modules::ai::handler::run_ai_turn;
-use crate::modules::ai::models::{
+use crate::llm::error::AiError;
+use crate::llm::models::{
     AiChatRequest, AiChatResponse, AiConversation, AiMessage, AiUserConfig, UpdateAiConfigInput,
     VerifyAiKeyInput, VerifyAiKeyResponse,
 };
-use crate::modules::ai::repository::AiRepository;
-use crate::modules::ai::resolved_config::ResolvedAiConfig;
-use crate::modules::ai::retrospective::{generate_weekly_retrospective, WeeklyRetrospective};
+use crate::llm::resolved_config::ResolvedAiConfig;
+use crate::llm::retrospective::{generate_weekly_retrospective, WeeklyRetrospective};
+use crate::llm::{run_turn, LlmTurnContext};
 
 /// It used to be a bare `String`, so this always answered 400 — a provider
 /// outage and a bad prompt looked identical to the caller. Each variant now
@@ -64,18 +63,18 @@ pub async fn chat(
         .resolve_target_room(owner_id, payload.room_id.as_deref())
         .await;
 
+    let turn_ctx = LlmTurnContext::new(
+        &state.services,
+        &state.db.pool,
+        &state.ai,
+        owner_id,
+        &room_id,
+        None,
+    );
+
     let turn_result = tokio::time::timeout(
         std::time::Duration::from_secs(180),
-        run_ai_turn(
-            &state.services,
-            &state.db.pool,
-            &state.ai,
-            Some(&state.broadcaster),
-            owner_id,
-            &room_id,
-            payload.conversation_id.as_deref(),
-            prompt,
-        ),
+        run_turn(&turn_ctx, prompt, payload.conversation_id.as_deref()),
     )
     .await
     .map_err(|_| {
@@ -106,10 +105,11 @@ pub async fn list_conversations(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<Vec<AiConversation>>, ApiError> {
-    let convs = AiRepository::list_conversations(&state.db.pool, &user.account_id, 20)
+    let convs = llm_repo::list_conversations(&state.db.pool, &user.account_id, 20)
         .await
         .map_err(ApiError::from)?;
-    Ok(Json(convs))
+    let dtos: Vec<AiConversation> = convs.into_iter().map(Into::into).collect();
+    Ok(Json(dtos))
 }
 
 #[utoipa::path(
@@ -125,15 +125,16 @@ pub async fn get_conversation_messages(
     user: AuthUser,
     Path(id): Path<String>,
 ) -> Result<Json<Vec<AiMessage>>, ApiError> {
-    let _conv = AiRepository::get_conversation(&state.db.pool, &id, &user.account_id)
+    let _conv = llm_repo::get_conversation(&state.db.pool, &id, &user.account_id)
         .await
         .map_err(ApiError::from)?
         .ok_or_else(|| ApiError::not_found("Conversation not found"))?;
 
-    let messages = AiRepository::get_recent_messages(&state.db.pool, &id, 100)
+    let messages = llm_repo::get_recent_messages(&state.db.pool, &id, 100)
         .await
         .map_err(ApiError::from)?;
-    Ok(Json(messages))
+    let dtos: Vec<AiMessage> = messages.into_iter().map(Into::into).collect();
+    Ok(Json(dtos))
 }
 
 #[utoipa::path(
@@ -149,18 +150,15 @@ pub async fn delete_conversation(
     user: AuthUser,
     Path(id): Path<String>,
 ) -> Result<StatusCode, ApiError> {
-    let deleted = AiRepository::delete_conversation(&state.db.pool, &id, &user.account_id)
-        .await
-        .map_err(ApiError::from)?;
+    let deleted = state
+        .services
+        .llm
+        .delete_conversation(&id, &user.account_id)
+        .await?;
 
     if !deleted {
         return Err(ApiError::not_found("Conversation not found"));
     }
-
-    state.broadcaster.send(SystemEvent::AiConversationDeleted {
-        id,
-        owner_id: user.account_id.to_string(),
-    });
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -182,11 +180,12 @@ pub async fn get_ai_config(
         .settings
         .get_or_default(&user.account_id)
         .await;
-    let config = AiRepository::get_user_config(&state.db.pool, &user.account_id)
+    let config = llm_repo::get_user_config(&state.db.pool, &user.account_id)
         .await
         .map_err(ApiError::from)?
         .map(|c| {
-            let mut redacted = c.redacted();
+            let mut redacted: AiUserConfig = c.into();
+            redacted = redacted.redacted();
             if redacted
                 .api_base_url
                 .as_ref()
@@ -261,20 +260,20 @@ pub async fn update_ai_config(
         }
     }
 
-    let updated = AiRepository::upsert_user_config(&state.db.pool, &user.account_id, &input)
-        .await
-        .map_err(ApiError::from)?;
-
-    state.broadcaster.send(SystemEvent::AiConfigUpdated {
-        owner_id: user.account_id.to_string(),
-    });
+    let domain_input: crate::domain::llm::UpdateAiConfigInput = input.into();
+    let updated = state
+        .services
+        .llm
+        .update_user_config(&user.account_id, &domain_input)
+        .await?;
 
     let settings = state
         .services
         .settings
         .get_or_default(&user.account_id)
         .await;
-    let mut redacted = updated.redacted();
+    let dto_updated: AiUserConfig = updated.into();
+    let mut redacted = dto_updated.redacted();
     redacted.max_history_turns = Some(settings.max_history_turns);
 
     Ok(Json(redacted))
@@ -297,7 +296,7 @@ pub async fn verify_ai_config(
         .validate(state.ai.allow_private_base_url)
         .map_err(ApiError::bad_request)?;
 
-    let user_config = AiRepository::get_user_config(&state.db.pool, &user.account_id)
+    let user_config = llm_repo::get_user_config(&state.db.pool, &user.account_id)
         .await
         .map_err(ApiError::from)?;
 
@@ -356,18 +355,17 @@ pub async fn get_retrospective(
 mod tests {
     use super::*;
     use crate::db::Database;
-    use crate::events::EventBroadcaster;
+    use crate::domain::accounts::AccountId;
 
-    async fn setup_state() -> (ApiState, String) {
+    async fn setup_state() -> (ApiState, AccountId) {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        let owner =
-            crate::accounts::AccountRepository::resolve_or_provision(&pool, "@apitest:mbm.one")
-                .await
-                .unwrap();
+        let owner = crate::application::AppServices::new(&pool)
+            .identity
+            .provision_matrix_for_test("@apitest:mbm.one")
+            .await;
         let state = ApiState::new(
-            Database { pool: pool },
-            EventBroadcaster::default(),
+            Database { pool },
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
@@ -378,7 +376,7 @@ mod tests {
     #[tokio::test]
     async fn test_ai_config_api_redacts_api_key() {
         let (state, owner) = setup_state().await;
-        let user = AuthUser::for_account(&owner);
+        let user = AuthUser::for_account(owner);
 
         let update_input = UpdateAiConfigInput {
             api_base_url: Some("https://api.openai.com/v1".to_string()),
@@ -409,7 +407,7 @@ mod tests {
     #[tokio::test]
     async fn test_ai_config_api_validates_input_lengths() {
         let (state, owner) = setup_state().await;
-        let user = AuthUser::for_account(&owner);
+        let user = AuthUser::for_account(owner);
 
         let too_long_model = UpdateAiConfigInput {
             api_base_url: None,
@@ -444,7 +442,7 @@ mod tests {
     #[tokio::test]
     async fn test_get_retrospective() {
         let (state, owner) = setup_state().await;
-        let user = AuthUser::for_account(&owner);
+        let user = AuthUser::for_account(owner);
 
         let retro_res = get_retrospective(State(state), user).await.unwrap();
         assert_eq!(retro_res.currency, "USD");
@@ -462,7 +460,7 @@ mod tests {
     #[tokio::test]
     async fn test_a_provider_failure_is_not_reported_as_a_bad_request() {
         let (state, owner) = setup_state().await;
-        let user = AuthUser::for_account(&owner);
+        let user = AuthUser::for_account(owner);
 
         let input = UpdateAiConfigInput {
             api_base_url: Some("http://127.0.0.1:1".to_string()),
@@ -473,7 +471,11 @@ mod tests {
             max_tokens: None,
             max_history_turns: None,
         };
-        AiRepository::upsert_user_config(&state.db.pool, &owner, &input)
+        let domain_input: crate::domain::llm::UpdateAiConfigInput = input.into();
+        state
+            .services
+            .llm
+            .update_user_config(&owner, &domain_input)
             .await
             .unwrap();
 

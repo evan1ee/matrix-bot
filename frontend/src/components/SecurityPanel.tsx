@@ -15,20 +15,20 @@ import {
   Trash2,
 } from 'lucide-react';
 import {
+  channelLabel,
   describeEvent,
   isAlarming,
   securityApi,
   SECURITY_KEYS,
   useDeviceSessions,
-  useLinkedAccounts,
+  useIdentities,
   usePasskeys,
-  usePendingMerge,
   useRecoveryStatus,
   useSecurityEvents,
   useSensitiveAction,
 } from '../core/security';
 import { addPasskey, describePasskeyError } from '../core/passkey';
-import { formatDateTimeInZone } from '../core/settings';
+import { formatDateInZone, formatDateTimeInZone } from '../core/settings';
 import { copyToClipboard } from '../core/clipboard';
 import { useSettings } from '../core/settings';
 
@@ -163,7 +163,6 @@ export const SecurityPanel: React.FC = () => {
   const settings = useSettings();
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
-  const [linkCode, setLinkCode] = useState<string | null>(null);
   const [freshCodes, setFreshCodes] = useState<string[] | null>(null);
   const [isAddingPasskey, setIsAddingPasskey] = useState(false);
   const [copiedTarget, setCopiedTarget] = useState<string | null>(null);
@@ -177,11 +176,10 @@ export const SecurityPanel: React.FC = () => {
   };
 
   const passkeys = usePasskeys();
-  const links = useLinkedAccounts();
+  const links = useIdentities();
   const sessions = useDeviceSessions();
   const events = useSecurityEvents();
   const recovery = useRecoveryStatus();
-  const pendingMerge = usePendingMerge();
 
   const fmt = (iso: string | null) =>
     iso ? formatDateTimeInZone(iso, settings.timezone) : '—';
@@ -205,13 +203,7 @@ export const SecurityPanel: React.FC = () => {
     m.mutateAsync(arg).catch((err) => setError(describePasskeyError(err)));
   };
 
-  const startLink = useSensitiveAction(securityApi.startLink, []);
-  const unlink = useSensitiveAction(securityApi.unlink, [SECURITY_KEYS.links, SECURITY_KEYS.events]);
-  const confirmMerge = useSensitiveAction(securityApi.confirmMerge, [
-    SECURITY_KEYS.pendingMerge,
-    SECURITY_KEYS.links,
-    SECURITY_KEYS.events,
-  ]);
+  const unlink = useSensitiveAction(securityApi.unlinkIdentity, [SECURITY_KEYS.identities, SECURITY_KEYS.events]);
   const deletePasskey = useSensitiveAction(securityApi.deletePasskey, [
     SECURITY_KEYS.passkeys,
     SECURITY_KEYS.events,
@@ -267,31 +259,6 @@ export const SecurityPanel: React.FC = () => {
         </div>
       )}
 
-      {pendingMerge.data && (
-        <div className="flex flex-col gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950">
-          <div className="text-sm text-amber-900 dark:text-amber-100">
-            <p className="font-semibold">A Matrix account with existing data is waiting to link.</p>
-            <ul className="mt-2 grid grid-cols-2 gap-x-4 text-xs">
-              {Object.entries(pendingMerge.data.preview)
-                .filter(([, count]) => (count as number) > 0)
-                .map(([table, count]) => (
-                  <li key={table}>
-                    {String(count)} {table.replace(/_/g, ' ')}
-                  </li>
-                ))}
-            </ul>
-            <p className="mt-2">Confirming moves all of it into this account. Nothing is deleted.</p>
-          </div>
-          <Button
-            busy={confirmMerge.isPending}
-            onClick={() => run(confirmMerge, pendingMerge.data!.from_account)}
-            className="self-start"
-          >
-            Move it into my account
-          </Button>
-        </div>
-      )}
-
       <Section
         title="Passkeys"
         hint="How you sign in. Keep at least two, on different devices."
@@ -338,31 +305,41 @@ export const SecurityPanel: React.FC = () => {
       </Section>
 
       <Section
-        title="Matrix accounts"
-        hint="Matrix account is your primary identity. You can link multiple passkeys to it, or attach secondary Matrix accounts."
+        title="Chat accounts"
+        hint="To link another chat account, send /link to the bot in a direct message from it."
       >
         <ul className="flex flex-col gap-2">
-          {links.data?.map((mxid, idx) => (
+          {links.data?.map((identity, idx) => (
             <li
-              key={mxid}
+              key={`${identity.channel}:${identity.user_id}`}
               className="flex items-center gap-3 rounded-lg bg-neutral-50 px-3 py-2 dark:bg-neutral-800"
             >
               <Link2 size={16} className="shrink-0 text-neutral-500" />
-              <div className="flex items-center gap-2 min-w-0 flex-1">
-                <span className="truncate text-sm text-neutral-900 dark:text-neutral-100 font-mono">
-                  {mxid}
-                </span>
-                {idx === 0 && (
-                  <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                    primary identity
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="shrink-0 text-xs font-medium text-neutral-600 dark:text-neutral-300">
+                    {channelLabel(identity.channel)}
                   </span>
-                )}
+                  <span className="truncate text-sm text-neutral-900 dark:text-neutral-100 font-mono">
+                    {identity.user_id}
+                  </span>
+                  {idx === 0 && (
+                    <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                      primary identity
+                    </span>
+                  )}
+                </div>
+                <p className="truncate text-xs text-neutral-500 dark:text-neutral-400">
+                  {identity.display_name ? `${identity.display_name} · ` : ''}Linked{' '}
+                  {formatDateInZone(identity.linked_at, settings.timezone)}
+                </p>
               </div>
               <button
                 type="button"
-                aria-label={`Unlink ${mxid}`}
-                onClick={() => run(unlink, mxid)}
-                className="rounded p-1.5 text-neutral-500 hover:bg-neutral-200 hover:text-red-600 dark:hover:bg-neutral-700"
+                aria-label={`Unlink ${identity.user_id}`}
+                title={`Unlink ${channelLabel(identity.channel)} account`}
+                onClick={() => run(unlink, { channel: identity.channel, userId: identity.user_id })}
+                className="rounded p-1.5 text-neutral-500 transition-colors duration-150 hover:bg-neutral-200 hover:text-red-600 focus-visible:outline focus-visible:outline-2 focus-visible:outline-neutral-900 dark:hover:bg-neutral-700 dark:focus-visible:outline-neutral-100"
               >
                 <Trash2 size={15} />
               </button>
@@ -370,55 +347,10 @@ export const SecurityPanel: React.FC = () => {
           ))}
           {links.data?.length === 0 && (
             <li className="text-xs text-neutral-500 dark:text-neutral-400">
-              No Matrix account linked yet.
+              No chat account linked yet.
             </li>
           )}
         </ul>
-
-        {linkCode ? (
-          <div className="flex flex-col gap-2 rounded-lg border border-neutral-300 p-3 dark:border-neutral-700">
-            <p className="text-xs text-neutral-500 dark:text-neutral-400">
-              Send this to the bot in a <strong>direct message</strong>:
-            </p>
-            <code className="select-all text-lg font-semibold tracking-widest text-neutral-900 dark:text-neutral-100">
-              !link {linkCode}
-            </code>
-            <button
-              type="button"
-              onClick={() => handleCopy(`!link ${linkCode}`, 'link')}
-              className="inline-flex items-center gap-1.5 self-start text-xs font-medium text-neutral-600 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-200 transition-colors"
-            >
-              {copiedTarget === 'link' ? (
-                <>
-                  <Check size={12} className="text-emerald-600 dark:text-emerald-400" />
-                  <span className="text-emerald-600 dark:text-emerald-400 font-semibold">Copied!</span>
-                </>
-              ) : (
-                <>
-                  <Copy size={12} />
-                  <span>Copy</span>
-                </>
-              )}
-            </button>
-            <p className="text-xs text-neutral-500 dark:text-neutral-400">
-              Expires in 5 minutes, and works once. Sending it in a shared room cancels it.
-            </p>
-          </div>
-        ) : (
-          <Button
-            busy={startLink.isPending}
-            className="self-start"
-            onClick={() => {
-              setError(null);
-              startLink
-                .mutateAsync(undefined as void)
-                .then((res: any) => setLinkCode(res.code))
-                .catch((err) => setError(describePasskeyError(err)));
-            }}
-          >
-            Link a Matrix account
-          </Button>
-        )}
       </Section>
 
       <Section title="Signed-in devices">

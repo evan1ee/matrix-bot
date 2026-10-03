@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO bot_message_targets (event_id, room_id, entity_type, entity_id, owner_id, title)\n        VALUES ($1, $2, $3, $4, $5, $6)\n        ON CONFLICT(event_id) DO UPDATE SET\n            room_id = excluded.room_id,\n            entity_type = excluded.entity_type,\n            entity_id = excluded.entity_id,\n            owner_id = excluded.owner_id,\n            title = excluded.title\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Int8",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d527013c7170554449b71c2f18ea65b11a6c5723b986265704df8069b58e6acc"
+}

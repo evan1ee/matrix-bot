@@ -66,7 +66,7 @@ pub async fn provision_models(config: Arc<InferenceConfig>) {
     let ocr_config = Arc::clone(&config);
     let ocr = async move {
         retry_until_ready("OCR", || {
-            crate::paddle::ensure_models(&ocr_config.ocr_model_dir)
+            crate::ocr::ensure_models(&ocr_config.ocr_model_dir)
         })
         .await;
     };
@@ -74,7 +74,7 @@ pub async fn provision_models(config: Arc<InferenceConfig>) {
     let stt_config = Arc::clone(&config);
     let stt = async move {
         retry_until_ready("Speech-to-text", || {
-            crate::sherpa::ensure_models_downloaded(&stt_config.voice_model_dir)
+            crate::stt::ensure_models_downloaded(&stt_config.voice_model_dir)
         })
         .await;
     };
@@ -82,7 +82,7 @@ pub async fn provision_models(config: Arc<InferenceConfig>) {
     let tts_config = Arc::clone(&config);
     let tts = async move {
         retry_until_ready("Text-to-speech", || {
-            crate::kokoro::ensure_model_downloaded(&tts_config.tts_model_dir)
+            crate::tts::ensure_model_downloaded(&tts_config.tts_model_dir)
         })
         .await;
     };
@@ -101,15 +101,15 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("provision-{}-{}", tag, std::process::id()));
         std::fs::create_dir_all(&dir).expect("temp dir should be creatable");
         for name in [
-            crate::paddle::DET_MODEL_NAME,
-            crate::paddle::CLS_MODEL_NAME,
-            crate::paddle::REC_MODEL_NAME,
-            crate::sherpa::SENSEVOICE_MODEL_FILE,
-            crate::sherpa::SENSEVOICE_TOKENS_FILE,
+            crate::ocr::DET_MODEL_NAME,
+            crate::ocr::CLS_MODEL_NAME,
+            crate::ocr::REC_MODEL_NAME,
+            crate::stt::SENSEVOICE_MODEL_FILE,
+            crate::stt::SENSEVOICE_TOKENS_FILE,
         ] {
             std::fs::write(dir.join(name), b"x").expect("model stub should be writable");
         }
-        for name in crate::kokoro::KOKORO_REQUIRED_FILES {
+        for name in crate::tts::KOKORO_REQUIRED_FILES {
             std::fs::write(dir.join(name), b"x").expect("model stub should be writable");
         }
         dir
