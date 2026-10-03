@@ -5,7 +5,7 @@ use std::env;
 mod ai;
 mod channels;
 pub use ai::AiEnvConfig;
-pub use channels::{DiscordConfig, TelegramConfig, TelegramMode};
+pub use channels::{DiscordConfig, EmailConfig, TelegramConfig, TelegramMode};
 
 use crate::domain::channels::Channel;
 
@@ -155,6 +155,8 @@ pub struct Config {
     pub discord: Option<DiscordConfig>,
     /// The Telegram adapter's settings; `None` (no adapter) without `TELEGRAM_BOT_TOKEN`.
     pub telegram: Option<TelegramConfig>,
+    /// The Email adapter's settings; `None` (no adapter) without `EMAIL_IMAP_URL`.
+    pub email: Option<EmailConfig>,
     /// Whether OCR image text recognition is enabled.
     pub ocr_enabled: bool,
     /// Base URL of the inference server's OCR endpoint.
@@ -286,6 +288,7 @@ impl Config {
             channels::parse_link_signup_allowlist(|name| env::var(name).ok());
         let discord = channels::parse_discord(|name| env::var(name).ok())?;
         let telegram = channels::parse_telegram(|name| env::var(name).ok())?;
+        let email = channels::parse_email(|name| env::var(name).ok())?;
 
         let ocr_enabled = env::var("OCR_ENABLED")
             .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
@@ -367,6 +370,7 @@ impl Config {
             link_signup_allowlist,
             discord,
             telegram,
+            email,
             ocr_enabled,
             ocr_base_url,
             voice_enabled,
@@ -453,6 +457,10 @@ impl Config {
             &self.web_url,
             allowed(Channel::Telegram),
         )?;
+        if let Some(cfg) = &self.email {
+            channels::validate_email(cfg)?;
+        }
+        channels::validate_email_allowlist(allowed(Channel::Email))?;
 
         Ok(())
     }
@@ -484,6 +492,7 @@ impl Config {
             link_signup_allowlist: HashMap::new(),
             discord: None,
             telegram: None,
+            email: None,
             ocr_enabled: true,
             ocr_base_url: None,
             voice_enabled: true,
@@ -537,6 +546,19 @@ mod tests {
         });
         let err = cfg.validate().unwrap_err();
         assert!(err.to_string().contains("WEB_URL"), "{err}");
+    }
+
+    #[test]
+    fn validate_refuses_a_malformed_email_allowlist_entry() {
+        let mut cfg = valid_config();
+        cfg.link_signup_allowlist
+            .insert(Channel::Email, vec!["alice@example.com".into()]);
+        assert!(cfg.validate().is_ok());
+
+        cfg.link_signup_allowlist
+            .insert(Channel::Email, vec!["not-an-email".into()]);
+        let err = cfg.validate().unwrap_err();
+        assert!(err.to_string().contains("not-an-email"), "{err}");
     }
 
     #[test]
@@ -612,6 +634,7 @@ mod tests {
             link_signup_allowlist: HashMap::new(),
             discord: None,
             telegram: None,
+            email: None,
             ocr_enabled: true,
             ocr_base_url: None,
             voice_enabled: true,

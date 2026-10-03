@@ -161,6 +161,173 @@ pub(super) fn validate_discord_allowlist(allowlist: &[String]) -> anyhow::Result
     Ok(())
 }
 
+/// A typo in `EMAIL_ALLOWED_SENDERS` would silently keep that person from
+/// signing up (spec D4), so a malformed entry is refused by name.
+pub(super) fn validate_email_allowlist(allowlist: &[String]) -> anyhow::Result<()> {
+    for entry in allowlist {
+        if PlatformUserId::parse(Channel::Email, entry).is_err() {
+            anyhow::bail!("EMAIL_ALLOWED_SENDERS entry '{entry}' is not an email address");
+        }
+    }
+    Ok(())
+}
+
+/// Default polling interval in seconds when `EMAIL_POLL_SECONDS` is unset.
+pub const DEFAULT_EMAIL_POLL_SECONDS: u64 = 60;
+/// Lower bound on `EMAIL_POLL_SECONDS` to prevent hammering IMAP servers.
+pub const MIN_EMAIL_POLL_SECONDS: u64 = 5;
+
+/// The Email adapter's settings; present only when `EMAIL_IMAP_URL` is set.
+#[derive(Clone)]
+pub struct EmailConfig {
+    /// `EMAIL_IMAP_URL`: IMAPS endpoint for polling mail (e.g. `imaps://imap.example.com:993`).
+    pub imap_url: url::Url,
+    /// `EMAIL_SMTP_URL`: SMTP endpoint for sending mail (e.g. `smtps://smtp.example.com:465` or `smtp://smtp.example.com:587`).
+    pub smtp_url: url::Url,
+    /// `EMAIL_USERNAME`: account username for IMAP and SMTP auth. Credential; never logged.
+    pub username: String,
+    /// `EMAIL_PASSWORD`: account password for IMAP and SMTP auth. Credential; never logged.
+    pub password: String,
+    /// `EMAIL_FROM`: address the bot sends from and expects to be reached at.
+    pub from: String,
+    /// `EMAIL_AUTHSERV_ID`: authserv-id used by the receiving MTA in `Authentication-Results` (e.g. `mail.example.com`).
+    pub authserv_id: String,
+    /// `EMAIL_POLL_SECONDS`: polling interval in seconds (default 60, min 5).
+    pub poll_seconds: u64,
+    /// `EMAIL_PROCESSED_FOLDER`: optional IMAP folder to move processed messages to.
+    pub processed_folder: Option<String>,
+}
+
+impl fmt::Debug for EmailConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EmailConfig")
+            .field("imap_url", &self.imap_url.as_str())
+            .field("smtp_url", &self.smtp_url.as_str())
+            .field("username", &"<redacted>")
+            .field("password", &"<redacted>")
+            .field("from", &self.from)
+            .field("authserv_id", &self.authserv_id)
+            .field("poll_seconds", &self.poll_seconds)
+            .field("processed_folder", &self.processed_folder)
+            .finish()
+    }
+}
+
+fn extract_addr_spec(raw: &str) -> &str {
+    if let Some((_, rest)) = raw.split_once('<') {
+        if let Some((addr, _)) = rest.split_once('>') {
+            return addr.trim();
+        }
+    }
+    raw.trim()
+}
+
+/// `None` when `EMAIL_IMAP_URL` is unset or blank. `Err` when required companion
+/// settings are missing or malformed.
+pub(super) fn parse_email(
+    get: impl Fn(&str) -> Option<String>,
+) -> anyhow::Result<Option<EmailConfig>> {
+    let Some(imap_raw) = get("EMAIL_IMAP_URL")
+        .map(|u| u.trim().to_owned())
+        .filter(|u| !u.is_empty())
+    else {
+        return Ok(None);
+    };
+
+    let imap_url = url::Url::parse(&imap_raw).map_err(|e| {
+        anyhow::anyhow!("EMAIL_IMAP_URL must be a valid URL (got '{imap_raw}'): {e}")
+    })?;
+
+    let smtp_raw = get("EMAIL_SMTP_URL")
+        .map(|u| u.trim().to_owned())
+        .filter(|u| !u.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("EMAIL_SMTP_URL is required when EMAIL_IMAP_URL is set"))?;
+    let smtp_url = url::Url::parse(&smtp_raw).map_err(|e| {
+        anyhow::anyhow!("EMAIL_SMTP_URL must be a valid URL (got '{smtp_raw}'): {e}")
+    })?;
+
+    let username = get("EMAIL_USERNAME")
+        .map(|u| u.trim().to_owned())
+        .filter(|u| !u.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("EMAIL_USERNAME is required when EMAIL_IMAP_URL is set"))?;
+
+    let password = get("EMAIL_PASSWORD")
+        .map(|p| p.trim().to_owned())
+        .filter(|p| !p.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("EMAIL_PASSWORD is required when EMAIL_IMAP_URL is set"))?;
+
+    let from = get("EMAIL_FROM")
+        .map(|f| f.trim().to_owned())
+        .filter(|f| !f.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("EMAIL_FROM is required when EMAIL_IMAP_URL is set"))?;
+
+    let authserv_id = get("EMAIL_AUTHSERV_ID")
+        .map(|a| a.trim().to_owned())
+        .filter(|a| !a.is_empty())
+        .ok_or_else(|| {
+            anyhow::anyhow!("EMAIL_AUTHSERV_ID is required when EMAIL_IMAP_URL is set")
+        })?;
+
+    let poll_seconds = match get("EMAIL_POLL_SECONDS").map(|s| s.trim().to_owned()) {
+        None => DEFAULT_EMAIL_POLL_SECONDS,
+        Some(raw) if raw.is_empty() => DEFAULT_EMAIL_POLL_SECONDS,
+        Some(raw) => raw.parse::<u64>().map_err(|_| {
+            anyhow::anyhow!("EMAIL_POLL_SECONDS must be a positive number of seconds (got '{raw}')")
+        })?,
+    };
+
+    let processed_folder = get("EMAIL_PROCESSED_FOLDER")
+        .map(|f| f.trim().to_owned())
+        .filter(|f| !f.is_empty());
+
+    Ok(Some(EmailConfig {
+        imap_url,
+        smtp_url,
+        username,
+        password,
+        from,
+        authserv_id,
+        poll_seconds,
+        processed_folder,
+    }))
+}
+
+pub(super) fn validate_email(cfg: &EmailConfig) -> anyhow::Result<()> {
+    if cfg.imap_url.scheme() != "imaps" {
+        anyhow::bail!(
+            "EMAIL_IMAP_URL must use the imaps:// scheme for TLS (got '{}')",
+            cfg.imap_url.scheme()
+        );
+    }
+    if cfg.imap_url.host_str().is_none() {
+        anyhow::bail!("EMAIL_IMAP_URL must specify a host");
+    }
+    let smtp_scheme = cfg.smtp_url.scheme();
+    if smtp_scheme != "smtps" && smtp_scheme != "smtp" {
+        anyhow::bail!("EMAIL_SMTP_URL must use smtp:// or smtps:// scheme (got '{smtp_scheme}')");
+    }
+    if cfg.smtp_url.host_str().is_none() {
+        anyhow::bail!("EMAIL_SMTP_URL must specify a host");
+    }
+    let addr = extract_addr_spec(&cfg.from);
+    if PlatformUserId::parse(Channel::Email, addr).is_err() {
+        anyhow::bail!(
+            "EMAIL_FROM must be a valid email address (got '{}')",
+            cfg.from
+        );
+    }
+    if cfg.authserv_id.trim().is_empty() {
+        anyhow::bail!("EMAIL_AUTHSERV_ID must not be empty");
+    }
+    if cfg.poll_seconds < MIN_EMAIL_POLL_SECONDS {
+        anyhow::bail!(
+            "EMAIL_POLL_SECONDS must be at least {MIN_EMAIL_POLL_SECONDS} seconds (got {})",
+            cfg.poll_seconds
+        );
+    }
+    Ok(())
+}
+
 /// The signup allowlist, one environment variable per channel, each a
 /// comma-separated list. Entries are trimmed, empty ones dropped, email
 /// addresses lowercased (the canonical form identities are stored in); a
@@ -381,5 +548,83 @@ mod tests {
             shown.contains("abc") && shown.contains("TELEGRAM_ALLOWED_USERS"),
             "{shown}"
         );
+    }
+
+    #[test]
+    fn email_is_absent_without_imap_url() {
+        assert!(parse_email(env_of(&[])).unwrap().is_none());
+        assert!(parse_email(env_of(&[("EMAIL_IMAP_URL", "  ")]))
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn email_reads_all_fields_with_defaults() {
+        let env = env_of(&[
+            ("EMAIL_IMAP_URL", "imaps://imap.example.com:993"),
+            ("EMAIL_SMTP_URL", "smtp://smtp.example.com:587"),
+            ("EMAIL_USERNAME", "bot@example.com"),
+            ("EMAIL_PASSWORD", "secret123"),
+            ("EMAIL_FROM", "bot@example.com"),
+            ("EMAIL_AUTHSERV_ID", "mail.example.com"),
+        ]);
+        let cfg = parse_email(env).unwrap().unwrap();
+        assert_eq!(cfg.imap_url.as_str(), "imaps://imap.example.com:993");
+        assert_eq!(cfg.smtp_url.as_str(), "smtp://smtp.example.com:587");
+        assert_eq!(cfg.username, "bot@example.com");
+        assert_eq!(cfg.password, "secret123");
+        assert_eq!(cfg.from, "bot@example.com");
+        assert_eq!(cfg.authserv_id, "mail.example.com");
+        assert_eq!(cfg.poll_seconds, DEFAULT_EMAIL_POLL_SECONDS);
+        assert_eq!(cfg.processed_folder, None);
+        assert!(validate_email(&cfg).is_ok());
+    }
+
+    #[test]
+    fn email_credentials_never_appear_in_debug_output() {
+        let cfg = EmailConfig {
+            imap_url: url::Url::parse("imaps://imap.example.com").unwrap(),
+            smtp_url: url::Url::parse("smtps://smtp.example.com").unwrap(),
+            username: "secret-user".into(),
+            password: "super-secret-password".into(),
+            from: "bot@example.com".into(),
+            authserv_id: "mail.example.com".into(),
+            poll_seconds: 60,
+            processed_folder: Some("Archive".into()),
+        };
+        let shown = format!("{cfg:?}");
+        assert!(!shown.contains("secret-user"), "{shown}");
+        assert!(!shown.contains("super-secret-password"), "{shown}");
+        assert!(shown.contains("redacted"), "{shown}");
+    }
+
+    #[test]
+    fn validate_email_enforces_imaps_and_smtp_schemes() {
+        let mut cfg = EmailConfig {
+            imap_url: url::Url::parse("imap://imap.example.com").unwrap(),
+            smtp_url: url::Url::parse("smtp://smtp.example.com").unwrap(),
+            username: "u".into(),
+            password: "p".into(),
+            from: "bot@example.com".into(),
+            authserv_id: "mail.example.com".into(),
+            poll_seconds: 60,
+            processed_folder: None,
+        };
+        let err = validate_email(&cfg).unwrap_err();
+        assert!(err.to_string().contains("imaps://"), "{err}");
+
+        cfg.imap_url = url::Url::parse("imaps://imap.example.com").unwrap();
+        cfg.smtp_url = url::Url::parse("http://smtp.example.com").unwrap();
+        let err = validate_email(&cfg).unwrap_err();
+        assert!(err.to_string().contains("EMAIL_SMTP_URL"), "{err}");
+    }
+
+    #[test]
+    fn validate_email_allowlist_refuses_invalid_addresses() {
+        let ok = vec!["alice@example.com".to_string(), "bob@mbm.one".to_string()];
+        assert!(validate_email_allowlist(&ok).is_ok());
+        let bad = vec!["alice@example.com".to_string(), "not-an-email".to_string()];
+        let err = validate_email_allowlist(&bad).unwrap_err();
+        assert!(err.to_string().contains("not-an-email"), "{err}");
     }
 }

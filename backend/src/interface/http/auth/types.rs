@@ -496,6 +496,7 @@ mod tests {
             link_signup_allowlist: Default::default(),
             discord: None,
             telegram: None,
+            email: None,
             ocr_enabled: false,
             ocr_base_url: None,
             voice_enabled: false,
