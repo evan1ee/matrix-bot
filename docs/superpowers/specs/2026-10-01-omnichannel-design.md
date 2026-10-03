@@ -20,6 +20,23 @@
 - `run` rebuilds the gateway client with capped exponential backoff and returns an error only for an invalid token or disallowed intents (R91); work runs on a bounded queue with four workers (R92); the supervisor watches every adapter (R97).
 - `ChannelSink::is_ready` still means "any adapter connected" (R93); `/help` shows the shared `!`-prefixed text (R94); attachments are files capped at 10 MiB (R98); option limits are 500 / 4000 characters, re-checked server side (R99); the outbox key becomes Discord's nonce when it fits (R100).
 
+**Amended after implementation (plan C, Telegram, 2026-10-03)** — rulings R102–R124 (= plan clarifications T1–T16):
+
+- Uses `teloxide-core` 0.13 without full teloxide; polling and webhook modes (R102); bare commands without `@bot` mentions (R103).
+- Slash commands + direct mentions + replies in groups; privacy mode preserved (R104); unhandled `/start` redispatches as `/help` (R105).
+- Interactive todo "Done" inline keyboard buttons constructed from `Content.actions` (R108); callback queries executed under presser identity (R107); private responses refused in groups (R109).
+- Webhook ingress at `/api/webhooks/telegram` with constant-time secret comparison and rate limiting (R110, R111).
+- Outbound sends voice notes via `sendVoice` for Ogg Opus, attachments over 50 MB produce notice (R117, R119).
+
+**Amended after implementation (plan D, Email, 2026-10-03)** — rulings R125–R138 (= plan clarifications E1–E14):
+
+- Uses `mail-parser` 0.11, `lettre` 0.11, `async-imap` 0.12, `tokio-rustls` 0.26 with explicit `ring` provider (R125).
+- Inbound body extracted from text/plain or converted HTML, quotes and signatures stripped (R126).
+- Strict DMARC pass enforcement against `EMAIL_AUTHSERV_ID` (R127, Invariant 8); unauthenticated emails and auto-replies silently dropped without bounce (R127, R128).
+- Outbound sent as `multipart/alternative` via lettre SMTP, threading preserved (`In-Reply-To`, `References`, `Re: <subject>`), actions rendered as text list (R130, R131).
+- IMAP polling searches `UNSEEN`, marks `\Seen`, drains stream properly, and moves to `EMAIL_PROCESSED_FOLDER` if set (R133).
+- Email adapter isolated with no-op progress sink (`NoProgress`) and supervised front door (R135, R138).
+
 ## 1. Goal
 
 One application and domain, many interfaces. Matrix, Discord, Telegram and Email become protocol adapters that turn platform traffic into normalized messages, call the same application services and `BotModule`s, and render normalized replies back into platform-native form.
@@ -335,10 +352,10 @@ Each adapter maps its client errors (`matrix_sdk::Error`, `serenity::Error`, `te
 
 | Plan | Scope | Written |
 |---|---|---|
-| **A** `plans/2026-10-01-omnichannel-a-framework.md` | domain/channels; message/adapter/registry; neutral `CommandContext`/`Reply`; agent decoupled; migrations 0006–0008; `IdentityService`/`LinkService`; link HTTP + web page; Matrix onto `MatrixAdapter`; registry replaces `Delivery` and `MatrixRoomSink`; docs | now |
+| **A** `plans/2026-10-01-omnichannel-a-framework.md` | domain/channels; message/adapter/registry; neutral `CommandContext`/`Reply`; agent decoupled; migrations 0006–0008; `IdentityService`/`LinkService`; link HTTP + web page; Matrix onto `MatrixAdapter`; registry replaces `Delivery` and `MatrixRoomSink`; docs | done (2026-10-02) |
 | **B** Discord `plans/2026-10-02-omnichannel-b-discord.md` | §8.2 | done (2026-10-02) |
 | **C** Telegram `plans/2026-10-02-omnichannel-c-telegram.md` | §8.3 | done (2026-10-03) |
-| **D** Email | §8.4 | after C |
+| **D** Email `plans/2026-10-03-omnichannel-d-email.md` | §8.4 | done (2026-10-03) |
 
 Each later plan is written against the code A produced, so it cites real types instead of guesses.
 
