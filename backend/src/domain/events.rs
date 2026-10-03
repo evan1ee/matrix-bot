@@ -466,6 +466,7 @@ mod tests {
             category_id: None,
             category_name: None,
             note: None,
+            receipt_storage_key: None,
             source_kind: None,
             source_id: None,
             occurred_at: now,

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT t.id, t.room_id, t.owner_id, t.sender_name, t.direction,\n               t.amount_minor, t.currency, t.currency_exponent, t.category_id,\n               c.name AS \"category_name?\", t.note, t.source_kind, t.source_id,\n               t.occurred_at, t.created_at\n        FROM transactions t\n        LEFT JOIN finance_categories c ON c.id = t.category_id\n        WHERE t.owner_id = $1\n          AND ($2::text IS NULL OR t.direction = $2)\n          AND ($3::bigint IS NULL OR t.category_id = $3)\n          AND ($4::timestamptz IS NULL OR t.occurred_at >= $4)\n          AND ($5::timestamptz IS NULL OR t.occurred_at <= $5)\n          AND ($6::text IS NULL OR t.currency = $6)\n        ORDER BY t.occurred_at DESC, t.id DESC\n        LIMIT $7 OFFSET $8\n        ",
+  "query": "\n        SELECT t.id, t.room_id, t.owner_id, t.sender_name, t.direction,\n               t.amount_minor, t.currency, t.currency_exponent, t.category_id,\n               c.name AS \"category_name?\", t.note, t.receipt_storage_key, t.source_kind, t.source_id,\n               t.occurred_at, t.created_at\n        FROM transactions t\n        LEFT JOIN finance_categories c ON c.id = t.category_id\n        WHERE t.owner_id = $1\n          AND ($2::text IS NULL OR t.direction = $2)\n          AND ($3::bigint IS NULL OR t.category_id = $3)\n          AND ($4::timestamptz IS NULL OR t.occurred_at >= $4)\n          AND ($5::timestamptz IS NULL OR t.occurred_at <= $5)\n          AND ($6::text IS NULL OR t.currency = $6)\n        ORDER BY t.occurred_at DESC, t.id DESC\n        LIMIT $7 OFFSET $8\n        ",
   "describe": {
     "columns": [
       {
@@ -126,6 +126,17 @@
       },
       {
         "ordinal": 11,
+        "name": "receipt_storage_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "transactions",
+            "name": "receipt_storage_key"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
         "name": "source_kind",
         "type_info": "Text",
         "origin": {
@@ -136,7 +147,7 @@
         }
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "source_id",
         "type_info": "Int8",
         "origin": {
@@ -147,7 +158,7 @@
         }
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "occurred_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -158,7 +169,7 @@
         }
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -195,9 +206,10 @@
       true,
       true,
       true,
+      true,
       false,
       true
     ]
   },
-  "hash": "82f7a4e91f00091403dde133ac0f0269e4011b8b67f675a45320cc8501a48822"
+  "hash": "0290101dc7d8c6335b8fab82e2fbd4f3c1d19a64d2a04b14dfb96872edde9e2e"
 }

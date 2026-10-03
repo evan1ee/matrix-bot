@@ -368,6 +368,7 @@ mod tests {
                     currency_exponent: 2,
                     category: None,
                     note: Some("Stipend"),
+                    receipt_storage_key: None,
                     room_id: "!room:1",
                     sender_name: "Alice",
                     occurred_at: crate::utils::time::now_at_storage_precision(),

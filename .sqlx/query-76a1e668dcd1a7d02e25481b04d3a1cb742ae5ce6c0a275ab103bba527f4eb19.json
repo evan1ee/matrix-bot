@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT t.id, t.room_id, t.owner_id, t.sender_name, t.direction,\n               t.amount_minor, t.currency, t.currency_exponent, t.category_id,\n               c.name AS \"category_name?\", t.note, t.source_kind, t.source_id,\n               t.occurred_at, t.created_at\n        FROM transactions t\n        LEFT JOIN finance_categories c ON c.id = t.category_id\n        WHERE t.id = $1 AND t.owner_id = $2\n        ",
+  "query": "\n        SELECT t.id, t.room_id, t.owner_id, t.sender_name, t.direction,\n               t.amount_minor, t.currency, t.currency_exponent, t.category_id,\n               c.name AS \"category_name?\", t.note, t.receipt_storage_key, t.source_kind, t.source_id,\n               t.occurred_at, t.created_at\n        FROM transactions t\n        LEFT JOIN finance_categories c ON c.id = t.category_id\n        WHERE t.id = $1 AND t.owner_id = $2\n        ",
   "describe": {
     "columns": [
       {
@@ -126,6 +126,17 @@
       },
       {
         "ordinal": 11,
+        "name": "receipt_storage_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "transactions",
+            "name": "receipt_storage_key"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
         "name": "source_kind",
         "type_info": "Text",
         "origin": {
@@ -136,7 +147,7 @@
         }
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "source_id",
         "type_info": "Int8",
         "origin": {
@@ -147,7 +158,7 @@
         }
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "occurred_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -158,7 +169,7 @@
         }
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -189,9 +200,10 @@
       true,
       true,
       true,
+      true,
       false,
       true
     ]
   },
-  "hash": "7ffe0b654fcd77423dac3b55298da3cdd7e5d92e106bbca0e48b113dcc0cae0e"
+  "hash": "76a1e668dcd1a7d02e25481b04d3a1cb742ae5ce6c0a275ab103bba527f4eb19"
 }

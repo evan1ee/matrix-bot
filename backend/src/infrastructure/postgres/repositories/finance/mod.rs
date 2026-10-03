@@ -52,6 +52,7 @@ mod tests {
             currency_exponent: exponent,
             category: None,
             note: Some("note"),
+            receipt_storage_key: None,
             room_id: "web",
             sender_name: "tester",
             occurred_at: when,
@@ -281,5 +282,60 @@ mod tests {
         assert_eq!(jpy.income_minor, 300000);
         assert_eq!(jpy.currency_exponent, 0);
         assert_eq!(jpy.net_minor, 300000);
+    }
+
+    #[tokio::test]
+    async fn test_transaction_receipt_storage_key_round_trip() {
+        use crate::domain::storage::{StorageCategory, StorageKey};
+
+        let pool = setup().await;
+        let owner = AccountId::from_seed("acct_receipt");
+        insert_account(&pool, &owner).await;
+
+        let key = StorageKey::generate(&owner, StorageCategory::Receipts, "jpg");
+
+        let input = NewTransaction {
+            direction: Direction::Expense,
+            amount_minor: 4200,
+            currency: "USD",
+            currency_exponent: 2,
+            category: None,
+            note: Some("dinner receipt"),
+            receipt_storage_key: Some(key.clone()),
+            room_id: "web",
+            sender_name: "tester",
+            occurred_at: Utc::now(),
+            source: None,
+            create_missing_category: false,
+        };
+
+        let mut conn = pool.acquire().await.unwrap();
+        let created = transactions::create_transaction(&mut conn, &owner, &input, None)
+            .await
+            .unwrap();
+
+        assert_eq!(created.receipt_storage_key, Some(key.clone()));
+
+        let found = transactions::find_owned(&pool, &owner, created.id)
+            .await
+            .unwrap()
+            .expect("transaction exists");
+        assert_eq!(found.receipt_storage_key, Some(key.clone()));
+
+        let listed = transactions::list(
+            &pool,
+            &owner,
+            &crate::domain::finance::ListTransactionsFilter::default(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(listed[0].receipt_storage_key, Some(key));
+
+        // Test clearing / updating receipt key
+        let updated = transactions::set_receipt_storage_key(&mut conn, &owner, created.id, None)
+            .await
+            .unwrap()
+            .expect("transaction updated");
+        assert_eq!(updated.receipt_storage_key, None);
     }
 }

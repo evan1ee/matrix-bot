@@ -169,6 +169,7 @@ impl RecurringBillsService {
                     currency_exponent: bill.currency_exponent,
                     category: Some(&bill.category),
                     note: Some(&note),
+                    receipt_storage_key: None,
                     room_id: &bill.room_id,
                     sender_name: &bill.sender_name,
                     occurred_at: Utc::now(),

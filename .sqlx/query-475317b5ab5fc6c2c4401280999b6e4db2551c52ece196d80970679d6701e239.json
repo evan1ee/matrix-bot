@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT t.id, t.room_id, t.owner_id, t.sender_name, t.direction,\n               t.amount_minor, t.currency, t.currency_exponent, t.category_id,\n               c.name AS \"category_name?\", t.note, t.source_kind, t.source_id,\n               t.occurred_at, t.created_at\n        FROM transactions t\n        LEFT JOIN finance_categories c ON c.id = t.category_id\n        WHERE t.id = $1\n        ",
+  "query": "\n        SELECT t.id, t.room_id, t.owner_id, t.sender_name, t.direction,\n               t.amount_minor, t.currency, t.currency_exponent, t.category_id,\n               c.name AS \"category_name?\", t.note, t.receipt_storage_key, t.source_kind, t.source_id,\n               t.occurred_at, t.created_at\n        FROM transactions t\n        LEFT JOIN finance_categories c ON c.id = t.category_id\n        WHERE t.id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -126,6 +126,17 @@
       },
       {
         "ordinal": 11,
+        "name": "receipt_storage_key",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "transactions",
+            "name": "receipt_storage_key"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
         "name": "source_kind",
         "type_info": "Text",
         "origin": {
@@ -136,7 +147,7 @@
         }
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "source_id",
         "type_info": "Int8",
         "origin": {
@@ -147,7 +158,7 @@
         }
       },
       {
-        "ordinal": 13,
+        "ordinal": 14,
         "name": "occurred_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -158,7 +169,7 @@
         }
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -188,9 +199,10 @@
       true,
       true,
       true,
+      true,
       false,
       true
     ]
   },
-  "hash": "0ba2d29080749050e023c65b9c386b899caa61f40c67c610b890f5c90554d0f8"
+  "hash": "475317b5ab5fc6c2c4401280999b6e4db2551c52ece196d80970679d6701e239"
 }

@@ -147,6 +147,7 @@ impl PortfolioService {
                     currency_exponent: exponent,
                     category: Some("Investments"),
                     note: Some(note),
+                    receipt_storage_key: None,
                     room_id: "web",
                     sender_name: "Portfolio",
                     occurred_at: executed_at.unwrap_or_else(Utc::now),

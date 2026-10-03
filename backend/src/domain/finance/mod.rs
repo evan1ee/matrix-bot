@@ -12,6 +12,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::domain::accounts::AccountId;
+use crate::domain::storage::StorageKey;
 
 /// Maximum allowed length for a transaction's note.
 pub const MAX_NOTE_LEN: usize = 500;
@@ -77,6 +78,7 @@ pub struct Transaction {
     /// Denormalised for reads so listing a ledger is one query, not N+1.
     pub category_name: Option<String>,
     pub note: Option<String>,
+    pub receipt_storage_key: Option<StorageKey>,
     /// Which module scheduled or generated this transaction (e.g. "recurring_bill", "portfolio_cash").
     pub source_kind: Option<String>,
     /// The ID of the originating entity in that module.
@@ -144,6 +146,7 @@ pub struct NewTransaction<'a> {
     pub currency_exponent: i64,
     pub category: Option<&'a str>,
     pub note: Option<&'a str>,
+    pub receipt_storage_key: Option<StorageKey>,
     pub room_id: &'a str,
     pub sender_name: &'a str,
     pub occurred_at: DateTime<Utc>,
@@ -160,6 +163,7 @@ pub struct TransactionPatch<'a> {
     pub currency_exponent: Option<i64>,
     pub category: Option<Option<&'a str>>,
     pub note: Option<Option<&'a str>>,
+    pub receipt_storage_key: Option<Option<StorageKey>>,
     pub occurred_at: Option<DateTime<Utc>>,
 }
 

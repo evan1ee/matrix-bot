@@ -240,6 +240,7 @@ pub async fn execute_tool(
                             currency_exponent: exp as i64,
                             category: Some(category_name),
                             note: Some(note),
+                            receipt_storage_key: None,
                             room_id: &target_room,
                             sender_name: "AI Assistant",
                             occurred_at,

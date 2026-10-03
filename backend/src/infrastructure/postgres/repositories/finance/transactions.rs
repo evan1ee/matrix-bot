@@ -5,6 +5,7 @@ use crate::domain::accounts::AccountId;
 use crate::domain::finance::{
     CategoryTotal, CurrencySummary, Direction, ListTransactionsFilter, NewTransaction, Transaction,
 };
+use crate::domain::storage::StorageKey;
 
 #[derive(Debug, sqlx::FromRow)]
 struct TransactionRow {
@@ -19,6 +20,7 @@ struct TransactionRow {
     category_id: Option<i64>,
     category_name: Option<String>,
     note: Option<String>,
+    receipt_storage_key: Option<String>,
     source_kind: Option<String>,
     source_id: Option<i64>,
     occurred_at: DateTime<Utc>,
@@ -39,6 +41,7 @@ impl From<TransactionRow> for Transaction {
             category_id: r.category_id,
             category_name: r.category_name,
             note: r.note,
+            receipt_storage_key: r.receipt_storage_key.and_then(|k| StorageKey::parse(&k).ok()),
             source_kind: r.source_kind,
             source_id: r.source_id,
             occurred_at: r.occurred_at,
@@ -57,13 +60,14 @@ pub async fn create_transaction(
         Some((k, id)) => (Some(k), Some(id)),
         None => (None, None),
     };
+    let receipt_storage_key = input.receipt_storage_key.as_ref().map(|k| k.as_str());
 
     let id = sqlx::query_scalar!(
         r#"
         INSERT INTO transactions
             (room_id, owner_id, sender_name, direction, amount_minor, currency,
-             currency_exponent, category_id, note, source_kind, source_id, occurred_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+             currency_exponent, category_id, note, receipt_storage_key, source_kind, source_id, occurred_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
         RETURNING id
         "#,
         input.room_id,
@@ -75,6 +79,7 @@ pub async fn create_transaction(
         input.currency_exponent,
         category_id,
         input.note,
+        receipt_storage_key,
         source_kind,
         source_id,
         input.occurred_at
@@ -87,7 +92,7 @@ pub async fn create_transaction(
         r#"
         SELECT t.id, t.room_id, t.owner_id, t.sender_name, t.direction,
                t.amount_minor, t.currency, t.currency_exponent, t.category_id,
-               c.name AS "category_name?", t.note, t.source_kind, t.source_id,
+               c.name AS "category_name?", t.note, t.receipt_storage_key, t.source_kind, t.source_id,
                t.occurred_at, t.created_at
         FROM transactions t
         LEFT JOIN finance_categories c ON c.id = t.category_id
@@ -107,7 +112,7 @@ pub async fn find(pool: &PgPool, id: i64) -> Result<Option<Transaction>, sqlx::E
         r#"
         SELECT t.id, t.room_id, t.owner_id, t.sender_name, t.direction,
                t.amount_minor, t.currency, t.currency_exponent, t.category_id,
-               c.name AS "category_name?", t.note, t.source_kind, t.source_id,
+               c.name AS "category_name?", t.note, t.receipt_storage_key, t.source_kind, t.source_id,
                t.occurred_at, t.created_at
         FROM transactions t
         LEFT JOIN finance_categories c ON c.id = t.category_id
@@ -131,7 +136,7 @@ pub async fn find_owned(
         r#"
         SELECT t.id, t.room_id, t.owner_id, t.sender_name, t.direction,
                t.amount_minor, t.currency, t.currency_exponent, t.category_id,
-               c.name AS "category_name?", t.note, t.source_kind, t.source_id,
+               c.name AS "category_name?", t.note, t.receipt_storage_key, t.source_kind, t.source_id,
                t.occurred_at, t.created_at
         FROM transactions t
         LEFT JOIN finance_categories c ON c.id = t.category_id
@@ -222,7 +227,7 @@ pub async fn list(
         r#"
         SELECT t.id, t.room_id, t.owner_id, t.sender_name, t.direction,
                t.amount_minor, t.currency, t.currency_exponent, t.category_id,
-               c.name AS "category_name?", t.note, t.source_kind, t.source_id,
+               c.name AS "category_name?", t.note, t.receipt_storage_key, t.source_kind, t.source_id,
                t.occurred_at, t.created_at
         FROM transactions t
         LEFT JOIN finance_categories c ON c.id = t.category_id
@@ -248,6 +253,34 @@ pub async fn list(
     .await?;
 
     Ok(rows.into_iter().map(Into::into).collect())
+}
+
+pub async fn set_receipt_storage_key(
+    conn: &mut sqlx::PgConnection,
+    owner_id: &AccountId,
+    id: i64,
+    receipt_storage_key: Option<&StorageKey>,
+) -> Result<Option<Transaction>, sqlx::Error> {
+    let key_str = receipt_storage_key.map(|k| k.as_str());
+    let rows_affected = sqlx::query!(
+        r#"
+        UPDATE transactions
+        SET receipt_storage_key = $1
+        WHERE id = $2 AND owner_id = $3
+        "#,
+        key_str,
+        id,
+        owner_id.as_uuid()
+    )
+    .execute(&mut *conn)
+    .await?
+    .rows_affected();
+
+    if rows_affected == 0 {
+        return Ok(None);
+    }
+
+    find_owned(&mut *conn, owner_id, id).await
 }
 
 pub async fn count(

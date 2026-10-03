@@ -316,6 +316,7 @@ pub async fn create_transaction(
                 currency_exponent: exponent,
                 category: category.as_deref(),
                 note: payload.note.as_deref(),
+                receipt_storage_key: None,
                 room_id: &room_id,
                 sender_name: &user.display_name,
                 occurred_at: payload.occurred_at.unwrap_or_else(Utc::now),
@@ -362,6 +363,7 @@ pub async fn update_transaction(
                 currency_exponent: Some(exponent),
                 category: Some(category.as_deref()),
                 note: Some(payload.note.as_deref()),
+                receipt_storage_key: None,
                 occurred_at: Some(payload.occurred_at.unwrap_or_else(Utc::now)),
             },
         )

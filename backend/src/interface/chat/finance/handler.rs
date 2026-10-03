@@ -134,6 +134,7 @@ pub async fn handle_finance_command(
         currency_exponent: parsed.exponent as i64,
         category: parsed.category.as_deref(),
         note: note_opt,
+        receipt_storage_key: None,
         room_id,
         sender_name,
         occurred_at: Utc::now(),

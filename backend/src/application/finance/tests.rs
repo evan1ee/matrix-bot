@@ -21,6 +21,7 @@ fn expense(note: &str) -> NewTransaction<'_> {
         currency_exponent: 2,
         category: None,
         note: Some(note),
+        receipt_storage_key: None,
         room_id: "web",
         sender_name: "tester",
         occurred_at: now_at_storage_precision(),
