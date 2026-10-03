@@ -33,6 +33,40 @@ impl FinanceService {
         Ok(tx)
     }
 
+    /// Convenience helper to record an expense transaction, optionally linking a receipt storage key.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn record_expense(
+        &self,
+        owner: &AccountId,
+        amount_minor: i64,
+        currency: &str,
+        currency_exponent: i64,
+        category: Option<&str>,
+        note: Option<&str>,
+        receipt_storage_key: Option<crate::domain::storage::StorageKey>,
+        room_id: &str,
+        sender_name: &str,
+    ) -> Result<Transaction, AppError> {
+        self.create_transaction(
+            owner,
+            NewTransaction {
+                direction: Direction::Expense,
+                amount_minor,
+                currency,
+                currency_exponent,
+                category,
+                note,
+                receipt_storage_key,
+                room_id,
+                sender_name,
+                occurred_at: chrono::Utc::now(),
+                source: None,
+                create_missing_category: true,
+            },
+        )
+        .await
+    }
+
     pub async fn get_transaction(
         &self,
         owner: &AccountId,
@@ -120,6 +154,27 @@ impl FinanceService {
             category_id,
             note,
             occurred_at,
+        )
+        .await?
+        .ok_or(FinanceError::TransactionNotFound)?;
+        outbox::publish(&mut tx, &SystemEvent::TransactionUpdated(updated.clone())).await?;
+        tx.commit().await?;
+        Ok(updated)
+    }
+
+    /// Attaches or updates a receipt storage key on an existing transaction owned by `owner`.
+    pub async fn link_receipt(
+        &self,
+        owner: &AccountId,
+        transaction_id: i64,
+        storage_key: crate::domain::storage::StorageKey,
+    ) -> Result<Transaction, AppError> {
+        let mut tx = self.pool.begin().await?;
+        let updated = repo::set_receipt_storage_key(
+            &mut tx,
+            owner,
+            transaction_id,
+            Some(&storage_key),
         )
         .await?
         .ok_or(FinanceError::TransactionNotFound)?;

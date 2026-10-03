@@ -187,8 +187,15 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         }
         db = Database::connect(&config.database_url, config.db_max_connections) => db?,
     };
+    let storage_config = crate::infrastructure::storage::StorageConfig::from_env(
+        (!config.web_url.is_empty()).then(|| config.web_url.clone()),
+    );
+    let storage = crate::infrastructure::storage::build_storage(&storage_config)
+        .map_err(|e| anyhow::anyhow!("Failed to initialize object storage: {e}"))?;
+
     let services = AppServices::new(&db.pool)
-        .with_link_config(config.web_url.clone(), config.link_signup_allowlist.clone());
+        .with_link_config(config.web_url.clone(), config.link_signup_allowlist.clone())
+        .with_storage(storage);
     // Built once and cloned into every reconnect generation, so `SyncHealth`
     // survives a Matrix reconnect.
     let handles = BotHandles::default();

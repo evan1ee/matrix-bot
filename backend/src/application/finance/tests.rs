@@ -1,4 +1,4 @@
-use crate::application::AppServices;
+use crate::application::{AppError, AppServices};
 use crate::domain::accounts::AccountId;
 use crate::domain::finance::{Direction, NewTransaction};
 use crate::infrastructure::postgres::repositories::{self, finance as repo, outbox};
@@ -189,3 +189,58 @@ async fn a_failed_publish_rolls_back_the_category_delete() {
         .await
         .contains(&"CategoryDeleted".to_string()));
 }
+
+#[tokio::test]
+async fn record_expense_with_receipt_and_link_receipt() {
+    use crate::domain::storage::{StorageCategory, StorageKey};
+
+    let (pool, services, owner) = setup("fin_record_expense_receipt").await;
+    let key1 = StorageKey::generate(&owner, StorageCategory::Receipts, "jpg");
+
+    let tx = services
+        .finance
+        .record_expense(
+            &owner,
+            2500,
+            "USD",
+            2,
+            None,
+            Some("dinner"),
+            Some(key1.clone()),
+            "web",
+            "tester",
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(tx.receipt_storage_key, Some(key1));
+    assert!(types(&pool, &owner)
+        .await
+        .contains(&"TransactionCreated".to_string()));
+
+    let key2 = StorageKey::generate(&owner, StorageCategory::Receipts, "png");
+    let updated = services
+        .finance
+        .link_receipt(&owner, tx.id, key2.clone())
+        .await
+        .unwrap();
+
+    assert_eq!(updated.receipt_storage_key, Some(key2));
+    assert!(types(&pool, &owner)
+        .await
+        .contains(&"TransactionUpdated".to_string()));
+
+    // Other owner cannot link receipt to another owner's transaction
+    let other_owner = AccountId::from_seed("other_fin_owner");
+    let err = services
+        .finance
+        .link_receipt(
+            &other_owner,
+            tx.id,
+            StorageKey::generate(&other_owner, StorageCategory::Receipts, "jpg"),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, AppError::NotFound(_)));
+}
+

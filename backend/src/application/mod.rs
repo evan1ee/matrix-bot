@@ -22,7 +22,11 @@ pub mod settings;
 pub mod todos;
 pub mod webhooks;
 
+use std::sync::Arc;
+
 use sqlx::PgPool;
+
+use crate::infrastructure::storage::StorageService;
 
 use self::accounts::AccountService;
 use self::bookmarks::BookmarkService;
@@ -105,6 +109,7 @@ pub struct AppServices {
     pub reminders: ReminderService,
     pub rooms: RoomService,
     pub settings: SettingsService,
+    pub storage: Arc<dyn StorageService>,
     pub todos: TodoService,
     pub webhooks: WebhookService,
 }
@@ -135,6 +140,23 @@ impl AppServices {
         let webhooks = WebhookService::new(pool.clone());
         let portfolio = PortfolioService::new(pool.clone());
         let outbox = OutboxService::new(pool.clone());
+        let storage = crate::infrastructure::storage::LocalStorageService::new(
+            "data/storage",
+            None,
+            "ephemeral-signing-secret",
+        )
+        .map(|s| Arc::new(s) as Arc<dyn StorageService>)
+        .unwrap_or_else(|_| {
+            let tmp = std::env::temp_dir().join("matrix_bot_storage");
+            Arc::new(
+                crate::infrastructure::storage::LocalStorageService::new(
+                    tmp,
+                    None,
+                    "ephemeral-signing-secret",
+                )
+                .expect("temp storage fallback must initialize"),
+            )
+        });
         Self {
             accounts,
             bookmarks,
@@ -152,6 +174,7 @@ impl AppServices {
             reminders,
             rooms,
             settings,
+            storage,
             todos,
             webhooks,
         }
@@ -166,6 +189,12 @@ impl AppServices {
         signup_allowlist: std::collections::HashMap<crate::domain::channels::Channel, Vec<String>>,
     ) -> Self {
         self.link = self.link.with_config(web_url, signup_allowlist);
+        self
+    }
+
+    /// Gives the services tree the configured object storage service.
+    pub fn with_storage(mut self, storage: Arc<dyn StorageService>) -> Self {
+        self.storage = storage;
         self
     }
 }

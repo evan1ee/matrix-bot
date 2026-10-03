@@ -73,13 +73,13 @@ pub struct StorageConfig {
 
 impl StorageConfig {
     /// Builds configuration from environment variables.
-    pub fn from_env(web_url: Option<String>, session_secret: &str) -> Self {
+    pub fn from_env(web_url: Option<String>) -> Self {
         let driver_str = std::env::var("STORAGE_DRIVER").unwrap_or_else(|_| "local".to_string());
         let driver = StorageDriver::parse(&driver_str).unwrap_or(StorageDriver::Local);
         let local_dir =
             std::env::var("STORAGE_LOCAL_DIR").unwrap_or_else(|_| "data/storage".to_string());
-        let signing_secret =
-            std::env::var("STORAGE_SIGNING_SECRET").unwrap_or_else(|_| session_secret.to_string());
+        let signing_secret = std::env::var("STORAGE_SIGNING_SECRET")
+            .unwrap_or_else(|_| "matrix-bot-default-signing-secret".to_string());
 
         let s3_endpoint = std::env::var("S3_ENDPOINT")
             .ok()
