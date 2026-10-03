@@ -20,5 +20,6 @@ pub mod recurring_bills;
 pub mod reminders;
 pub mod rooms;
 pub mod settings;
+pub mod storage;
 pub mod todos;
 pub mod webhooks;
