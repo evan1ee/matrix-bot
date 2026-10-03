@@ -18,11 +18,14 @@ use matrix_sdk::{
 };
 use tracing::{error, warn};
 
+use bytes::Bytes;
 use crate::config::AiEnvConfig;
 use crate::db::Database;
 use crate::domain::accounts::AccountId;
-use crate::domain::channels::PlatformIdentity;
-use crate::infrastructure::postgres::repositories::identities;
+use crate::domain::channels::{ConversationAddress, PlatformIdentity};
+use crate::domain::jobs::NewJob;
+use crate::domain::storage::{StorageCategory, StorageKey};
+use crate::infrastructure::postgres::repositories::{identities, jobs};
 use crate::interface::channels::matrix::stage::{StageIndicator, StageReporter, TypingGuard};
 use crate::interface::chat::voice::VoiceConfig;
 use crate::llm::progress::ProgressSink;
@@ -34,7 +37,6 @@ use crate::llm::progress::ProgressSink;
 enum Attachment<'a> {
     Image {
         content: &'a ImageMessageEventContent,
-        ocr: &'a crate::infrastructure::inference::ocr::OcrClient,
     },
     Audio {
         content: &'a AudioMessageEventContent,
@@ -46,12 +48,12 @@ enum Attachment<'a> {
 impl<'a> Attachment<'a> {
     fn from_msgtype(
         msgtype: &'a MessageType,
-        ocr: &'a crate::infrastructure::inference::ocr::OcrClient,
+        _ocr: &'a crate::infrastructure::inference::ocr::OcrClient,
         voice_config: &'a VoiceConfig,
         stt: &'a crate::infrastructure::inference::stt::SttClient,
     ) -> Option<Self> {
         match msgtype {
-            MessageType::Image(content) => Some(Self::Image { content, ocr }),
+            MessageType::Image(content) => Some(Self::Image { content }),
             MessageType::Audio(content) => Some(Self::Audio {
                 content,
                 voice_config,
@@ -78,8 +80,8 @@ impl<'a> Attachment<'a> {
     fn stage_labels(&self) -> (&'static str, &'static str) {
         match self {
             Self::Image { .. } => (
-                "🔍 Scanning image with OCR...",
-                "🔍 <i>正在识别图片文字 (OCR)...</i>",
+                "🧾 Saving receipt to storage...",
+                "🧾 <i>正在保存小票至存储并排队处理...</i>",
             ),
             Self::Audio { .. } => ("🎧 Transcribing voice...", "🎧 <i>正在转写语音...</i>"),
         }
@@ -121,7 +123,7 @@ impl<'a> Attachment<'a> {
     fn panic_message(&self) -> &'static str {
         match self {
             Self::Image { .. } => {
-                "⚠️ <b>图片处理异常</b><br/>• <b>原因:</b> 图片识别过程中发生系统异常<br/>• <b>建议:</b> 请尝试重新拍摄发送，或直接输入文字。"
+                "⚠️ <b>图片处理异常</b><br/>• <b>原因:</b> 图片接收过程中发生系统异常<br/>• <b>建议:</b> 请尝试重新发送图片，或直接输入文字。"
             }
             Self::Audio { .. } => {
                 "⚠️ <b>语音处理异常</b><br/>• <b>原因:</b> 音频解码或识别过程中发生系统异常<br/>• <b>建议:</b> 请尝试重新发送语音，或直接输入文字。"
@@ -156,7 +158,7 @@ impl<'a> Attachment<'a> {
 
     fn log_panic(&self, panic_err: &(dyn std::any::Any + Send)) {
         match self {
-            Self::Image { .. } => error!("OCR image processing panicked: {:?}", panic_err),
+            Self::Image { .. } => error!("Receipt image ingestion panicked: {:?}", panic_err),
             Self::Audio { .. } => error!("Voice audio processing panicked: {:?}", panic_err),
         }
     }
@@ -175,19 +177,27 @@ impl<'a> Attachment<'a> {
         let conversation = room.room_id().as_str();
         let progress: Option<&dyn ProgressSink> = Some(reporter);
         let reply = match self {
-            Self::Image { content, ocr } => {
-                crate::interface::chat::ocr::process_image(
-                    db,
+            Self::Image { content } => {
+                let conversation =
+                    ConversationAddress::Matrix(room.room_id().as_str().to_string());
+                let mimetype = content
+                    .info
+                    .as_ref()
+                    .and_then(|info| info.mimetype.as_deref());
+                match ingest_receipt_image(
+                    &db.pool,
                     services,
-                    ai,
                     conversation,
                     owner_id,
-                    Some(&content.body),
+                    &content.body,
+                    mimetype,
                     media_bytes,
-                    ocr,
-                    progress,
                 )
                 .await
+                {
+                    Ok(html) => return html,
+                    Err(err) => return err,
+                }
             }
             Self::Audio {
                 content,
@@ -334,4 +344,170 @@ pub async fn handle_attachment(
         ev.event_id.as_str(),
     )
     .await;
+}
+
+fn image_meta(mimetype: Option<&str>, body: &str, bytes: &[u8]) -> (&'static str, &'static str) {
+    let mime = mimetype.unwrap_or_default().to_ascii_lowercase();
+    if mime.contains("jpeg") || mime.contains("jpg") {
+        ("jpg", "image/jpeg")
+    } else if mime.contains("png") {
+        ("png", "image/png")
+    } else if mime.contains("webp") {
+        ("webp", "image/webp")
+    } else if mime.contains("gif") {
+        ("gif", "image/gif")
+    } else if bytes.starts_with(b"\xFF\xD8\xFF") {
+        ("jpg", "image/jpeg")
+    } else if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        ("png", "image/png")
+    } else if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        ("webp", "image/webp")
+    } else {
+        let lower = body.to_ascii_lowercase();
+        if lower.ends_with(".png") {
+            ("png", "image/png")
+        } else if lower.ends_with(".webp") {
+            ("webp", "image/webp")
+        } else if lower.ends_with(".gif") {
+            ("gif", "image/gif")
+        } else {
+            ("jpg", "image/jpeg")
+        }
+    }
+}
+
+pub(crate) async fn ingest_receipt_image(
+    pool: &sqlx::PgPool,
+    services: &crate::application::AppServices,
+    conversation: ConversationAddress,
+    owner_id: &AccountId,
+    body: &str,
+    mimetype: Option<&str>,
+    media_bytes: &[u8],
+) -> Result<String, String> {
+    let (ext, content_type) = image_meta(mimetype, body, media_bytes);
+    let storage_key = StorageKey::generate(owner_id, StorageCategory::Receipts, ext);
+
+    if let Err(err) = services
+        .storage
+        .put(
+            &storage_key,
+            Bytes::copy_from_slice(media_bytes),
+            content_type,
+        )
+        .await
+    {
+        error!(
+            "Failed to save receipt image to storage for owner {}: {:?}",
+            owner_id, err
+        );
+        return Err("⚠️ <b>图片保存失败</b><br/>• <b>原因:</b> 无法保存至存储服务<br/>• <b>建议:</b> 请稍后重试。".to_string());
+    }
+
+    let caption = {
+        let b = body.trim();
+        if b.is_empty() {
+            None
+        } else {
+            Some(b.to_string())
+        }
+    };
+
+    let job = NewJob::media_process_receipt(
+        *owner_id,
+        storage_key,
+        Some(conversation),
+        caption,
+    );
+
+    if let Err(err) = jobs::enqueue(pool, &job).await {
+        error!(
+            "Failed to enqueue media.process_receipt job for owner {}: {:?}",
+            owner_id, err
+        );
+        return Err("⚠️ <b>任务排队失败</b><br/>• <b>原因:</b> 无法提交后台解析任务<br/>• <b>建议:</b> 请稍后重试。".to_string());
+    }
+
+    Ok("🧾 <b>已收到小票图片</b><br/>后台正在进行 OCR 识别与自动记账，处理完成后将在此通知您。".to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Arc;
+    use crate::domain::jobs::JobType;
+    use crate::infrastructure::storage::local::LocalStorageService;
+
+    #[test]
+    fn detects_image_metadata() {
+        assert_eq!(image_meta(Some("image/png"), "", b""), ("png", "image/png"));
+        assert_eq!(image_meta(Some("image/jpeg"), "", b""), ("jpg", "image/jpeg"));
+        assert_eq!(image_meta(None, "receipt.webp", b""), ("webp", "image/webp"));
+        assert_eq!(image_meta(None, "", b"\xFF\xD8\xFF\xE0"), ("jpg", "image/jpeg"));
+        assert_eq!(image_meta(None, "", b"\x89PNG\r\n\x1a\n"), ("png", "image/png"));
+        assert_eq!(image_meta(None, "unknown", b"data"), ("jpg", "image/jpeg"));
+    }
+
+    #[tokio::test]
+    async fn ingest_receipt_image_stores_payload_and_enqueues_durable_job() {
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let storage = LocalStorageService::new(
+            temp_dir.path(),
+            None,
+            "test-secret",
+        )
+        .unwrap();
+
+        let services = crate::application::AppServices::new(&pool)
+            .with_storage(Arc::new(storage.clone()));
+
+        let owner = AccountId::from_seed("acct_matrix_ingest");
+        crate::infrastructure::postgres::repositories::accounts::core::create_with_id(
+            &pool,
+            &owner,
+            "Tester",
+            crate::domain::accounts::STATUS_ACTIVE,
+        )
+        .await
+        .unwrap();
+
+        let conv = ConversationAddress::Matrix("!room123:matrix.org".into());
+        let fake_image = b"\x89PNG\r\n\x1a\nfake-receipt-image-content";
+
+        let html = ingest_receipt_image(
+            &pool,
+            &services,
+            conv.clone(),
+            &owner,
+            "lunch at cafe",
+            Some("image/png"),
+            fake_image,
+        )
+        .await
+        .expect("ingestion should succeed");
+
+        assert!(html.contains("已收到小票图片"));
+
+        // Claim the enqueued job to verify its type and payload
+        let claimed = jobs::claim(&pool, "test-worker", &[JobType::MediaProcessReceipt.as_str()])
+            .await
+            .expect("claim query should succeed")
+            .expect("job should be claimable");
+
+        assert_eq!(claimed.job_type, JobType::MediaProcessReceipt.as_str());
+        assert_eq!(claimed.account_id, Some(owner));
+
+        let storage_key_str = claimed.payload["storage_key"].as_str().expect("storage_key in payload");
+        let storage_key: StorageKey = storage_key_str.parse().expect("valid storage key");
+
+        assert_eq!(storage_key.account_id(), owner);
+        assert_eq!(storage_key.category(), StorageCategory::Receipts);
+
+        // Verify image bytes can be retrieved from object storage
+        let retrieved = services.storage.get(&storage_key).await.expect("storage get");
+        assert_eq!(retrieved.as_ref(), fake_image);
+    }
 }
