@@ -181,6 +181,11 @@ WEBAUTHN_ORIGIN=http://localhost:8080
 # DISCORD_TOKEN=
 # DISCORD_GUILD_ID=123456789012345678   # register commands to one server (instant updates)
 
+# Telegram (Optional) — the adapter starts only when TELEGRAM_BOT_TOKEN is set.
+# TELEGRAM_BOT_TOKEN=
+# TELEGRAM_MODE=polling                  # polling (default) or webhook
+# TELEGRAM_WEBHOOK_SECRET=               # required in webhook mode (alphanumeric, -, _)
+
 # AI Assistant & Live Web Search (Optional)
 AI_ENDPOINT=https://api.x.ai/v1
 AI_API_KEY=xai-...
@@ -211,6 +216,19 @@ TAVILY_API_KEY=tvly-...                # Live Web Search (fallback to DuckDuckGo
 4. People link their Discord account by sending `/link` to the bot in a direct message and opening the link it returns. List someone in `DISCORD_ALLOWED_USERS` to let them create a new account from that link; anyone else signs in to an existing one.
 
 The bot answers `/todo`, `/expense`, `/portfolio`, `/ask`, `/link` and `/help` (each with one `args` text, e.g. `/todo args:add buy milk`; `/ask` takes a `prompt`), and talks to the assistant when you write to it in a direct message. In a server, every reply except `/help` is visible only to you.
+
+---
+
+### Enabling Telegram (optional)
+
+1. Open Telegram, start a conversation with [@BotFather](https://t.me/BotFather), run `/newbot`, and follow the prompts to create your bot. Copy the bot token into `TELEGRAM_BOT_TOKEN`.
+2. Keep group privacy mode enabled (the default in @BotFather): in groups and supergroups, the bot will only receive slash commands and direct mentions, protecting other group members' privacy.
+3. Choose the operating mode in `TELEGRAM_MODE`:
+   - `polling`: default, ideal for local testing and development behind NAT without a public domain. The bot long-polls Telegram for updates.
+   - `webhook`: recommended for production. Requires a public HTTPS `WEB_URL` (or `WEBAUTHN_ORIGIN`) and `TELEGRAM_WEBHOOK_SECRET`. The bot calls `setWebhook` automatically at boot and receives updates at `POST /api/webhooks/telegram`.
+4. People link their Telegram account by sending `/link` to the bot in a direct chat and opening the link it returns. List someone's numeric Telegram user ID in `TELEGRAM_ALLOWED_USERS` (comma-separated) to let them create a new account from that link; anyone else signs in to an existing one.
+
+The bot advertises `/todo`, `/expense`, `/portfolio`, `/ask`, `/link`, and `/help` in Telegram's menu via `setMyCommands`. Direct messages route free-text to the AI assistant with typing indicators and status updates. In groups, commands are supported with `@botname` mentions, while private responses (e.g. portfolio/finance) are refused with a prompt to message the bot directly. The `/todo` task list includes interactive inline "Done" buttons to quickly complete tasks.
 
 ### Option 1: Standalone Single Binary (Recommended)
 

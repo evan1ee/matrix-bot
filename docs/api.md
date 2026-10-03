@@ -4,7 +4,7 @@ The embedded Axum server (`backend/src/interface/http/`) exposes the application
 
 ## Conventions
 
-- **Mounting.** Application endpoints live under `/api/v1`, aggregated by `api_routes()` in `interface/http/routes.rs`. The health probes and the Telegram-compatible webhook receiver are mounted at the router root, outside `/api/v1`.
+- **Mounting.** Application endpoints live under `/api/v1`, aggregated by `api_routes()` in `interface/http/routes.rs`. The health probes, the Telegram update webhook receiver (`POST /api/webhooks/telegram`), and the Telegram-compatible webhook receiver are mounted at the router root, outside `/api/v1`.
 - **Handler shape.** Parse and validate → call a service on `ApiState.services` → map the result to a response DTO. A handler holds no business rule and runs no SQL.
 - **Errors.** Every response uses `ApiError` (`backend/src/error.rs`): `{ "error": "...", "code": 400 }`. `?` maps `AppError` through `interface/http/app_error.rs`: `Validation` → 400, `NotFound` → 404, `Forbidden` → 403, `Conflict` → 409; `Database` and `External` become an opaque 500 with the detail logged, never returned. `.api_context("Failed to …")?` keeps a handler's log context.
 - **Input limits.** Cap every API payload string at 500 characters. The router carries a 180 s `TimeoutLayer` so long research requests (AI, web search) complete.
@@ -67,7 +67,16 @@ Linking is chat-initiated for every channel (`!link` on Matrix, `/link` on Disco
 
 The token travels in the request body, is capped at 500 characters, and appears in no log line or error; the landing page strips it from the address bar after reading it. `link` is handled by the inbound pipeline before the sender is resolved: resolving first would provision an empty account for the very identity being claimed. A claim requires `VerifiedUser` (so the web's passkey step-up and the `Origin` check apply); `/link/inspect` takes an optional session and reads only. The old `/account/matrix/*` endpoints (web-minted link code, pending merge confirmation, Matrix-only unlink) are gone, together with `!link <code>`: the replacement is the table above, and an identity is removed with `POST /account/identities/unlink`.
 
-**Reserved for plan C (Telegram).** The production Telegram update webhook will be `POST /api/webhooks/telegram`, outside `/api/v1`, authenticated by the `X-Telegram-Bot-Api-Secret-Token` header against `TELEGRAM_WEBHOOK_SECRET`; nothing serves it yet, and it is distinct from the Bot-API-compatible inbound gateway `/bot<token>/sendMessage` below (design: `superpowers/specs/2026-10-01-omnichannel-design.md` §6).
+### Telegram update webhook (`POST /api/webhooks/telegram`)
+
+Mounted outside `/api/v1` at `POST /api/webhooks/telegram`. Receives raw JSON `Update` payloads from Telegram Bot API servers.
+
+- **Authentication & Rate Limit:** Checked before reading the request body. Rate-limited by IP sliding window (120 req / 60 s, `429`). The `X-Telegram-Bot-Api-Secret-Token` header is verified against `TELEGRAM_WEBHOOK_SECRET` using constant-time comparison (`utils::secure::constant_time_eq`); missing or incorrect secret returns `401 Unauthorized` without reading the body (invariant 7).
+- **Queueing:** Returns `200 OK` immediately upon enqueuing to the adapter's bounded worker channel (capacity 32). Returns `503 Service Unavailable` if the queue is full.
+- **Availability:** Returns `404 Not Found` when Telegram is disabled or configured in polling mode.
+- **Security:** Neither the secret header nor the payload body is logged at any level. Not included in OpenAPI (`backend/openapi.json` is byte-identical, T12).
+
+The drop-in Bot-API emulation shim (`/bot<token>/sendMessage`) lives in `interface/http/webhooks/telegram_compat.rs` and remains at the router root for external monitoring services.
 
 Unlinking keeps every row. Data belongs to the account; unlinking revokes an access path, and the MXID comes back as a stranger.
 
@@ -98,7 +107,7 @@ External senders (Alertmanager, Grafana, Uptime Kuma, Sentry, cron, CI) post int
 | Endpoint | Auth | Purpose |
 |---|---|---|
 | `POST /api/v1/webhooks/:token` | the token in the path | JSON `{message\|text, title?, level\|severity?, room_id?, format?}` or a raw plaintext body; `level` is `critical`, `warning`, `info` (default) or `success` |
-| `GET`/`POST /bot<token>/sendMessage` | the token replaces the Telegram bot token | drop-in Telegram Bot API emulation (`text`, `parse_mode`), mounted at the router root |
+| `GET`/`POST /bot<token>/sendMessage` | the token replaces the Telegram bot token | drop-in Telegram Bot API emulation (`text`, `parse_mode`), mounted at the router root (implemented in `webhooks/telegram_compat.rs`) |
 | `GET/POST/PATCH/DELETE /api/v1/account/webhooks[/:id]`, `…/:id/{rotate,test,logs}` | session | management; rotation and deletion require step-up |
 
 Management is also available from chat: `!webhook list | create <name> [room] | test <id> | revoke <id>`. Design rules:

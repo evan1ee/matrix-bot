@@ -269,6 +269,24 @@ The four `/account/matrix/*` routes are removed. This is an **intentional OpenAP
 - The existing Bot-API *emulation* endpoint `interface/http/webhooks_telegram.rs` (`/bot{token}/sendMessage`, an inbound-webhook compatibility shim) is renamed `interface/http/webhooks/telegram_compat.rs`; its contract is unchanged.
 - Config: `TELEGRAM_BOT_TOKEN`, `TELEGRAM_MODE` (`webhook` | `polling`, default `webhook`), `TELEGRAM_WEBHOOK_SECRET` (required in webhook mode; `Config::validate` refuses to boot without it), `TELEGRAM_ALLOWED_USERS`.
 
+> **Spec amendments (plan C, 2026-10-03; rulings R102–R117):**
+> - **T1 (R102):** Dependency is `teloxide-core` 0.13 (`rustls`), not the full `teloxide` framework; brings `reqwest` 0.12 with `takecell` pinned to 0.1.1 for rustc 1.94 compatibility.
+> - **T2 (R103):** Commands reach the registry as bare `full_body` without `/` (matching Discord R85); `/todo@BotName` mention suffix is stripped; any typed `/name` is parsed as a command, with the 6 core commands advertised via `setMyCommands`.
+> - **T3 (R104):** Addressed text: in groups/supergroups, only commands, `@bot` mentions, and direct replies to bot messages are processed; channels and edited messages are ignored.
+> - **T4 (R105):** `/start` for an unlinked user answers with link guidance; for a linked user, if unhandled it redispatches once as `help`.
+> - **T5 (R106):** Replied-to messages populate `quoted = QuotedMessage`, supporting reply-as-body for commands.
+> - **T6 (R107):** Callbacks are answered at once via `answerCallbackQuery` and re-dispatched through the inbound pipeline as the user who pressed the button (invariant 9).
+> - **T7 (R108):** `Content.actions` render as an inline keyboard (max 8 rows of 1 button, callback data ≤ 64 bytes). Todo list generates `Done #<id>` buttons for at most 10 open items.
+> - **T8 (R109):** In groups/supergroups, `Visibility::Private` replies are refused with `PRIVATE_IN_GROUP` ("That answer is private — message me directly.") and never posted publicly (invariant 10).
+> - **T9 (R110):** Webhook ingress at `POST /api/webhooks/telegram` verifies `X-Telegram-Bot-Api-Secret-Token` in constant time before parsing the body; 120/min rate limit per IP; returns 200 on enqueue, 503 on queue full.
+> - **T10 (R111):** Constant-time comparison implemented in `utils::secure::constant_time_eq`.
+> - **T11 (R112):** 4 worker tasks drain a bounded queue (32 slots) fed by either webhook ingress or long polling; updates deduplicated by `RecentUpdates` (1024-id sliding window).
+> - **T12 (R113):** Webhook route is not in OpenAPI (infrastructure endpoint). Compat shim `/bot<token>/sendMessage` moved to `interface/http/webhooks/telegram_compat.rs` with OpenAPI schema unchanged.
+> - **T13 (R114):** `Config::validate` requires `TELEGRAM_WEBHOOK_SECRET` and HTTPS `WEB_URL` in webhook mode; validates `TELEGRAM_ALLOWED_USERS` entries as positive i64.
+> - **T14 (R115):** Telegram Bot API has no idempotency keys; outbox deliveries are at-least-once.
+> - **T15 (R116):** Progress edits a status message at most every 1.5 s and sends chat action typing indicators every 4 s in direct chats.
+> - **T16 (R117):** Attachments: Ogg Opus voice notes sent via `sendVoice`; other audio `sendAudio`; photos `sendPhoto`; documents `sendDocument`. Files over 50 MB produce a text warning notice.
+
 ### 8.4 Email (plan D) — IMAP inbound, SMTP outbound
 
 - **Inbound:** the adapter's `run` polls `EMAIL_IMAP_URL` (IMAPS only) every `EMAIL_POLL_SECONDS` (default 60): fetch `UNSEEN`, parse with `mail-parser`, process, mark `\Seen` (moving to a processed folder when `EMAIL_PROCESSED_FOLDER` is set). Bounded: at most N messages per poll, body capped (the 500-char command cap applies to the command; AI prompts use the existing prompt cap), attachments ignored.
@@ -319,7 +337,7 @@ Each adapter maps its client errors (`matrix_sdk::Error`, `serenity::Error`, `te
 |---|---|---|
 | **A** `plans/2026-10-01-omnichannel-a-framework.md` | domain/channels; message/adapter/registry; neutral `CommandContext`/`Reply`; agent decoupled; migrations 0006–0008; `IdentityService`/`LinkService`; link HTTP + web page; Matrix onto `MatrixAdapter`; registry replaces `Delivery` and `MatrixRoomSink`; docs | now |
 | **B** Discord `plans/2026-10-02-omnichannel-b-discord.md` | §8.2 | done (2026-10-02) |
-| **C** Telegram | §8.3 | after B |
+| **C** Telegram `plans/2026-10-02-omnichannel-c-telegram.md` | §8.3 | done (2026-10-03) |
 | **D** Email | §8.4 | after C |
 
 Each later plan is written against the code A produced, so it cites real types instead of guesses.

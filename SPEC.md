@@ -956,51 +956,49 @@ Text sent to the bot in a direct message goes to the AI assistant.
 
 ---
 
-### 9.4 Telegram Adapter Specification ([TODO Feature] — Planned Extension)
+### 9.4 Telegram Adapter Specification (Implemented — plan C)
 
-> **[TODO Feature — Phase 4 Roadmap]**  
-> Telegram support is a **planned extension feature** to be built in Phase 4 alongside Discord. The specification below defines its webhook architecture, command bindings, inline keyboard interaction, and media ingestion pipeline.
+> **Implemented** in `backend/src/interface/channels/telegram/` (plan `docs/superpowers/plans/2026-10-02-omnichannel-c-telegram.md`, rulings in `docs/superpowers/HANDOFF.md`). Where this section and the omnichannel design (`docs/superpowers/specs/2026-10-01-omnichannel-design.md` §8.3) or the plan disagree, the design and the plan win. Media ingestion and object storage (§9.4.4) remain Phase 5 / Sub-project 3 work.
 
-The Telegram integration supports both modern cloud serverless webhooks and local development polling using **`teloxide`**.
+The Telegram integration is a `ChannelAdapter` built on **`teloxide-core`** 0.13 types and `Bot`, registered only when `TELEGRAM_BOT_TOKEN` is set.
 
 #### 9.4.1 Client Architecture & Deployment Modes
 * **Production Mode (Axum Webhook):**
-  * Telegram sends updates via HTTPS `POST` to `/api/webhooks/telegram`.
-  * Verified using the `X-Telegram-Bot-Api-Secret-Token` header.
-  * Zero long-polling overhead, instant execution, and seamless integration with the existing Axum reverse-proxy (Caddy).
+  * Configured via `TELEGRAM_MODE=webhook` (requires `TELEGRAM_WEBHOOK_SECRET` and HTTPS `WEB_URL`).
+  * `TelegramAdapter::run` registers the webhook URL with Telegram via `setWebhook` at startup with exponential backoff (1 s to 300 s).
+  * Telegram sends updates via HTTPS `POST` to `/api/webhooks/telegram` (mounted outside `/api/v1`).
+  * Rate-limited per IP (120 req / 60 s); secret header `X-Telegram-Bot-Api-Secret-Token` checked in constant time before reading the body.
+  * Acknowledges `200 OK` immediately upon enqueuing into a bounded channel (capacity 32) drained by 4 worker tasks (`503` if full).
 * **Development Mode (Long Polling):**
-  * Standalone `teloxide::dispatching::Dispatcher` for local testing without public IP or ngrok tunnels.
+  * Configured via `TELEGRAM_MODE=polling` (default; suitable for development behind NAT).
+  * Standalone long-polling loop calling `getUpdates` (timeout 50 s) inside `TelegramAdapter::run`.
+* **Deduplication:**
+  * Both modes feed into `RecentUpdates` (1024-id sliding window) to eliminate duplicate updates.
 
 #### 9.4.2 Bot Commands & Menu Integration
-* Commands are registered with Telegram via `setMyCommands` API:
-  * `/start` — Welcome message, account link status, and getting started guide.
+* Commands are registered with Telegram via `setMyCommands` API at boot:
+  * `/start` — Welcome message, account link status, or help redirect.
+  * `/help` — Command cheatsheet and documentation.
   * `/todo` — Task management (add, list, check off).
   * `/expense` — Personal finance logging and summaries.
   * `/portfolio` — Asset holdings, cash balances, and trades.
-  * `/remind` — Natural language reminders.
-  * `/say` — Voice message synthesis.
   * `/link` — Secure web console account linking ceremony.
-  * `/help` — Command cheatsheet and documentation.
+* Any typed command `/name ...` is parsed and forwarded to the shared `ModuleRegistry`.
+* Direct messages route non-command text to the AI assistant with typing action indicators and live status message editing (`TelegramProgress`).
 
 #### 9.4.3 Inline Keyboards & Callback Queries
-* **Callback Query Dispatcher:** Handles interactive button presses without sending new chat messages.
-  * Interactive Todo Checklists: Users tap `[✓ Done]` directly under a task item.
-  * Trade Confirmation Prompts: `[Confirm Buy]` / `[Cancel]` buttons for high-value actions.
-  * Pagination Controls: `[◄ Prev]` / `[Next ►]` for browsing transaction history.
+* **Inline Keyboards:** Rendered from `Content.actions` (`InlineKeyboardMarkup`, max 8 rows of 1 button, callback data ≤ 64 bytes).
+* **Interactive Todo List:** `/todo` list outputs "Done #<id>" buttons for at most 10 open tasks owned by the viewer.
+* **Callback Query Dispatcher:** Callback queries are answered immediately (`answerCallbackQuery`), parsed without leading `/`, and executed through `Inbound::handle` **under the identity of the presser** (not the message author; invariant 9).
 
-#### 9.4.4 Media Ingestion & Native Voice Notes
-* **Voice Notes:** Text-to-speech replies are delivered via Telegram's `sendVoice` API, rendering as interactive audio bubbles with waveform visualization.
-* **Photo Receipt Ingestion:**
-  * When a user sends a photo or document receipt in Telegram DM:
-  * Bot downloads the highest resolution `PhotoSize` via `getFile`.
-  * Streams binary to Object Storage (`StorageService`).
-  * Enqueues an OCR parsing job in PostgreSQL.
-  * Sends an immediate acknowledgement: *"Receipt received. Processing with OCR..."*
-  * Once parsed, edits the message or sends confirmation with parsed merchant and amount.
+#### 9.4.4 Outbound & Audio Delivery
+* **Voice Notes:** Ogg Opus audio is sent via `sendVoice` as native voice notes. Other audio uses `sendAudio`, photos use `sendPhoto`, and documents use `sendDocument`. Files over 50 MB produce a descriptive warning notice.
+* **Photo Receipt Ingestion:** Planned for Phase 5 / Sub-project 3 with object storage.
 
 #### 9.4.5 Group vs Private Chat Context
-* **Private Chat (1-on-1):** Full conversational workspace mode. Interactive requests execute directly via deterministic CLI or LLM + Tool Calling (bounded tool loop).
-* **Group Chats:** Privacy mode enabled. The bot ignores background room traffic and only activates when explicitly mentioned (`@bot_username`) or when a reply targets one of its previous messages.
+* **Private Chat (1-on-1):** Full workspace access; free text reaches the AI assistant.
+* **Group Chats:** Privacy mode stays enabled. The bot receives only slash commands (with optional `@bot` mentions), direct mentions, and replies to its own messages.
+* **Privacy Enforcement:** Replies with `Visibility::Private` are refused with `PRIVATE_IN_GROUP` text ("That answer is private — message me directly.") and never posted to public groups (invariant 10).
 
 ---
 
