@@ -17,6 +17,7 @@ use crate::utils::secure::constant_time_eq;
 type HmacSha256 = Hmac<Sha256>;
 
 /// Local filesystem implementation of [`StorageService`].
+#[derive(Clone)]
 pub struct LocalStorageService {
     root_dir: PathBuf,
     web_url: Option<String>,
@@ -60,29 +61,44 @@ impl LocalStorageService {
 
     /// Computes the HMAC-SHA256 signature for a key and expiration timestamp.
     pub fn sign(&self, key_str: &str, exp: i64) -> String {
-        let mut mac = HmacSha256::new_from_slice(self.signing_secret.as_bytes())
-            .expect("HMAC can take any key size");
-        mac.update(key_str.as_bytes());
-        mac.update(b":");
-        mac.update(exp.to_string().as_bytes());
-        let result = mac.finalize().into_bytes();
-        result.iter().fold(String::with_capacity(64), |mut acc, b| {
-            use std::fmt::Write;
-            let _ = write!(acc, "{b:02x}");
-            acc
-        })
+        sign_storage_key(&self.signing_secret, key_str, exp)
     }
 
     /// Verifies that an HMAC-SHA256 signature matches and has not expired.
     pub fn verify_signature(&self, key: &StorageKey, exp: i64, sig_hex: &str) -> bool {
-        let now = chrono::Utc::now().timestamp();
-        if now > exp {
-            return false;
-        }
-
-        let expected_sig = self.sign(key.as_str(), exp);
-        constant_time_eq(expected_sig.as_bytes(), sig_hex.as_bytes())
+        verify_storage_signature(&self.signing_secret, key, exp, sig_hex)
     }
+}
+
+/// Computes the HMAC-SHA256 signature for a key and expiration timestamp.
+pub fn sign_storage_key(signing_secret: &str, key_str: &str, exp: i64) -> String {
+    let mut mac = HmacSha256::new_from_slice(signing_secret.as_bytes())
+        .expect("HMAC can take any key size");
+    mac.update(key_str.as_bytes());
+    mac.update(b":");
+    mac.update(exp.to_string().as_bytes());
+    let result = mac.finalize().into_bytes();
+    result.iter().fold(String::with_capacity(64), |mut acc, b| {
+        use std::fmt::Write;
+        let _ = write!(acc, "{b:02x}");
+        acc
+    })
+}
+
+/// Verifies that an HMAC-SHA256 signature matches and has not expired.
+pub fn verify_storage_signature(
+    signing_secret: &str,
+    key: &StorageKey,
+    exp: i64,
+    sig_hex: &str,
+) -> bool {
+    let now = chrono::Utc::now().timestamp();
+    if now > exp {
+        return false;
+    }
+
+    let expected_sig = sign_storage_key(signing_secret, key.as_str(), exp);
+    constant_time_eq(expected_sig.as_bytes(), sig_hex.as_bytes())
 }
 
 #[async_trait::async_trait]

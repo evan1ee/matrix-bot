@@ -7,7 +7,7 @@ use super::{
     account, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_categories,
     finance_net_worth, footprints, habits, identities, life, life_activity, link, mcp, ocr,
     openapi, portfolio, portfolio_alerts, portfolio_cash, portfolio_history, portfolio_prices,
-    recurring_bills, reminders, rooms, settings, sse, todos, voice, webhooks,
+    recurring_bills, reminders, rooms, settings, sse, storage, todos, voice, webhooks,
 };
 
 /// The API route table.
@@ -35,6 +35,7 @@ fn routes_core() -> Router<auth::ApiState> {
             get(settings::get_settings).put(settings::update_settings),
         )
         .route("/events", get(sse::sse_handler))
+        .route("/storage/*key", get(storage::get_storage))
 }
 
 fn routes_auth() -> Router<auth::ApiState> {

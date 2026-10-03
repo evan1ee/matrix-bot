@@ -34,7 +34,7 @@ use crate::interface::http::{
     account, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_categories,
     finance_net_worth, footprints, habits, health, identities, life, life_activity, link, mcp, ocr,
     portfolio, portfolio_alerts, portfolio_cash, portfolio_history, portfolio_prices,
-    recurring_bills, reminders, rooms, settings, sse, todos, voice, webhooks,
+    recurring_bills, reminders, rooms, settings, sse, storage, todos, voice, webhooks,
 };
 
 #[derive(OpenApi)]
@@ -43,6 +43,7 @@ use crate::interface::http::{
         health::live,
         health::ready,
         sse::sse_handler,
+        storage::get_storage,
         auth::webauthn::enroll_start,
         auth::webauthn::register_start,
         auth::webauthn::register_finish,

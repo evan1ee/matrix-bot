@@ -5970,6 +5970,98 @@
         ]
       }
     },
+    "/api/v1/storage/{key}": {
+      "get": {
+        "tags": [
+          "storage"
+        ],
+        "summary": "Retrieves stored binary asset for a given canonical storage key.",
+        "description": "Access is granted if:\n1. The caller is authenticated as the account owning the key (`key.account_id() == user.account_id`), OR\n2. An unexpired HMAC token matching the key is provided in the query string (`sig` and `exp`).",
+        "operationId": "get_storage",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "description": "Canonical storage key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "sig",
+            "in": "query",
+            "description": "HMAC-SHA256 signature for presigned temporary access.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
+            "name": "exp",
+            "in": "query",
+            "description": "Expiration timestamp in seconds since Unix epoch.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Storage media binary stream"
+          },
+          "400": {
+            "description": "Invalid storage key",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized: not logged in and no signature",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden: cross-account access or expired signature",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Storage object not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/todos": {
       "get": {
         "tags": [

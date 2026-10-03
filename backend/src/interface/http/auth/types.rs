@@ -170,6 +170,7 @@ pub struct ApiState {
     /// The Telegram update queue, present only in webhook mode; `None` makes
     /// `POST /api/webhooks/telegram` a 404.
     pub telegram: Option<crate::interface::channels::telegram::ingress::TelegramIngress>,
+    pub storage_signing_secret: String,
 }
 
 /// A WebAuthn ceremony in flight.
@@ -252,6 +253,7 @@ impl ApiState {
             ),
             ai: crate::config::AiEnvConfig::default(),
             telegram: None,
+            storage_signing_secret: "matrix-bot-default-signing-secret".to_string(),
         }
     }
 
@@ -323,6 +325,8 @@ impl ApiState {
             ai: config.ai.clone(),
             // start_api_server hands the adapter's ingress in after from_config.
             telegram: None,
+            storage_signing_secret: std::env::var("STORAGE_SIGNING_SECRET")
+                .unwrap_or_else(|_| "matrix-bot-default-signing-secret".to_string()),
         })
     }
 

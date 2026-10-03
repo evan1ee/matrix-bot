@@ -53,6 +53,7 @@ pub mod routes;
 pub mod settings;
 pub mod sse;
 pub mod static_files;
+pub mod storage;
 pub mod telegram_webhook;
 pub mod todos;
 pub mod voice;
