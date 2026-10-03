@@ -7,8 +7,8 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
-use crate::error::ApiError;
 use crate::interface::http::auth::{ApiState, AuthUser};
+use crate::interface::http::error::ApiError;
 
 /// Pattern for recurring reminders (none, daily, weekly, monthly, or yearly).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]

@@ -9,8 +9,8 @@ use utoipa::ToSchema;
 
 use crate::domain::finance::money::{exponent_for, normalise_currency, parse_amount};
 use crate::domain::portfolio::models::normalise_symbol;
-use crate::error::ApiError;
 use crate::interface::http::auth::{ApiState, AuthUser};
+use crate::interface::http::error::ApiError;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 #[serde(rename_all = "lowercase")]

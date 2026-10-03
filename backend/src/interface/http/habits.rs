@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use crate::domain::habits::HabitUpdate;
-use crate::error::ApiError;
 use crate::interface::http::auth::{ApiState, AuthUser};
+use crate::interface::http::error::ApiError;
 
 #[derive(Debug, Deserialize, IntoParams)]
 pub struct ListHabitsQuery {

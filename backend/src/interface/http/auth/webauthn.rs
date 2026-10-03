@@ -19,8 +19,8 @@ use webauthn_rs::prelude::{DiscoverableKey, PublicKeyCredential, RegisterPublicK
 use crate::domain::accounts::{
     cookie_value, hash_token, AccountId, ABSOLUTE_TIMEOUT_DAYS, COOKIE_NAME,
 };
-use crate::error::ApiError;
 use crate::interface::http::auth::types::{ApiState, Ceremony};
+use crate::interface::http::error::ApiError;
 
 /// What a browser needs to begin registering a passkey.
 #[derive(Debug, Serialize, ToSchema)]

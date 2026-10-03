@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
 use crate::domain::portfolio::TradeRequest;
-use crate::error::ApiError;
 use crate::interface::http::auth::{ApiState, AuthUser};
+use crate::interface::http::error::ApiError;
 use crate::interface::http::portfolio::{BuyHoldingRequest, Holding};
 
 #[derive(Debug, Default, Clone, Serialize, ToSchema)]

@@ -13,7 +13,7 @@ pub use types::*;
 mod tests {
     use super::*;
     use crate::domain::accounts::{hash_token, AccountId, COOKIE_NAME, STATUS_ACTIVE};
-    use crate::error::ApiError;
+    use crate::interface::http::error::ApiError;
     use axum::extract::FromRequestParts;
     use axum::http::{header, Method};
 

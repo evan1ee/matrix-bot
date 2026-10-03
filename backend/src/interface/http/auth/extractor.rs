@@ -4,9 +4,9 @@ use axum::{
     http::{header, request::Parts, Method},
 };
 
-use crate::error::ApiError;
 use crate::interface::http::auth::credential::parse_credential;
 use crate::interface::http::auth::types::{ApiState, AuthUser};
+use crate::interface::http::error::ApiError;
 
 /// Whether a request method changes state.
 fn is_mutating(method: &Method) -> bool {

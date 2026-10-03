@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use utoipa::ToSchema;
 
 use crate::db::Database;
-use crate::error::ApiError;
+use crate::interface::http::error::ApiError;
 
 /// Ceiling on a single outbound homeserver request, start to finish.
 const HTTP_TOTAL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);

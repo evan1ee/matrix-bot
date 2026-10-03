@@ -11,9 +11,9 @@ use std::time::Duration;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::error::ApiError;
 use crate::infrastructure::postgres::repositories::mcp::McpTokenRepository;
 use crate::interface::http::auth::{ApiState, AuthUser};
+use crate::interface::http::error::ApiError;
 use crate::interface::mcp::models::{
     self, CreateMcpTokenRequest, CreateMcpTokenResponse, McpTokenSummary,
 };

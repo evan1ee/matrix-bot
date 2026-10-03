@@ -8,11 +8,11 @@ use utoipa::ToSchema;
 
 use crate::application::identity::Resolution;
 use crate::domain::channels::PlatformIdentity;
-use crate::error::ApiError;
-#[allow(unused_imports)]
-use crate::error::ApiErrorResponse;
 use crate::interface::http::auth::types::ApiState;
 use crate::interface::http::auth::webauthn::with_session_cookie;
+use crate::interface::http::error::ApiError;
+#[allow(unused_imports)]
+use crate::interface::http::error::ApiErrorResponse;
 
 /// The bot's access token, if the bot has one.
 ///

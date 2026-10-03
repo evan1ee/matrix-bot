@@ -23,6 +23,7 @@ pub mod app_error;
 pub mod auth;
 pub mod bookmarks;
 pub mod briefing;
+pub mod error;
 pub mod finance;
 pub mod finance_analytics;
 pub mod finance_categories;
@@ -57,6 +58,7 @@ pub mod todos;
 pub mod voice;
 pub mod webhooks;
 
+pub use error::{ApiError, ApiErrorResponse};
 pub use routes::api_routes;
 
 /// Parses `API_HOST` into an [`IpAddr`].

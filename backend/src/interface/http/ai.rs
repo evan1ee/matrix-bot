@@ -5,9 +5,9 @@ use axum::{
 };
 use tracing::error;
 
-use crate::error::ApiError;
 use crate::infrastructure::postgres::repositories::llm as llm_repo;
 use crate::interface::http::auth::{ApiState, AuthUser};
+use crate::interface::http::error::ApiError;
 use crate::llm::error::AiError;
 use crate::llm::models::{
     AiChatRequest, AiChatResponse, AiConversation, AiMessage, AiUserConfig, UpdateAiConfigInput,

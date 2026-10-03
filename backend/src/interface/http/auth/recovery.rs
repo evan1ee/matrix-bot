@@ -12,9 +12,9 @@ use std::net::SocketAddr;
 use utoipa::ToSchema;
 
 use crate::domain::accounts::{hash_token, restriction_expiry, COOKIE_NAME};
-use crate::error::ApiError;
 use crate::interface::http::auth::types::ApiState;
 use crate::interface::http::auth::webauthn::{with_session_cookie, SessionResponse};
+use crate::interface::http::error::ApiError;
 use crate::interface::http::rate_limit::check_recovery_limit;
 
 #[derive(Debug, Deserialize, ToSchema)]

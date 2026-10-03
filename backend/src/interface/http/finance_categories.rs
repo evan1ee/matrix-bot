@@ -6,8 +6,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::error::ApiError;
 use crate::interface::http::auth::{ApiState, AuthUser};
+use crate::interface::http::error::ApiError;
 
 /// A user-defined spending category.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

@@ -931,3 +931,36 @@ fn email_crates_stay_inside_the_email_adapter() {
         hits.join("\n")
     );
 }
+
+/// ApiError and ApiErrorResponse belong strictly to interface/http/error.rs, not the crate root.
+#[test]
+fn error_module_is_in_interface_http() {
+    assert!(
+        !src("error.rs").exists(),
+        "backend/src/error.rs was moved to backend/src/interface/http/error.rs"
+    );
+    assert!(
+        src("interface/http/error.rs").exists(),
+        "backend/src/interface/http/error.rs must exist"
+    );
+    let v = violations(
+        "",
+        &[
+            "crate::error::",
+            "crate::error;",
+            "crate::error,",
+            "crate::error}",
+        ],
+    );
+    assert!(
+        v.is_empty(),
+        "nothing may reference crate::error (use crate::interface::http::error or crate::interface::http):\n{}",
+        v.join("\n")
+    );
+    let lib = fs::read_to_string(src("lib.rs")).expect("lib.rs is readable");
+    assert!(
+        !lib.lines()
+            .any(|l| l.trim_start().starts_with("pub mod error")),
+        "lib.rs must not declare `pub mod error`"
+    );
+}

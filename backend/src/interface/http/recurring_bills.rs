@@ -7,8 +7,8 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::domain::reminders::MAX_LEAD_MINUTES;
-use crate::error::ApiError;
 use crate::interface::http::auth::{ApiState, AuthUser};
+use crate::interface::http::error::ApiError;
 
 /// Represents a recurring bill, subscription, installment, or recurring transfer.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

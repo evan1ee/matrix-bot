@@ -6,9 +6,9 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::domain::channels::{Channel, LinkedIdentity};
-use crate::error::ApiError;
 use crate::interface::http::auth::extractor::VerifiedUser;
 use crate::interface::http::auth::types::{ApiState, AuthUser};
+use crate::interface::http::error::ApiError;
 
 /// Longest string a request may carry (AGENTS.md §5.1).
 const MAX_FIELD: usize = 500;

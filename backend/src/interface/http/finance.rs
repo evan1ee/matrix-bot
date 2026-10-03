@@ -10,8 +10,8 @@ use utoipa::{IntoParams, ToSchema};
 use crate::domain::accounts::AccountId;
 use crate::domain::finance::money::{exponent_for, normalise_currency, parse_amount};
 use crate::domain::finance::{ListTransactionsFilter, NewTransaction, TransactionPatch};
-use crate::error::ApiError;
 use crate::interface::http::auth::{ApiState, AuthUser};
+use crate::interface::http::error::ApiError;
 
 /// Which way the money moved.
 ///

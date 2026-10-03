@@ -3,9 +3,9 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::domain::settings as domain;
-use crate::error::ApiError;
 use crate::interface::http::app_error::AppResultExt;
 use crate::interface::http::auth::{ApiState, AuthUser};
+use crate::interface::http::error::ApiError;
 
 /// Both preferences are always sent together — settings are saved as a whole
 /// row, so there is no partial-update path to get wrong.

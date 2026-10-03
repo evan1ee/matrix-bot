@@ -6,8 +6,8 @@ use futures_util::stream::StreamExt;
 use std::convert::Infallible;
 use std::time::Duration;
 
-use crate::error::ApiError;
 use crate::interface::http::auth::{ApiState, AuthUser};
+use crate::interface::http::error::ApiError;
 
 /// SSE endpoint streaming real-time system events to authenticated web clients.
 ///

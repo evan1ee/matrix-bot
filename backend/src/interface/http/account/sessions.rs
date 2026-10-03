@@ -2,10 +2,10 @@
 
 use axum::{extract::State, Json};
 
-use crate::error::ApiError;
 use crate::interface::http::account::types::*;
 use crate::interface::http::auth::extractor::VerifiedUser;
 use crate::interface::http::auth::types::{ApiState, AuthUser};
+use crate::interface::http::error::ApiError;
 
 // ---------------------------------------------------------------- sessions --
 

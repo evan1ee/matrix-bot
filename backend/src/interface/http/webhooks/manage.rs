@@ -6,9 +6,9 @@ use axum::{
     Json,
 };
 
-use crate::error::ApiError;
 use crate::interface::http::auth::extractor::VerifiedUser;
 use crate::interface::http::auth::types::{ApiState, AuthUser};
+use crate::interface::http::error::ApiError;
 
 use super::dto::{
     build_example_curls, CreateWebhookInput, CreatedWebhookResponse, InboundAcceptedResponse,

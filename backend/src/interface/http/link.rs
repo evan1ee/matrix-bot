@@ -14,11 +14,11 @@ use webauthn_rs::prelude::RegisterPublicKeyCredential;
 
 use crate::application::identity::{LinkOutcome, LinkPreview};
 use crate::domain::accounts::{hash_token, AccountId};
-use crate::error::ApiError;
 use crate::interface::http::auth::extractor::VerifiedUser;
 use crate::interface::http::auth::recovery::extract_client_ip;
 use crate::interface::http::auth::types::{ApiState, AuthUser, Ceremony};
 use crate::interface::http::auth::webauthn::{issue_session, passkey_label, CeremonyStart};
+use crate::interface::http::error::ApiError;
 use crate::interface::http::rate_limit::check_link_signup_limit;
 
 /// Longest string a request may carry (AGENTS.md §5.1).

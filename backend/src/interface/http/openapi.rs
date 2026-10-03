@@ -2,7 +2,7 @@ use axum::{response::IntoResponse, Json};
 use utoipa::openapi::security::SecurityScheme;
 use utoipa::{Modify, OpenApi};
 
-use crate::error::ApiErrorResponse;
+use crate::interface::http::error::ApiErrorResponse;
 use crate::interface::http::finance::{CategoryTotal, CurrencySummary, Direction, Transaction};
 use crate::interface::http::finance_analytics::{
     ExpenseCategorySlice, FinanceAnalyticsReport, FinanceShare, MonthlyCashflowBucket,

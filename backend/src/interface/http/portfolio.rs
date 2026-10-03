@@ -10,8 +10,8 @@ use utoipa::ToSchema;
 use crate::domain::finance::money::{exponent_for, normalise_currency, parse_amount};
 use crate::domain::portfolio::models::{normalise_symbol, BuyOutcome, SellOutcome};
 use crate::domain::portfolio::{PortfolioError, TradeRequest, MAX_NOTE_LEN};
-use crate::error::ApiError;
 use crate::interface::http::auth::{ApiState, AuthUser};
+use crate::interface::http::error::ApiError;
 
 /// One investment position: symbol, quantity, and weighted-average cost basis.
 ///

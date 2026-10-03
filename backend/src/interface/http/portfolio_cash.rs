@@ -6,8 +6,8 @@ use utoipa::ToSchema;
 
 use crate::domain::finance::money::{exponent_for, normalise_currency, parse_amount};
 use crate::domain::portfolio::WithdrawOutcome;
-use crate::error::ApiError;
 use crate::interface::http::auth::{ApiState, AuthUser};
+use crate::interface::http::error::ApiError;
 use crate::interface::http::portfolio::{format_for_error, CashBalance};
 
 #[derive(Deserialize, ToSchema)]

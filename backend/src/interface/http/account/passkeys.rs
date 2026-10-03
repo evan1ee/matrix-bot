@@ -6,11 +6,11 @@ use axum::{
 };
 
 use crate::domain::accounts::DeleteOutcome;
-use crate::error::ApiError;
 use crate::interface::http::account::types::*;
 use crate::interface::http::auth::extractor::VerifiedUser;
 use crate::interface::http::auth::types::{ApiState, AuthUser, Ceremony};
 use crate::interface::http::auth::webauthn::CeremonyStart;
+use crate::interface::http::error::ApiError;
 
 // ---------------------------------------------------------------- passkeys --
 

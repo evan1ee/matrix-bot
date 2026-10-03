@@ -8,7 +8,7 @@
 //! { service, .. }` itself before `?`.
 
 use crate::application::AppError;
-use crate::error::ApiError;
+use crate::interface::http::error::ApiError;
 
 impl From<AppError> for ApiError {
     fn from(err: AppError) -> Self {

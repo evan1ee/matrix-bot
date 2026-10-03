@@ -8,8 +8,8 @@ use axum::{
 };
 
 use crate::domain::webhooks::hash_token;
-use crate::error::ApiError;
 use crate::interface::http::auth::types::ApiState;
+use crate::interface::http::error::ApiError;
 
 use super::dto::{InboundAcceptedResponse, InboundPayload, WebhookSeverity};
 

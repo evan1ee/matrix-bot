@@ -10,8 +10,8 @@ use chrono::Utc;
 
 use super::{TelegramMessageResult, TelegramQuery, TelegramResponse, WebhookSeverity};
 use crate::domain::webhooks::hash_token;
-use crate::error::ApiError;
 use crate::interface::http::auth::types::ApiState;
+use crate::interface::http::error::ApiError;
 
 /// Mounted outside `/api/v1` (see `api/mod.rs`), mimicking the path shape of
 /// Telegram's own Bot API (`https://api.telegram.org/bot<token>/sendMessage`)

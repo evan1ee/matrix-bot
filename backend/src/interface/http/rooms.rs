@@ -5,10 +5,10 @@ use utoipa::ToSchema;
 
 use crate::application::rooms::PickerRooms;
 use crate::domain::rooms::{CachedRoom, JoinedRoom};
-use crate::error::ApiError;
 use crate::interface::channels::matrix::rooms::discover_rooms_for_account;
 use crate::interface::http::app_error::AppResultExt;
 use crate::interface::http::auth::{ApiState, AuthUser};
+use crate::interface::http::error::ApiError;
 
 // A room in the web room picker. `updated_at` is when it was cached; a room
 // discovered live but not yet cached has none. A plain comment, not `///`:

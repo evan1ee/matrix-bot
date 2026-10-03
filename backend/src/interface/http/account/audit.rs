@@ -1,8 +1,8 @@
 //! The account's own security log.
 
-use crate::error::ApiError;
 use crate::interface::http::account::types::SecurityEvent;
 use crate::interface::http::auth::types::{ApiState, AuthUser};
+use crate::interface::http::error::ApiError;
 use axum::{extract::State, Json};
 
 // ------------------------------------------------------------------- audit --

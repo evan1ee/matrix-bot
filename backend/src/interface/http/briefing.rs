@@ -3,8 +3,8 @@ use matrix_sdk::ruma::{events::room::message::RoomMessageEventContent, RoomId};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::error::ApiError;
 use crate::interface::http::auth::{ApiState, AuthUser};
+use crate::interface::http::error::ApiError;
 
 /// Market performance snapshot for a single holding across 1D, 1W, and 1M timeframes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]

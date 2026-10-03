@@ -5,11 +5,11 @@ use axum::{
 use serde::Deserialize;
 
 use crate::domain::channels::Channel;
-use crate::error::ApiError;
 use crate::interface::http::auth::matrix::{get_bot_matrix_access_token, resolved_homeserver};
 use crate::interface::http::auth::types::{
     ApiState, AuthUser, MediaProxyQuery, UserProfileResponse,
 };
+use crate::interface::http::error::ApiError;
 
 #[utoipa::path(
     post,

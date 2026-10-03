@@ -6,8 +6,8 @@ use chrono::NaiveDate;
 use serde::Serialize;
 use utoipa::ToSchema;
 
-use crate::error::ApiError;
 use crate::interface::http::auth::{ApiState, AuthUser};
+use crate::interface::http::error::ApiError;
 
 /// A single event from any module that happened on a given date.
 #[derive(Debug, Clone, Serialize, ToSchema)]
