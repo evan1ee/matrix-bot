@@ -812,6 +812,7 @@ fn only_the_composition_root_builds_adapters_and_the_registry() {
     for needle in [
         "MatrixAdapter::new(",
         "DiscordAdapter::new(",
+        "TelegramAdapter::new(",
         "ChannelRegistry::new(",
         "ChannelRegistry::from_unique(",
     ] {
@@ -873,6 +874,29 @@ fn serenity_stays_inside_the_discord_adapter() {
     assert!(
         hits.is_empty(),
         "serenity outside interface/channels/discord:\n{}",
+        hits.join("\n")
+    );
+}
+
+/// teloxide is the Telegram adapter's private dependency: nothing else may name
+/// it, so swapping or upgrading it touches one directory.
+#[test]
+fn teloxide_stays_inside_the_telegram_adapter() {
+    let hits: Vec<_> = rust_files(&src(""))
+        .into_iter()
+        .filter(|f| !relative_to_src(f).starts_with("interface/channels/telegram/"))
+        .flat_map(|f| {
+            let text = fs::read_to_string(&f).expect("readable source file");
+            let rel = relative_to_src(&f);
+            production_hits(&text, &["teloxide"])
+                .into_iter()
+                .map(move |(n, l)| format!("{rel}:{n}: {l}"))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert!(
+        hits.is_empty(),
+        "teloxide outside interface/channels/telegram:\n{}",
         hits.join("\n")
     );
 }

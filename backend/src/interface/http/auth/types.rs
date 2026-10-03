@@ -321,7 +321,7 @@ impl ApiState {
                 config.stt_model.clone(),
             ),
             ai: config.ai.clone(),
-            // Task 8 hands the adapter's ingress in; until then no webhook mode.
+            // start_api_server hands the adapter's ingress in after from_config.
             telegram: None,
         })
     }

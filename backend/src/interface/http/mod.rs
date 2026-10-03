@@ -92,16 +92,20 @@ pub async fn bind(config: &Config) -> anyhow::Result<TcpListener> {
 /// it completes once graceful shutdown has drained open connections. SSE
 /// streams end on the same token (see `sse.rs`), so an open browser tab does
 /// not hold the drain open.
+#[allow(clippy::too_many_arguments)]
 pub fn start_api_server(
     config: &Config,
     db: Database,
     services: crate::application::AppServices,
     hub: crate::events::Hub,
     handles: crate::interface::channels::matrix::handles::BotHandles,
+    telegram: Option<crate::interface::channels::telegram::ingress::TelegramIngress>,
     listener: TcpListener,
     shutdown: CancellationToken,
 ) -> anyhow::Result<JoinHandle<()>> {
-    let state = auth::ApiState::from_config(config, db, services, hub, handles, shutdown.clone())?;
+    let mut state =
+        auth::ApiState::from_config(config, db, services, hub, handles, shutdown.clone())?;
+    state.telegram = telegram;
 
     // Same-origin by default. `Any`/`Any`/`Any` let any site on the internet
     // script authenticated calls against this API using a token it had obtained;
@@ -436,6 +440,7 @@ mod server_shutdown_tests {
             crate::application::AppServices::new(&pool),
             crate::events::Hub::new(crate::application::AppServices::new(&pool).outbox, 8),
             crate::interface::channels::matrix::handles::BotHandles::default(),
+            None,
             listener,
             shutdown.clone(),
         )

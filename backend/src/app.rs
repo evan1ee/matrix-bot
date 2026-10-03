@@ -16,7 +16,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 use crate::application::AppServices;
-use crate::config::Config;
+use crate::config::{Config, TelegramMode};
 use crate::db::Database;
 use crate::domain::channels::Channel;
 use crate::interface::channels::adapter::ChannelAdapter;
@@ -26,6 +26,7 @@ use crate::interface::channels::matrix::adapter::MatrixAdapter;
 use crate::interface::channels::matrix::handles::BotHandles;
 use crate::interface::channels::matrix::modules::build_modules;
 use crate::interface::channels::registry::{check_unique, ChannelRegistry};
+use crate::interface::channels::telegram::adapter::TelegramAdapter;
 use crate::interface::http;
 use crate::interface::jobs::Outbound;
 use crate::jobs;
@@ -195,8 +196,15 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         .discord
         .clone()
         .map(|discord| Arc::new(DiscordAdapter::new(discord)));
+    let telegram = config
+        .telegram
+        .clone()
+        .map(|c| TelegramAdapter::new(c, config.web_url.clone()))
+        .transpose()?
+        .map(Arc::new);
     let mut configured = vec![Channel::Matrix];
     configured.extend(discord.as_ref().map(|_| Channel::Discord));
+    configured.extend(telegram.as_ref().map(|_| Channel::Telegram));
     check_unique(&configured)?;
     let matrix = Arc::new(MatrixAdapter::new(
         config.clone(),
@@ -219,6 +227,10 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         if let Some(discord) = &discord {
             discord.attach_inbound(Arc::clone(&inbound));
             adapters.push(discord.clone() as Arc<dyn ChannelAdapter>);
+        }
+        if let Some(telegram) = &telegram {
+            telegram.attach_inbound(Arc::clone(&inbound));
+            adapters.push(telegram.clone() as Arc<dyn ChannelAdapter>);
         }
         ChannelRegistry::from_unique(adapters)
     });
@@ -255,6 +267,7 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         services.clone(),
         hub.clone(),
         handles.clone(),
+        telegram.as_ref().and_then(|t| t.ingress()),
         listener,
         shutdown.child_token(),
     )?;
@@ -359,6 +372,13 @@ fn log_registration_mode(config: &Config) {
         }
         Some(_) => info!("Discord: enabled (global commands)"),
         None => info!("Discord: disabled (DISCORD_TOKEN unset)"),
+    }
+    match &config.telegram {
+        Some(telegram) => match telegram.mode {
+            TelegramMode::Webhook { .. } => info!("Telegram: enabled (webhook mode)"),
+            TelegramMode::Polling => info!("Telegram: enabled (polling mode)"),
+        },
+        None => info!("Telegram: disabled (TELEGRAM_BOT_TOKEN unset)"),
     }
     if config.registration_secret.is_some() {
         info!("Registration mode: INVITE-ONLY (invite secret configured)");
@@ -669,6 +689,39 @@ mod tests {
             supervise_front_doors(&shutdown, &mut api, &mut adapters, &mut jobs, &mut events).await;
 
         assert_eq!(ended, Some("Discord gateway"));
+        assert!(shutdown.is_cancelled());
+        let started = Instant::now();
+        let laggards = stop_remaining(
+            started + Duration::from_secs(15),
+            tasks_of(api, adapters, jobs, events),
+            ended,
+        )
+        .await;
+        assert!(laggards.is_empty(), "{laggards:?}");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_telegram_adapter_task_ending_unrequested_stops_the_process() {
+        let shutdown = CancellationToken::new();
+        let waiter = |s: CancellationToken| tokio::spawn(async move { s.cancelled().await });
+        let mut api = waiter(shutdown.clone());
+        let mut jobs = waiter(shutdown.clone());
+        let mut events = waiter(shutdown.clone());
+        let mut adapters = vec![
+            AdapterTask {
+                name: front_door_name(Channel::Matrix),
+                handle: waiter(shutdown.clone()),
+            },
+            AdapterTask {
+                name: front_door_name(Channel::Telegram),
+                handle: tokio::spawn(async {}), // ends immediately, unrequested
+            },
+        ];
+
+        let ended =
+            supervise_front_doors(&shutdown, &mut api, &mut adapters, &mut jobs, &mut events).await;
+
+        assert_eq!(ended, Some("Telegram updates"));
         assert!(shutdown.is_cancelled());
         let started = Instant::now();
         let laggards = stop_remaining(
