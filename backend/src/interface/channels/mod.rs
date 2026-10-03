@@ -16,6 +16,7 @@
 
 pub mod adapter;
 pub mod discord;
+pub mod email;
 #[cfg(test)]
 pub(crate) mod fake;
 pub mod inbound;

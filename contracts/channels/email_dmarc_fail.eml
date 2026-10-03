@@ -1,0 +1,10 @@
+Authentication-Results: mx.example.com;
+    dmarc=fail (p=REJECT sp=REJECT) header.from=spoofed.com
+From: Bad Actor <spoofer@spoofed.com>
+To: bot@example.com
+Subject: !admin reset
+Message-ID: <msg-fail-5678@spoofed.com>
+Date: Fri, 03 Oct 2026 10:01:00 +0000
+Content-Type: text/plain; charset=utf-8
+
+Malicious content.
