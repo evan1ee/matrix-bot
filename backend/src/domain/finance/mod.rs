@@ -7,6 +7,7 @@ pub mod analytics;
 pub mod fx;
 pub mod money;
 pub mod net_worth;
+pub mod receipt;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};

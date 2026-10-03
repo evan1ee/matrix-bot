@@ -17,6 +17,7 @@ use crate::interface::channels::registry::ChannelRegistry;
 use crate::jobs::{JobError, JobHandler};
 
 pub mod briefing;
+pub mod media;
 pub mod portfolio;
 pub mod reminders;
 
@@ -46,7 +47,11 @@ impl Outbound for ChannelRegistry {
 }
 
 /// Every job handler.
-pub fn handlers(services: &AppServices, outbound: Arc<dyn Outbound>) -> Vec<Arc<dyn JobHandler>> {
+pub fn handlers(
+    services: &AppServices,
+    outbound: Arc<dyn Outbound>,
+    ocr: crate::infrastructure::inference::ocr::OcrClient,
+) -> Vec<Arc<dyn JobHandler>> {
     vec![
         Arc::new(reminders::ReminderFireHandler::new(
             services.clone(),
@@ -58,9 +63,14 @@ pub fn handlers(services: &AppServices, outbound: Arc<dyn Outbound>) -> Vec<Arc<
         )),
         Arc::new(portfolio::CheckAlertsHandler::new(
             services.clone(),
-            outbound,
+            outbound.clone(),
         )),
         Arc::new(portfolio::RefreshPricesHandler::new(services.clone())),
+        Arc::new(media::ProcessReceiptHandler::new(
+            services.clone(),
+            outbound,
+            ocr,
+        )),
     ]
 }
 

@@ -53,6 +53,7 @@ fn payload_json(payload: &JobPayload) -> sqlx::Result<serde_json::Value> {
     let value = match payload {
         JobPayload::ReminderFire(p) => serde_json::to_value(p),
         JobPayload::BriefingSend(p) => serde_json::to_value(p),
+        JobPayload::MediaProcessReceipt(p) => serde_json::to_value(p),
         JobPayload::Empty => Ok(serde_json::json!({})),
     };
     value.map_err(|e| sqlx::Error::Encode(Box::new(e)))

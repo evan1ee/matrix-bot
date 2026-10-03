@@ -258,9 +258,11 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         }
         ChannelRegistry::from_unique(adapters)
     });
+    let ocr = crate::infrastructure::inference::ocr::OcrClient::new(config.ocr_base_url.clone());
     let registry = jobs::Registry::new(crate::interface::jobs::handlers(
         &services,
         channels.clone() as Arc<dyn Outbound>,
+        ocr,
     ))?;
     let runtime = jobs::JobRuntime::new(
         db.pool.clone(),

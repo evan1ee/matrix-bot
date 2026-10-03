@@ -10,7 +10,9 @@ use chrono::{DateTime, NaiveDate, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::domain::accounts::AccountId;
+use crate::domain::channels::ConversationAddress;
 use crate::domain::reminders::MAX_DELIVERY_ATTEMPTS;
+use crate::domain::storage::StorageKey;
 
 /// Longest error text stored on a job row.
 pub const MAX_ERROR_CHARS: usize = 2_000;
@@ -32,14 +34,16 @@ pub enum JobType {
     BriefingSend,
     PortfolioCheckAlerts,
     PortfolioRefreshPrices,
+    MediaProcessReceipt,
 }
 
 impl JobType {
-    pub const ALL: [JobType; 4] = [
+    pub const ALL: [JobType; 5] = [
         JobType::ReminderFire,
         JobType::BriefingSend,
         JobType::PortfolioCheckAlerts,
         JobType::PortfolioRefreshPrices,
+        JobType::MediaProcessReceipt,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -48,6 +52,7 @@ impl JobType {
             JobType::BriefingSend => "briefing.send",
             JobType::PortfolioCheckAlerts => "portfolio.check_alerts",
             JobType::PortfolioRefreshPrices => "portfolio.refresh_prices",
+            JobType::MediaProcessReceipt => "media.process_receipt",
         }
     }
 
@@ -104,10 +109,21 @@ pub struct BriefingSendPayload {
     pub local_date: NaiveDate,
 }
 
+/// `media.process_receipt`: an uploaded receipt image in object storage to scan
+/// and parse into a transaction.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProcessReceiptPayload {
+    pub storage_key: StorageKey,
+    pub account_id: AccountId,
+    pub conversation: Option<ConversationAddress>,
+    pub caption: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JobPayload {
     ReminderFire(ReminderFirePayload),
     BriefingSend(BriefingSendPayload),
+    MediaProcessReceipt(ProcessReceiptPayload),
     /// `{}` — the job's type and account say everything.
     Empty,
 }
@@ -194,6 +210,29 @@ impl NewJob {
             3,
             60,
             key,
+        )
+    }
+
+    pub fn media_process_receipt(
+        owner: AccountId,
+        storage_key: StorageKey,
+        conversation: Option<ConversationAddress>,
+        caption: Option<String>,
+    ) -> Self {
+        let dedupe_key = storage_key.as_str().to_owned();
+        let payload = JobPayload::MediaProcessReceipt(ProcessReceiptPayload {
+            storage_key,
+            account_id: owner,
+            conversation,
+            caption,
+        });
+        Self::new(
+            JobType::MediaProcessReceipt,
+            Some(owner),
+            payload,
+            3,
+            60,
+            dedupe_key,
         )
     }
 
@@ -394,5 +433,36 @@ mod tests {
         let back: ReminderFirePayload =
             serde_json::from_value(serde_json::to_value(&p).unwrap()).unwrap();
         assert_eq!(back, p);
+    }
+
+    #[test]
+    fn media_process_receipt_builds_and_dedupes_by_storage_key() {
+        let o = owner();
+        let key = crate::domain::storage::StorageKey::generate(
+            &o,
+            crate::domain::storage::StorageCategory::Receipts,
+            "jpg",
+        );
+        let conv = Some(ConversationAddress::Matrix("!room:example.org".into()));
+        let job = NewJob::media_process_receipt(o, key.clone(), conv.clone(), Some("lunch".into()));
+
+        assert_eq!(job.job_type(), JobType::MediaProcessReceipt);
+        assert_eq!(job.account_id(), Some(&o));
+        assert_eq!(job.dedupe_key(), Some(key.as_str()));
+        assert_eq!((job.max_attempts(), job.backoff_seconds()), (3, 60));
+
+        let payload = match job.payload() {
+            JobPayload::MediaProcessReceipt(p) => p,
+            _ => panic!("wrong payload variant"),
+        };
+        assert_eq!(payload.storage_key, key);
+        assert_eq!(payload.account_id, o);
+        assert_eq!(payload.conversation, conv);
+        assert_eq!(payload.caption.as_deref(), Some("lunch"));
+
+        // Payload serde round-trip
+        let val = serde_json::to_value(payload).unwrap();
+        let back: ProcessReceiptPayload = serde_json::from_value(val).unwrap();
+        assert_eq!(&back, payload);
     }
 }

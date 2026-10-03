@@ -201,7 +201,7 @@ impl LinkedIdentity {
 }
 
 /// Where a conversation lives. See the module docs for the two encodings.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ConversationAddress {
     Web,
     Matrix(String),
@@ -419,6 +419,22 @@ mod tests {
             Channel::Email,
         ] {
             assert_eq!(c.as_str().parse::<Channel>().unwrap(), c);
+        }
+    }
+
+    #[test]
+    fn conversation_address_serde_round_trips() {
+        let cases = [
+            ConversationAddress::Web,
+            ConversationAddress::Matrix("!room:server.org".into()),
+            ConversationAddress::Discord(123456789),
+            ConversationAddress::Telegram(987654),
+            ConversationAddress::Email("alice@example.com".into()),
+        ];
+        for addr in cases {
+            let json = serde_json::to_string(&addr).unwrap();
+            let back: ConversationAddress = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, addr);
         }
     }
 }
