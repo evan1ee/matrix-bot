@@ -114,7 +114,10 @@ impl JobHandler for ProcessReceiptHandler {
                 warn!(%owner, "OCR service reported not configured");
                 return Ok(());
             }
-            Err(OcrServiceError::Upstream { status: 400, message }) => {
+            Err(OcrServiceError::Upstream {
+                status: 400,
+                message,
+            }) => {
                 error!(%owner, status = 400, %message, "Uploaded image could not be decoded by OCR engine");
                 self.deliver_notification(
                     &p.conversation,
@@ -143,7 +146,10 @@ impl JobHandler for ProcessReceiptHandler {
         // Parse structured fields from recognized OCR text
         let extracted = extract_receipt_fields(&scan.text);
 
-        let amount_opt = extracted.amount.as_deref().and_then(|a| a.parse::<f64>().ok());
+        let amount_opt = extracted
+            .amount
+            .as_deref()
+            .and_then(|a| a.parse::<f64>().ok());
 
         if let Some(amount_f64) = amount_opt {
             let amount_minor = (amount_f64 * 100.0).round() as i64;
@@ -296,9 +302,8 @@ mod tests {
     async fn missing_storage_key_fails_permanently() {
         let pool = crate::db::pool::test_pool().await;
         let temp_dir = tempfile::tempdir().unwrap();
-        let storage = Arc::new(
-            LocalStorageService::new(temp_dir.path().to_path_buf(), None, "test-secret").unwrap(),
-        );
+        let storage =
+            Arc::new(LocalStorageService::new(temp_dir.path(), None, "test-secret").unwrap());
         let services = AppServices::new(&pool).with_storage(storage);
         let outbound = FakeOutbound::connected();
         let ocr = OcrClient::new(None);
@@ -324,9 +329,8 @@ mod tests {
     async fn missing_ocr_config_completes_and_notifies() {
         let pool = crate::db::pool::test_pool().await;
         let temp_dir = tempfile::tempdir().unwrap();
-        let storage = Arc::new(
-            LocalStorageService::new(temp_dir.path().to_path_buf(), None, "test-secret").unwrap(),
-        );
+        let storage =
+            Arc::new(LocalStorageService::new(temp_dir.path(), None, "test-secret").unwrap());
         let owner = AccountId::from_seed("acct_alice");
         let key = StorageKey::generate(&owner, StorageCategory::Receipts, "jpg");
 

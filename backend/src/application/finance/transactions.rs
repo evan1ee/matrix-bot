@@ -170,14 +170,10 @@ impl FinanceService {
         storage_key: crate::domain::storage::StorageKey,
     ) -> Result<Transaction, AppError> {
         let mut tx = self.pool.begin().await?;
-        let updated = repo::set_receipt_storage_key(
-            &mut tx,
-            owner,
-            transaction_id,
-            Some(&storage_key),
-        )
-        .await?
-        .ok_or(FinanceError::TransactionNotFound)?;
+        let updated =
+            repo::set_receipt_storage_key(&mut tx, owner, transaction_id, Some(&storage_key))
+                .await?
+                .ok_or(FinanceError::TransactionNotFound)?;
         outbox::publish(&mut tx, &SystemEvent::TransactionUpdated(updated.clone())).await?;
         tx.commit().await?;
         Ok(updated)

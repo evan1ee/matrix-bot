@@ -243,4 +243,3 @@ async fn record_expense_with_receipt_and_link_receipt() {
         .unwrap_err();
     assert!(matches!(err, AppError::NotFound(_)));
 }
-

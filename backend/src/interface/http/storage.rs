@@ -111,16 +111,21 @@ pub async fn get_storage(
     }
 
     // Fetch binary from configured storage backend
-    let data = state.services.storage.get(&key).await.map_err(|e| match e {
-        StorageError::NotFound(_) => ApiError::not_found("Storage asset not found"),
-        StorageError::AccessDenied => ApiError::forbidden("Access denied"),
-        StorageError::InvalidKey(msg) => ApiError::bad_request(msg),
-        StorageError::Backend(err) => {
-            error!(%err, "Storage backend error");
-            ApiError::internal("Failed to retrieve storage object")
-        }
-        StorageError::Unsupported(msg) => ApiError::bad_request(msg),
-    })?;
+    let data = state
+        .services
+        .storage
+        .get(&key)
+        .await
+        .map_err(|e| match e {
+            StorageError::NotFound(_) => ApiError::not_found("Storage asset not found"),
+            StorageError::AccessDenied => ApiError::forbidden("Access denied"),
+            StorageError::InvalidKey(msg) => ApiError::bad_request(msg),
+            StorageError::Backend(err) => {
+                error!(%err, "Storage backend error");
+                ApiError::internal("Failed to retrieve storage object")
+            }
+            StorageError::Unsupported(msg) => ApiError::bad_request(msg),
+        })?;
 
     let content_type = content_type_for_key(&key);
 
@@ -135,27 +140,23 @@ pub async fn get_storage(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
-    use bytes::Bytes;
-    use axum::extract::Query;
     use crate::domain::accounts::AccountId;
     use crate::domain::storage::StorageCategory;
     use crate::infrastructure::storage::local::{sign_storage_key, LocalStorageService};
     use crate::infrastructure::storage::StorageService;
+    use axum::extract::Query;
+    use bytes::Bytes;
+    use std::sync::Arc;
 
     async fn setup_test_state() -> (ApiState, LocalStorageService, tempfile::TempDir) {
         let temp_dir = tempfile::tempdir().unwrap();
         let signing_secret = "test-secret-12345".to_string();
-        let storage = LocalStorageService::new(
-            temp_dir.path().to_path_buf(),
-            None,
-            signing_secret.clone(),
-        )
-        .unwrap();
+        let storage =
+            LocalStorageService::new(temp_dir.path(), None, signing_secret.clone()).unwrap();
 
         let pool = crate::db::pool::test_pool().await;
-        let services = crate::application::AppServices::new(&pool)
-            .with_storage(Arc::new(storage.clone()));
+        let services =
+            crate::application::AppServices::new(&pool).with_storage(Arc::new(storage.clone()));
 
         let mut state = ApiState::new(
             crate::db::Database { pool },
@@ -185,7 +186,10 @@ mod tests {
             State(state),
             user,
             Path(key.as_str().to_string()),
-            Query(StorageQuery { sig: None, exp: None }),
+            Query(StorageQuery {
+                sig: None,
+                exp: None,
+            }),
         )
         .await;
 
@@ -215,7 +219,10 @@ mod tests {
             State(state),
             user,
             Path(key.as_str().to_string()),
-            Query(StorageQuery { sig: None, exp: None }),
+            Query(StorageQuery {
+                sig: None,
+                exp: None,
+            }),
         )
         .await;
 
@@ -239,7 +246,10 @@ mod tests {
             State(state),
             None,
             Path(key.as_str().to_string()),
-            Query(StorageQuery { sig: None, exp: None }),
+            Query(StorageQuery {
+                sig: None,
+                exp: None,
+            }),
         )
         .await;
 

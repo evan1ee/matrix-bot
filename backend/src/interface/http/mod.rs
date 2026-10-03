@@ -423,6 +423,7 @@ mod server_shutdown_tests {
             tts_dialect: crate::infrastructure::inference::tts::TtsDialect::OpenAi,
             trust_forwarded_for: false,
             ai: crate::config::AiEnvConfig::default(),
+            storage: crate::config::StorageConfig::default(),
         }
     }
 

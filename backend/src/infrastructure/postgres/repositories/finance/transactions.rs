@@ -41,7 +41,9 @@ impl From<TransactionRow> for Transaction {
             category_id: r.category_id,
             category_name: r.category_name,
             note: r.note,
-            receipt_storage_key: r.receipt_storage_key.and_then(|k| StorageKey::parse(&k).ok()),
+            receipt_storage_key: r
+                .receipt_storage_key
+                .and_then(|k| StorageKey::parse(&k).ok()),
             source_kind: r.source_kind,
             source_id: r.source_id,
             occurred_at: r.occurred_at,

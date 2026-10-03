@@ -516,7 +516,7 @@ mod tests {
         let mut out = String::with_capacity(path.len());
         let mut chars = path.chars().peekable();
         while let Some(c) = chars.next() {
-            if c != ':' {
+            if c != ':' && c != '*' {
                 out.push(c);
                 continue;
             }

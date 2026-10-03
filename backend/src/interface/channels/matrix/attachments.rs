@@ -18,7 +18,6 @@ use matrix_sdk::{
 };
 use tracing::{error, warn};
 
-use bytes::Bytes;
 use crate::config::AiEnvConfig;
 use crate::db::Database;
 use crate::domain::accounts::AccountId;
@@ -29,6 +28,7 @@ use crate::infrastructure::postgres::repositories::{identities, jobs};
 use crate::interface::channels::matrix::stage::{StageIndicator, StageReporter, TypingGuard};
 use crate::interface::chat::voice::VoiceConfig;
 use crate::llm::progress::ProgressSink;
+use bytes::Bytes;
 
 /// Everything that differs between handling an image and handling a voice
 /// note: which content carries the media, what to call the two processing
@@ -178,14 +178,13 @@ impl<'a> Attachment<'a> {
         let progress: Option<&dyn ProgressSink> = Some(reporter);
         let reply = match self {
             Self::Image { content } => {
-                let conversation =
-                    ConversationAddress::Matrix(room.room_id().as_str().to_string());
+                let conversation = ConversationAddress::Matrix(room.room_id().as_str().to_string());
                 let mimetype = content
                     .info
                     .as_ref()
                     .and_then(|info| info.mimetype.as_deref());
                 match ingest_receipt_image(
-                    &db.pool,
+                    db,
                     services,
                     conversation,
                     owner_id,
@@ -377,7 +376,7 @@ fn image_meta(mimetype: Option<&str>, body: &str, bytes: &[u8]) -> (&'static str
 }
 
 pub(crate) async fn ingest_receipt_image(
-    pool: &sqlx::PgPool,
+    db: &Database,
     services: &crate::application::AppServices,
     conversation: ConversationAddress,
     owner_id: &AccountId,
@@ -413,14 +412,9 @@ pub(crate) async fn ingest_receipt_image(
         }
     };
 
-    let job = NewJob::media_process_receipt(
-        *owner_id,
-        storage_key,
-        Some(conversation),
-        caption,
-    );
+    let job = NewJob::media_process_receipt(*owner_id, storage_key, Some(conversation), caption);
 
-    if let Err(err) = jobs::enqueue(pool, &job).await {
+    if let Err(err) = jobs::enqueue(&db.pool, &job).await {
         error!(
             "Failed to enqueue media.process_receipt job for owner {}: {:?}",
             owner_id, err
@@ -428,23 +422,38 @@ pub(crate) async fn ingest_receipt_image(
         return Err("⚠️ <b>任务排队失败</b><br/>• <b>原因:</b> 无法提交后台解析任务<br/>• <b>建议:</b> 请稍后重试。".to_string());
     }
 
-    Ok("🧾 <b>已收到小票图片</b><br/>后台正在进行 OCR 识别与自动记账，处理完成后将在此通知您。".to_string())
+    Ok(
+        "🧾 <b>已收到小票图片</b><br/>后台正在进行 OCR 识别与自动记账，处理完成后将在此通知您。"
+            .to_string(),
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
     use crate::domain::jobs::JobType;
     use crate::infrastructure::storage::local::LocalStorageService;
+    use std::sync::Arc;
 
     #[test]
     fn detects_image_metadata() {
         assert_eq!(image_meta(Some("image/png"), "", b""), ("png", "image/png"));
-        assert_eq!(image_meta(Some("image/jpeg"), "", b""), ("jpg", "image/jpeg"));
-        assert_eq!(image_meta(None, "receipt.webp", b""), ("webp", "image/webp"));
-        assert_eq!(image_meta(None, "", b"\xFF\xD8\xFF\xE0"), ("jpg", "image/jpeg"));
-        assert_eq!(image_meta(None, "", b"\x89PNG\r\n\x1a\n"), ("png", "image/png"));
+        assert_eq!(
+            image_meta(Some("image/jpeg"), "", b""),
+            ("jpg", "image/jpeg")
+        );
+        assert_eq!(
+            image_meta(None, "receipt.webp", b""),
+            ("webp", "image/webp")
+        );
+        assert_eq!(
+            image_meta(None, "", b"\xFF\xD8\xFF\xE0"),
+            ("jpg", "image/jpeg")
+        );
+        assert_eq!(
+            image_meta(None, "", b"\x89PNG\r\n\x1a\n"),
+            ("png", "image/png")
+        );
         assert_eq!(image_meta(None, "unknown", b"data"), ("jpg", "image/jpeg"));
     }
 
@@ -454,15 +463,10 @@ mod tests {
         crate::db::migrate::run_migrations_unlocked(&pool).await;
 
         let temp_dir = tempfile::tempdir().unwrap();
-        let storage = LocalStorageService::new(
-            temp_dir.path(),
-            None,
-            "test-secret",
-        )
-        .unwrap();
+        let storage = LocalStorageService::new(temp_dir.path(), None, "test-secret").unwrap();
 
-        let services = crate::application::AppServices::new(&pool)
-            .with_storage(Arc::new(storage.clone()));
+        let services =
+            crate::application::AppServices::new(&pool).with_storage(Arc::new(storage.clone()));
 
         let owner = AccountId::from_seed("acct_matrix_ingest");
         crate::infrastructure::postgres::repositories::accounts::core::create_with_id(
@@ -477,8 +481,9 @@ mod tests {
         let conv = ConversationAddress::Matrix("!room123:matrix.org".into());
         let fake_image = b"\x89PNG\r\n\x1a\nfake-receipt-image-content";
 
+        let db = Database { pool: pool.clone() };
         let html = ingest_receipt_image(
-            &pool,
+            &db,
             &services,
             conv.clone(),
             &owner,
@@ -492,22 +497,32 @@ mod tests {
         assert!(html.contains("已收到小票图片"));
 
         // Claim the enqueued job to verify its type and payload
-        let claimed = jobs::claim(&pool, "test-worker", &[JobType::MediaProcessReceipt.as_str()])
-            .await
-            .expect("claim query should succeed")
-            .expect("job should be claimable");
+        let claimed = jobs::claim(
+            &pool,
+            "test-worker",
+            &[JobType::MediaProcessReceipt.as_str()],
+        )
+        .await
+        .expect("claim query should succeed")
+        .expect("job should be claimable");
 
         assert_eq!(claimed.job_type, JobType::MediaProcessReceipt.as_str());
         assert_eq!(claimed.account_id, Some(owner));
 
-        let storage_key_str = claimed.payload["storage_key"].as_str().expect("storage_key in payload");
+        let storage_key_str = claimed.payload["storage_key"]
+            .as_str()
+            .expect("storage_key in payload");
         let storage_key: StorageKey = storage_key_str.parse().expect("valid storage key");
 
         assert_eq!(storage_key.account_id(), owner);
         assert_eq!(storage_key.category(), StorageCategory::Receipts);
 
         // Verify image bytes can be retrieved from object storage
-        let retrieved = services.storage.get(&storage_key).await.expect("storage get");
+        let retrieved = services
+            .storage
+            .get(&storage_key)
+            .await
+            .expect("storage get");
         assert_eq!(retrieved.as_ref(), fake_image);
     }
 }

@@ -27,22 +27,22 @@
 ## Tasks
 
 ### Task 1: Domain Storage Types (`domain/storage/`)
-- [ ] Create `backend/src/domain/storage/mod.rs`
-- [ ] Define `StorageCategory` enum (`Receipts`, `Audio`, `Attachments`, `Exports`)
-- [ ] Define `StorageKey` value object:
+- [x] Create `backend/src/domain/storage/mod.rs`
+- [x] Define `StorageCategory` enum (`Receipts`, `Audio`, `Attachments`, `Exports`)
+- [x] Define `StorageKey` value object:
   - Canonical format: `accounts/{account_id}/{category}/{uuid}.{ext}`
   - Path traversal checks: reject `..`, `\`, leading/trailing `/`, characters outside `[a-zA-Z0-9_.-]`
   - Maximum key length: 256 bytes
   - Method `account_id(&self) -> AccountId`
   - Method `generate(owner: &AccountId, category: StorageCategory, ext: &str) -> Self`
-- [ ] Define pure `StorageError` enum (`NotFound`, `InvalidKey`, `AccessDenied`, `Backend`, `Unsupported`)
-- [ ] Unit tests covering path traversal attacks (`../`, `..\\`, absolute paths, null bytes), formatting, and owner extraction
-- [ ] Declare `pub mod storage;` in `backend/src/domain/mod.rs`
-- [ ] Verify: `cargo test -p matrix-bot --lib domain::storage`
+- [x] Define pure `StorageError` enum (`NotFound`, `InvalidKey`, `AccessDenied`, `Backend`, `Unsupported`)
+- [x] Unit tests covering path traversal attacks (`../`, `..\\`, absolute paths, null bytes), formatting, and owner extraction
+- [x] Declare `pub mod storage;` in `backend/src/domain/mod.rs`
+- [x] Verify: `cargo test -p matrix-bot --lib domain::storage`
 
 ### Task 2: Storage Infrastructure & Local Provider (`infrastructure/storage/`)
-- [ ] Create `backend/src/infrastructure/storage/mod.rs`
-- [ ] Define `StorageService` trait:
+- [x] Create `backend/src/infrastructure/storage/mod.rs`
+- [x] Define `StorageService` trait:
   ```rust
   #[async_trait::async_trait]
   pub trait StorageService: Send + Sync {
@@ -52,72 +52,72 @@
       async fn get_presigned_url(&self, key: &StorageKey, ttl: std::time::Duration) -> Result<String, StorageError>;
   }
   ```
-- [ ] Implement `StorageConfig` supporting `STORAGE_DRIVER` (`local` | `s3`), `STORAGE_LOCAL_DIR`, `STORAGE_SIGNING_SECRET`, etc.
-- [ ] Create `backend/src/infrastructure/storage/local.rs`:
+- [x] Implement `StorageConfig` supporting `STORAGE_DRIVER` (`local` | `s3`), `STORAGE_LOCAL_DIR`, `STORAGE_SIGNING_SECRET`, etc.
+- [x] Create `backend/src/infrastructure/storage/local.rs`:
   - `LocalStorageService`: safe canonicalization within `STORAGE_LOCAL_DIR`
   - Atomic file writes using staging `.tmp` files
   - HMAC-SHA256 presigned URL generation
-- [ ] Declare `pub mod storage;` in `backend/src/infrastructure/mod.rs`
-- [ ] Unit tests for `LocalStorageService`: round-trip `put`/`get`/`delete`, directory creation, atomic overwrite, traversal attempts
-- [ ] Verify: `cargo test -p matrix-bot --lib infrastructure::storage`
+- [x] Declare `pub mod storage;` in `backend/src/infrastructure/mod.rs`
+- [x] Unit tests for `LocalStorageService`: round-trip `put`/`get`/`delete`, directory creation, atomic overwrite, traversal attempts
+- [x] Verify: `cargo test -p matrix-bot --lib infrastructure::storage`
 
 ### Task 3: S3 Storage Provider (`infrastructure/storage/s3.rs`)
-- [ ] Add `aws-sdk-s3 = { version = "1", default-features = false, features = ["rustls"] }` and `aws-config = { version = "1", default-features = false, features = ["rustls"] }` to `backend/Cargo.toml`
-- [ ] Create `backend/src/infrastructure/storage/s3.rs`:
+- [x] Add `aws-sdk-s3 = { version = "1", default-features = false, features = ["rustls"] }` and `aws-config = { version = "1", default-features = false, features = ["rustls"] }` to `backend/Cargo.toml`
+- [x] Create `backend/src/infrastructure/storage/s3.rs`:
   - `S3StorageService`: client initialization, presigned client
   - Implements `StorageService` trait
-- [ ] Unit tests with mocked/configured builder
-- [ ] Verify: `cargo check -p matrix-bot --all-targets`
+- [x] Unit tests with mocked/configured builder
+- [x] Verify: `cargo check -p matrix-bot --all-targets`
 
 ### Task 4: Database Migration & Finance Repository (`0009` & `repositories/finance.rs`)
-- [ ] Add migration `backend/migrations/0009_transaction_receipt_storage_key.sql`:
+- [x] Add migration `backend/migrations/0009_transaction_receipt_storage_key.sql`:
   - `ALTER TABLE transactions ADD COLUMN IF NOT EXISTS receipt_storage_key TEXT;`
   - `CREATE INDEX IF NOT EXISTS idx_transactions_receipt_storage_key ON transactions(receipt_storage_key);`
-- [ ] Update `backend/src/infrastructure/postgres/repositories/finance.rs` to persist and fetch `receipt_storage_key`
-- [ ] Update `TransactionRow` and domain conversion
-- [ ] Run `cargo sqlx prepare --check` against scratch database
-- [ ] Verify repository tests pass
+- [x] Update `backend/src/infrastructure/postgres/repositories/finance.rs` to persist and fetch `receipt_storage_key`
+- [x] Update `TransactionRow` and domain conversion
+- [x] Run `cargo sqlx prepare --check` against scratch database
+- [x] Verify repository tests pass
 
 ### Task 5: Application Layer Wiring (`application/finance/` & `AppServices`)
-- [ ] Update `FinanceService`:
+- [x] Update `FinanceService`:
   - `record_expense` accepts optional `receipt_storage_key: Option<StorageKey>`
   - Add `link_receipt` method to attach a receipt to an existing transaction
-- [ ] Add `storage: Arc<dyn StorageService>` to `AppServices`
-- [ ] Build storage in `app.rs` composition root based on `Config`
-- [ ] Verify: `cargo test -p matrix-bot --lib application::finance`
+- [x] Add `storage: Arc<dyn StorageService>` to `AppServices`
+- [x] Build storage in `app.rs` composition root based on `Config`
+- [x] Verify: `cargo test -p matrix-bot --lib application::finance`
 
 ### Task 6: Durable Background Job (`interface/jobs/media.rs`)
-- [ ] Define `media.process_receipt` job payload:
+- [x] Define `media.process_receipt` job payload:
   `ProcessReceiptJob { storage_key: StorageKey, account_id: AccountId, conversation: ConversationAddress, caption: Option<String> }`
-- [ ] Create `backend/src/interface/jobs/media.rs`:
+- [x] Create `backend/src/interface/jobs/media.rs`:
   - Handler downloads bytes from `storage.get(&storage_key)`
   - Calls OCR client to extract text
   - Synthesizes LLM structured receipt prompt
   - Invokes `FinanceService::record_expense` with `receipt_storage_key`
   - Publishes `SystemEvent::ReceiptProcessed` (or appropriate event)
   - Notifies origin conversation via outbox
-- [ ] Wire job into `backend/src/jobs/` dispatcher
-- [ ] Tests for job execution and failure recovery
+- [x] Wire job into `backend/src/jobs/` dispatcher
+- [x] Tests for job execution and failure recovery
 
 ### Task 7: HTTP Storage Endpoint (`interface/http/storage.rs`)
-- [ ] Create `backend/src/interface/http/storage.rs`:
+- [x] Create `backend/src/interface/http/storage.rs`:
   - `GET /api/v1/storage/*key`:
     - Validates caller session (`AuthUser`) owns the key (`key.account_id() == user.account_id`)
     - OR validates unexpired HMAC token
     - Streams media bytes with appropriate `Content-Type`
-- [ ] Register routes in `routes.rs` and OpenAPI in `openapi.rs`
-- [ ] Verify byte-identical OpenAPI or intentional additions
-- [ ] Unit & integration tests for authorization (cross-account read forbidden)
+- [x] Register routes in `routes.rs` and OpenAPI in `openapi.rs`
+- [x] Verify byte-identical OpenAPI or intentional additions
+- [x] Unit & integration tests for authorization (cross-account read forbidden)
 
 ### Task 8: Inbound Chat Channel Attachment Ingestion
-- [ ] Update `backend/src/interface/channels/matrix/attachments.rs`:
+- [x] Update `backend/src/interface/channels/matrix/attachments.rs`:
   - When image attachment is received, save to storage with `StorageCategory::Receipts`
   - Enqueue `media.process_receipt` job
   - Send acknowledgment reply to user
-- [ ] Add tests for receipt upload ingestion flow
+- [x] Add tests for receipt upload ingestion flow
 
 ### Task 9: Architecture Boundary Tests & Documentation
-- [ ] Add architecture test: `storage_crates_stay_inside_the_storage_infrastructure` (assert `aws_sdk_s3` never appears outside `infrastructure/storage/`)
-- [ ] Update `docs/architecture.md`, `README.md`, `.env.example`
-- [ ] Update `HANDOFF.md` with status and rulings
-- [ ] Full verification gate pass
+- [x] Add architecture test: `storage_crates_stay_inside_the_storage_infrastructure` (assert `aws_sdk_s3` never appears outside `infrastructure/storage/`)
+- [x] Update `docs/architecture.md`, `README.md`, `.env.example`
+- [x] Update `HANDOFF.md` with status and rulings
+- [x] Full verification gate pass

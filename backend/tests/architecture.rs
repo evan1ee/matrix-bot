@@ -964,3 +964,26 @@ fn error_module_is_in_interface_http() {
         "lib.rs must not declare `pub mod error`"
     );
 }
+
+/// aws-sdk-s3 and aws-config are the S3 storage implementation's private dependencies:
+/// nothing else may name them, so swapping or upgrading them touches one directory.
+#[test]
+fn storage_crates_stay_inside_the_storage_infrastructure() {
+    let hits: Vec<_> = rust_files(&src(""))
+        .into_iter()
+        .filter(|f| !relative_to_src(f).starts_with("infrastructure/storage/"))
+        .flat_map(|f| {
+            let text = fs::read_to_string(&f).expect("readable source file");
+            let rel = relative_to_src(&f);
+            production_hits(&text, &["aws_sdk_s3", "aws_config"])
+                .into_iter()
+                .map(move |(n, l)| format!("{rel}:{n}: {l}"))
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert!(
+        hits.is_empty(),
+        "storage AWS crates outside infrastructure/storage:\n{}",
+        hits.join("\n")
+    );
+}

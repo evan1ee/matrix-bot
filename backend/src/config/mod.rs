@@ -4,8 +4,10 @@ use std::env;
 
 mod ai;
 mod channels;
+mod storage;
 pub use ai::AiEnvConfig;
 pub use channels::{DiscordConfig, EmailConfig, TelegramConfig, TelegramMode};
+pub use storage::{StorageConfig, StorageDriver};
 
 use crate::domain::channels::Channel;
 
@@ -201,6 +203,7 @@ pub struct Config {
     /// setup that does not put a trusted proxy in front of the bot.
     pub trust_forwarded_for: bool,
     pub ai: AiEnvConfig,
+    pub storage: StorageConfig,
 }
 
 impl Config {
@@ -347,6 +350,7 @@ impl Config {
             .unwrap_or(false);
 
         let ai = AiEnvConfig::from_env();
+        let storage = StorageConfig::from_env((!web_url.is_empty()).then(|| web_url.clone()));
 
         Ok(Self {
             homeserver,
@@ -385,6 +389,7 @@ impl Config {
             tts_dialect,
             trust_forwarded_for,
             ai,
+            storage,
         })
     }
 
@@ -507,6 +512,7 @@ impl Config {
             tts_dialect: crate::infrastructure::inference::tts::TtsDialect::OpenAi,
             trust_forwarded_for: false,
             ai: AiEnvConfig::default(),
+            storage: StorageConfig::default(),
         }
     }
 }
@@ -649,6 +655,7 @@ mod tests {
             tts_dialect: crate::infrastructure::inference::tts::TtsDialect::OpenAi,
             trust_forwarded_for: false,
             ai: AiEnvConfig::default(),
+            storage: StorageConfig::default(),
         };
 
         for bad in ["https://mbm.one", "mbm.one:8080", "localhost:5173"] {

@@ -325,8 +325,7 @@ impl ApiState {
             ai: config.ai.clone(),
             // start_api_server hands the adapter's ingress in after from_config.
             telegram: None,
-            storage_signing_secret: std::env::var("STORAGE_SIGNING_SECRET")
-                .unwrap_or_else(|_| "matrix-bot-default-signing-secret".to_string()),
+            storage_signing_secret: config.storage.signing_secret.clone(),
         })
     }
 
@@ -515,6 +514,7 @@ mod tests {
             tts_dialect: crate::infrastructure::inference::tts::TtsDialect::OpenAi,
             trust_forwarded_for: true,
             ai: crate::config::AiEnvConfig::default(),
+            storage: crate::config::StorageConfig::default(),
         }
     }
 

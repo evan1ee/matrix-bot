@@ -39,81 +39,7 @@ pub trait StorageService: Send + Sync {
     ) -> Result<String, StorageError>;
 }
 
-/// Selected storage driver.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum StorageDriver {
-    Local,
-    S3,
-}
-
-impl StorageDriver {
-    pub fn parse(s: &str) -> Option<Self> {
-        match s.trim().to_ascii_lowercase().as_str() {
-            "local" => Some(Self::Local),
-            "s3" => Some(Self::S3),
-            _ => None,
-        }
-    }
-}
-
-/// Configuration for object storage.
-#[derive(Clone, Debug)]
-pub struct StorageConfig {
-    pub driver: StorageDriver,
-    pub local_dir: String,
-    pub web_url: Option<String>,
-    pub signing_secret: String,
-    pub s3_endpoint: Option<String>,
-    pub s3_bucket: Option<String>,
-    pub s3_region: Option<String>,
-    pub s3_access_key: Option<String>,
-    pub s3_secret_key: Option<String>,
-    pub s3_force_path_style: bool,
-}
-
-impl StorageConfig {
-    /// Builds configuration from environment variables.
-    pub fn from_env(web_url: Option<String>) -> Self {
-        let driver_str = std::env::var("STORAGE_DRIVER").unwrap_or_else(|_| "local".to_string());
-        let driver = StorageDriver::parse(&driver_str).unwrap_or(StorageDriver::Local);
-        let local_dir =
-            std::env::var("STORAGE_LOCAL_DIR").unwrap_or_else(|_| "data/storage".to_string());
-        let signing_secret = std::env::var("STORAGE_SIGNING_SECRET")
-            .unwrap_or_else(|_| "matrix-bot-default-signing-secret".to_string());
-
-        let s3_endpoint = std::env::var("S3_ENDPOINT")
-            .ok()
-            .filter(|s| !s.trim().is_empty());
-        let s3_bucket = std::env::var("S3_BUCKET")
-            .ok()
-            .filter(|s| !s.trim().is_empty());
-        let s3_region = std::env::var("S3_REGION")
-            .ok()
-            .filter(|s| !s.trim().is_empty());
-        let s3_access_key = std::env::var("S3_ACCESS_KEY")
-            .ok()
-            .filter(|s| !s.trim().is_empty());
-        let s3_secret_key = std::env::var("S3_SECRET_KEY")
-            .ok()
-            .filter(|s| !s.trim().is_empty());
-        let s3_force_path_style = std::env::var("S3_FORCE_PATH_STYLE")
-            .map(|s| s.trim().eq_ignore_ascii_case("true") || s.trim() == "1")
-            .unwrap_or(false);
-
-        Self {
-            driver,
-            local_dir,
-            web_url,
-            signing_secret,
-            s3_endpoint,
-            s3_bucket,
-            s3_region,
-            s3_access_key,
-            s3_secret_key,
-            s3_force_path_style,
-        }
-    }
-}
+pub use crate::config::{StorageConfig, StorageDriver};
 
 /// Builds the configured [`StorageService`] implementation based on [`StorageConfig`].
 pub fn build_storage(
@@ -199,4 +125,3 @@ mod tests {
         assert!(build_storage(&config).is_ok());
     }
 }
-

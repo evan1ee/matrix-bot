@@ -72,8 +72,8 @@ impl LocalStorageService {
 
 /// Computes the HMAC-SHA256 signature for a key and expiration timestamp.
 pub fn sign_storage_key(signing_secret: &str, key_str: &str, exp: i64) -> String {
-    let mut mac = HmacSha256::new_from_slice(signing_secret.as_bytes())
-        .expect("HMAC can take any key size");
+    let mut mac =
+        HmacSha256::new_from_slice(signing_secret.as_bytes()).expect("HMAC can take any key size");
     mac.update(key_str.as_bytes());
     mac.update(b":");
     mac.update(exp.to_string().as_bytes());

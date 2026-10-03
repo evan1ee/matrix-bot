@@ -244,6 +244,18 @@ The inference server provisions models in the background (`provision.rs`), spawn
 
 `backend/src/infrastructure/inference/` is the boundary this split created. `interface/` and `application/` define what the application does; `infrastructure/` is how external capabilities are reached. Nothing in `infrastructure/` may import from `interface/` or `application/` — `infrastructure::inference::ocr::OcrScan` is a separate type from `interface::chat::ocr::OcrResult` for exactly that reason, with a `From` impl doing the mapping.
 
+## Object storage and media decoupling
+
+Binary media (receipt photos, voice audio clips, attachments, data exports) is decoupled from PostgreSQL: state, transactions, and metadata remain in PostgreSQL, while binary payloads live in pluggable object storage accessed via `StorageService` (`infrastructure/storage/mod.rs`).
+
+- **Domain keys (`domain/storage/mod.rs`):** `StorageKey` is a strict, synchronous domain value object enforcing the format `accounts/{account_id}/{category}/{uuid}.{ext}`. Path traversal sequences (`..`, `\`, leading/trailing `/`, non-whitelisted characters) are rejected at instantiation before reaching any filesystem or cloud driver. `StorageCategory` enforces domain partitions (`Receipts`, `Audio`, `Attachments`, `Exports`).
+- **Pluggable drivers (`infrastructure/storage/`):**
+  - `LocalStorageService`: Writes atomically via staging `.tmp` files into `STORAGE_LOCAL_DIR` (default: `data/storage`) and generates HMAC-SHA256 presigned URLs.
+  - `S3StorageService`: Works with AWS S3, Cloudflare R2, MinIO, or compatible providers using `aws-sdk-s3`. Presigned URLs are minted natively via AWS S3 presigning.
+- **Isolation:** `backend/tests/architecture.rs::storage_crates_stay_inside_the_storage_infrastructure` enforces that `aws-sdk-s3` and `aws-config` are strictly private to `infrastructure/storage/` and never leak into `application/`, `interface/`, or `domain/`.
+- **Media Ingestion & Async Processing:** Inbound chat attachments (such as receipt photos) are saved directly to `StorageService` with `StorageCategory::Receipts`. An acknowledgment is immediately returned to the chat channel, while a durable background job `media.process_receipt` (`interface/jobs/media.rs`) is enqueued. The worker executes OCR, parses receipt fields, records the transaction with `receipt_storage_key` via `FinanceService::record_expense`, and notifies the originating conversation via outbox.
+- **Streaming endpoint:** `GET /api/v1/storage/*key` validates either active caller session matching the account prefix in the key or an unexpired HMAC signature, streaming binary media with proper `Content-Type`.
+
 ## Portfolio (investment holdings)
 
 Portfolio tracks investment positions — symbol, quantity, weighted-average cost basis. A holding's price is set manually (`!portfolio price`, the web UI) or refreshed from the quote feed in `infrastructure/web/portfolio_feed.rs` (`!portfolio refresh`, `POST /portfolio/refresh-prices`); market value and unrealized P&L are `Option`, not zero, until a price exists.

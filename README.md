@@ -25,6 +25,7 @@ Every feature is reachable through several surfaces (Matrix chat commands, the w
 - ⚙️ **Settings**: per-user timezone, default currency and voice, respected by every module.
 - 🔐 **Accounts and security**: passkey (WebAuthn) sign-in, linked Matrix identities, step-up assertions, delayed recovery and an audit log.
 - 🗄️ **PostgreSQL 18** as the only application database, with versioned migrations applied at boot. See [`docs/database.md`](docs/database.md).
+- 📦 **Decoupled Object Storage**: binary media (receipts, audio clips, attachments) stored in local filesystem or S3/R2/MinIO, isolated by account with presigned streaming.
 
 ---
 

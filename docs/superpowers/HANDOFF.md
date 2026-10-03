@@ -33,7 +33,7 @@ Do not reopen a settled decision without new evidence and the user's agreement.
 |---|---|---|---|
 | **1 — PostgreSQL Foundation** | 1–3 | PostgreSQL-only; versioned migrations; compile-checked SQL; layer-first architecture for **every backend feature**; account UUIDs; durable job queue; transactional outbox | **In progress** (designed, partly implemented) |
 | 2 — Omnichannel | 4 | `ChannelAdapter` / `ChannelRegistry`; Matrix refactored onto it; Discord (`serenity`), Telegram (`teloxide`) and Email (IMAP/SMTP) adapters; `platform_identities`; chat-initiated linking | **Complete: plans A, B, C, and D implemented and verified.** Design `specs/2026-10-01-omnichannel-design.md`; plan A (`plans/2026-10-01-omnichannel-a-framework.md`); plan B (Discord, `plans/2026-10-02-omnichannel-b-discord.md`); plan C (Telegram, `plans/2026-10-02-omnichannel-c-telegram.md`); plan D (Email, `plans/2026-10-03-omnichannel-d-email.md`); branch `feat/omnichannel` |
-| 3 — Scheduled agent & storage | 5 | `ScheduledAgentTask` runtime (`scheduled_agent_tasks`, `agent_runs`, `agent_steps`); `StorageService` (local / S3); HTTP contracts between the backend and inference crates standardised | Not designed |
+| 3 — Scheduled agent & storage | 5 | Storage decoupling (`StorageService`, local/S3, presigned streaming, durable `media.process_receipt` job, chat image ingestion); `ScheduledAgentTask` runtime | **Storage decoupling complete** (plan `plans/2026-10-03-storage-decoupling.md`); ScheduledAgentTask pending |
 | 4 — Web polish | 6 | Regenerated TypeScript client; live UI through the unified SSE stream; UI for linked identities and notification routing | Not designed |
 
 The order is strict. Each sub-project builds on the previous one: channels need the layers and the tool registry, the agent needs the job queue, and the web UI needs the outbox events. **Do not start sub-project 2 until sub-project 1 is merged**, unless the user says otherwise.
@@ -235,6 +235,20 @@ Final verification (orchestrator, at `8418b25` plus the docs commit; docs change
 - `cargo build -p matrix-bot --release`: ok (compiled cleanly in release profile).
 - `npm --prefix frontend run build`: ok (frontend unchanged, verified).
 - Not verified (needs a real mail server, HANDOFF §6): the live checks listed in the plan's *What the user verifies*.
+
+### Sub-project 3 — Storage Decoupling (`plans/2026-10-03-storage-decoupling.md`, branch `feat/storage-decoupling`)
+
+| Task | Scope | State | Commit |
+|---|---|---|---|
+| 1 | Domain storage types (`domain/storage/mod.rs`): `StorageKey`, `StorageCategory`, `StorageError` | ✅ | `aed58ad` |
+| 2 | Storage infrastructure & Local provider (`infrastructure/storage/local.rs`): atomic writes, HMAC signing | ✅ | `de6ffaa` |
+| 3 | S3 storage provider (`infrastructure/storage/s3.rs`): `aws-sdk-s3`, presigned URLs | ✅ | `74ce914` |
+| 4 | Database migration `0009` & Finance repository: `receipt_storage_key` in `transactions` & sqlx cache | ✅ | `ac060ec` |
+| 5 | Application wiring: `FinanceService` (`record_expense`, `link_receipt`), `AppServices.storage` | ✅ | `0e6330a` |
+| 6 | Durable background job: `media.process_receipt` (`interface/jobs/media.rs`), OCR extraction, expense record, outbox notifications | ✅ | `475c92b` |
+| 7 | HTTP storage endpoint: `GET /api/v1/storage/*key` (`interface/http/storage.rs`), owner verification, HMAC token check | ✅ | `76c4186` |
+| 8 | Inbound chat attachment ingestion: `interface/channels/matrix/attachments.rs` saves to storage, enqueues job, replies immediate acknowledgment | ✅ | `5d470d4` |
+| 9 | Architecture boundary tests & documentation: `storage_crates_stay_inside_the_storage_infrastructure`, README, docs, HANDOFF | ✅ | this commit |
 
 ---
 
@@ -607,3 +621,12 @@ These need the human. Prepare them; don't perform them.
 - **R137 (E13 — deduplication):** Inbound messages deduplicated by `Message-ID` in a 1024-entry sliding window (`RecentMessages`). Outbox deliveries to email are at-least-once — cost: none.
 - **R138 (E14 — architecture isolation):** Architecture test verifies `lettre`, `async_imap`, and `mail_parser` are isolated inside `interface/channels/email/` (`email_crates_stay_inside_the_email_adapter`) and composition root builds `EmailAdapter::new(` — cost: none.
 - **R139:** `error.rs` relocated from crate root to `backend/src/interface/http/error.rs` with `pub use error::{ApiError, ApiErrorResponse};` in `interface/http/mod.rs`; `lib.rs` removes `pub mod error;`, all `interface/http` callers re-pointed to `crate::interface::http::error::*`, and `tests/architecture.rs::error_module_is_in_interface_http` prevents regression — cost: none; byte-identical `openapi.json`.
+- **R140 (S1 — `StorageKey` value object):** Canonical format `accounts/{account_id}/{category}/{uuid}.{ext}`; strictly bans traversal (`..`, `\`, leading/trailing `/`) and restricts charset to `[a-zA-Z0-9_.-]`; owner-isolated at the type level — cost: none.
+- **R141 (S2 — `StorageService` trait):** Pluggable async trait for `put`, `get`, `delete`, and `get_presigned_url`. Concrete implementations `LocalStorageService` (local filesystem, atomic write via `.tmp`) and `S3StorageService` (`aws-sdk-s3` with native presigning) — cost: none.
+- **R142 (S3 — Presigned local URLs):** Uses HMAC-SHA256 tokens (`?sig=...&exp=...`) against the API server's `/api/v1/storage/*key` endpoint, giving parity with S3 without exposing internal filesystem paths — cost: none.
+- **R143 (S4 — Migration 0009):** `ALTER TABLE transactions ADD COLUMN IF NOT EXISTS receipt_storage_key TEXT;` with index on `receipt_storage_key`. Handled in `OWNED_TABLES` automatically — cost: none.
+- **R144 (S5 — Async Receipt Ingestion):** Receipt processing is fully asynchronous via durable background job `media.process_receipt`. Chat sync loop only saves to storage and enqueues job with immediate acknowledgment — cost: none.
+- **R145 (S6 — Pure domain receipt parsing):** `domain::finance::receipt::extract_receipt_fields` is pure and synchronous; HTTP OCR endpoint and background job delegate to it — cost: none.
+- **R146 (S7 — Authenticated storage streaming endpoint):** `GET /api/v1/storage/*key` validates `AuthUser` ownership (`key.account_id() == user.account_id`) or valid unexpired HMAC signature, streaming with appropriate Content-Type — cost: none.
+- **R147 (S8 — Crate isolation):** `aws-sdk-s3` and `aws-config` are strictly private to `infrastructure/storage/`, asserted by `storage_crates_stay_inside_the_storage_infrastructure` in `backend/tests/architecture.rs` — cost: none.
+
