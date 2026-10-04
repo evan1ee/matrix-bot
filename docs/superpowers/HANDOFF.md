@@ -311,6 +311,29 @@ Final verification (orchestrator, on `feat/hardening-housekeeping`):
 - `cargo run --bin generate-openapi && git diff --exit-code backend/openapi.json`: byte-identical (zero drift).
 - `npm --prefix frontend run test:e2e`: 199 passed / 0 failed (100% green across entire suite).
 
+### Technical Debt Remediation (`plans/2026-10-04-technical-debt-remediation.md`, branch `feat/tech-debt-remediation`)
+
+| Task | Scope | State | Commit |
+|---|---|---|---|
+| 1 | Guard re-link merges to unclaimed accounts only (R165, `application/identity/link.rs`) | ✅ | `395f2a6` |
+| 2 | Remove `webauthn_rs`, `sha2`, and `tracing` from domain session & credentials (`domain/accounts/`) | ✅ | `658770b` |
+| 3 | Decompose monolithic agent files (`domain/agent/`, `repositories/agent/`, `application/agent/`) < 300 lines (R167) | ✅ | `a8d14ca` |
+| 4 | Defer offline channel deliveries in outbox dispatcher without burning attempts (R166, `events/delivery.rs`) | ✅ | `fe13313` |
+| 5 | Telegram 60s sliding window outbound deduplication (R168, `channels/telegram/outbound.rs`) | ✅ | `282b5af` `5c924bd` |
+| 6 | Budget ReAct prompt tool output to 2,000 chars while preserving raw JSON in DB (R169, `llm/agent/prompts.rs`) | ✅ | `00bd4d7` |
+| 7 | Decompose frontend monolithic modules `portfolio` and `finance` < 350 lines (R170) | ✅ | `fb38fc3` |
+| 8 | Add WAI-ARIA and keyboard navigation to `CustomSelect.tsx` | ✅ | `8660ba7` |
+| 9 | Verification & test resilience (clippy, statement_timeout on test admin pool, 1309 unit tests, 199 e2e tests) | ✅ | `58d51b9` |
+
+Final verification (orchestrator, on `feat/tech-debt-remediation`):
+- `cargo fmt --all -- --check`: clean.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean (zero warnings).
+- `cargo test -p matrix-bot --test architecture`: 35 passed / 0 failed.
+- `cargo test -p matrix-bot --lib -- --test-threads=4`: 1309 passed / 0 failed / 7 ignored (100% green).
+- `cargo run --bin generate-openapi && git diff --exit-code backend/openapi.json`: byte-identical (zero drift).
+- `npm --prefix frontend run build`: clean (1742 modules transformed, zero TypeScript errors).
+- `npm --prefix frontend run test:e2e`: 199 passed / 0 failed (100% green).
+
 ---
 
 
@@ -564,32 +587,32 @@ These need the human. Prepare them; don't perform them.
 - ~~`!briefing now` still publishes `MorningBriefingSent` from the chat handler instead of `BriefingService::record_sent` (candidate cleanup).~~ — resolved by step 9.
 - ~~`BotModule::spawn_background_workers`, `BackgroundWorkers` and `ModuleContext` remain only for the webhook worker and go with step 9.~~ — resolved by step 9.
 - ~~Interface code still calls `repositories::mcp::McpTokenRepository` directly (`interface/chat/mcp.rs`, `interface/http/mcp.rs`, `interface/http/auth/mod.rs` tests): candidate for an `McpService`.~~ — resolved by R162 (`application/mcp::McpService` extracted, interface refactored, architecture rule added).
-- `domain::accounts::StoredCredential::passkey` imports `webauthn_rs`/`serde_json`/`tracing`, outside the domain crate list (pre-existing).
-- `domain/accounts/session.rs` imports `sha2`/`webauthn_rs`/`serde_json`/`tracing`, also outside the domain crate list (pre-existing purity breach).
+- ~~`domain::accounts::StoredCredential::passkey` imports `webauthn_rs`/`serde_json`/`tracing`, outside the domain crate list (pre-existing).~~ — resolved in `feat/tech-debt-remediation` (`credentials.rs` stores raw `Vec<u8>` credential ID).
+- ~~`domain/accounts/session.rs` imports `sha2`/`webauthn_rs`/`serde_json`/`tracing`, also outside the domain crate list (pre-existing purity breach).~~ — resolved in `feat/tech-debt-remediation` (`SessionCookie` takes raw cookie hash, verified in `architecture.rs::domain_depends_on_nothing_outside_itself`).
 - A recurring reminder is marked `failed` if the send succeeded but advancing it hit a database error on the last attempt.
 - The HTTP recovery path reaches `interface::chat::redeem_matured_recovery`, whose `if let Ok` turns a database error into a 401.
-- Pre-existing re-link merge offer in `repositories/accounts/linking.rs:129-159`: an MXID removed from account A can pull A's data into a new account. Needs its own ticket.
+- ~~Pre-existing re-link merge offer in `repositories/accounts/linking.rs:129-159`: an MXID removed from account A can pull A's data into a new account. Needs its own ticket.~~ — resolved by R165 (`application/identity/link.rs` strictly restricts automatic merge on re-link to unclaimed accounts only).
 - ~~`JOB_WORKERS` is not validated against `DATABASE_MAX_CONNECTIONS`~~ — resolved by R150 (`Config::validate` enforces `job_workers < db_max_connections`).
 - ~~Hub replay uses the oldest 500 events when `last_seen = 0`~~ — resolved by R65 (newest rows, seeded floor).
 - ~~The jobs listener (`infrastructure/postgres/job_notifications.rs`) still uses `PgListener::recv()`~~ — resolved by R151 (uses `try_recv()` and wakes idle workers on silent reconnect `Ok(None)`).
 - ~~`ReminderService::enqueue_due` is unbounded~~ — resolved by R152 (bounded by `MAX_ENQUEUE_DUE_BATCH = 100` via `LIMIT` in `get_due_reminders`).
 
 - Plan A e2e gaps: the link page's sign-in then re-inspect round trip (`sign_in_required` and "I already have an account") and the 403 step-up retry on `POST /link/claim` are covered only by unit-level and API tests, not end to end in Playwright.
-- `ChannelSink::is_ready` means "any adapter connected" (R81): with a second destination channel a delivery whose own channel is down is claimed, fails as not connected and backs off, costing attempts. Revisit when Discord or Telegram can be a delivery destination.
+- ~~`ChannelSink::is_ready` means "any adapter connected" (R81): with a second destination channel a delivery whose own channel is down is claimed, fails as not connected and backs off, costing attempts. Revisit when Discord or Telegram can be a delivery destination.~~ — resolved by R166 (outbox delivery dispatcher checks destination channel connectivity and defers deliveries without burning retry attempts).
 - ~~Link tokens are never purged; expired and consumed rows are inert but accumulate (one per `/link`). Add retention if volume ever matters.~~ — resolved by R163 (`LinkService::purge_expired` called hourly from `events/purge.rs`, retaining tokens for 24h).
 - Four Playwright specs fail on the untouched baseline, before plan A too: `ai-chat.spec.ts:193`, `finance.spec.ts:156`, `screens.spec.ts:117`, `todo-due-reminder.spec.ts:141`. Cause: the custom select's option list stays open after a pick and intercepts the Save click. The sandbox Chromium is rev 1194 while Playwright 1.62.1 expects 1234, so this is unverified on the expected build.
 - `frontend/e2e/portfolio.spec.ts:68` (currency mismatch rejected) is intermittently flaky under full-suite load; it passes in isolation.
 - ~~Discord `/help` prints the shared help text with Matrix's `!` prefixes (R94); a per-channel help format is open.~~ — resolved by R164 (`interface/chat/core/help.rs` renders `/` for Discord).
-- `ChannelSink::is_ready` is still "any adapter connected" (R93): while Discord is down and Matrix up, an `IdentityLinked` confirmation to a Discord DM burns delivery attempts.
+- ~~`ChannelSink::is_ready` is still "any adapter connected" (R93): while Discord is down and Matrix up, an `IdentityLinked` confirmation to a Discord DM burns delivery attempts.~~ — resolved by R166 (dispatcher skips offline channels without burning attempts).
 - The Discord adapter keeps two `serenity::Http` clients (its own for sends and the workers, the gateway client's for registration and deferral), so their rate-limit buckets are tracked separately; serenity retries a 429 either way (R101).
 - Discord has no buttons (R89), no typed slash options and no media ingestion (spec §14).
-- Telegram outbox deliveries are at-least-once (no Bot API idempotency keys; T14). A re-claimed outbox delivery could deliver twice.
+- ~~Telegram outbox deliveries are at-least-once (no Bot API idempotency keys; T14). A re-claimed outbox delivery could deliver twice.~~ — resolved by R168 (in-memory 60s sliding window deduplication in `TelegramSendDeduper`).
 - ~~Telegram `/help` prints the shared help text with Matrix's `!` prefixes (same as Discord B10).~~ — resolved by R164 (`interface/chat/core/help.rs` renders `/` for Telegram).
 - Built-in task plugins implementation: the 5 planned tasks (`WeeklyBookmarkDigestTask`, `MonthlyFinancialAuditTask`, `PortfolioRebalanceAlertTask`, `BillDueDigestTask`, `HabitConsistencyReviewTask`) are stubbed with domain schemas and goals as TODO extensions in `domain/agent/task.rs`; execution of custom user goals and custom scheduled crons is fully functional.
-- Agent subsystem line-count limit violations (>500 production lines): `domain/agent/mod.rs` (~680 lines), `infrastructure/postgres/repositories/agent.rs` (~648 lines), and `application/agent/mod.rs` (~621 lines) need decomposition into submodules.
-- Frontend monolithic modules: `frontend/src/modules/portfolio/index.tsx` (1,248 lines) and `frontend/src/modules/finance/index.tsx` (807 lines) need decomposition into subcomponents.
-- ReAct engine tool output budgeting: raw JSON payloads in `llm/agent/engine.rs` need truncation to avoid context window blowup during 15-step runs.
-- `CustomSelect.tsx` accessibility: missing WAI-ARIA combobox/listbox attributes and keyboard arrow navigation.
+- ~~Agent subsystem line-count limit violations (>500 production lines): `domain/agent/mod.rs` (~680 lines), `infrastructure/postgres/repositories/agent.rs` (~648 lines), and `application/agent/mod.rs` (~621 lines) need decomposition into submodules.~~ — resolved by R167 (decomposed into focused submodules < 300 lines each).
+- ~~Frontend monolithic modules: `frontend/src/modules/portfolio/index.tsx` (1,248 lines) and `frontend/src/modules/finance/index.tsx` (807 lines) need decomposition into subcomponents.~~ — resolved by R170 (decomposed into subcomponents < 350 lines each).
+- ~~ReAct engine tool output budgeting: raw JSON payloads in `llm/agent/engine.rs` need truncation to avoid context window blowup during 15-step runs.~~ — resolved by R169 (tool output capped at 2,000 characters in prompt history while preserving full JSON in DB).
+- ~~`CustomSelect.tsx` accessibility: missing WAI-ARIA combobox/listbox attributes and keyboard arrow navigation.~~ — resolved in `feat/tech-debt-remediation` (`CustomSelect.tsx` added `role="listbox"`, `role="option"`, ARIA attributes, and ArrowUp/Down/Enter/Escape keyboard navigation).
 
 ## 12. Document map
 
