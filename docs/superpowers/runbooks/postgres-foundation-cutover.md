@@ -96,7 +96,38 @@ set `WEB_URL` (defaults to `WEBAUTHN_ORIGIN`) and the signup allowlists
 (`DISCORD_ALLOWED_USERS`, `TELEGRAM_ALLOWED_USERS`, `EMAIL_ALLOWED_SENDERS`)
 before the first boot.
 
-## 3. First boot on matrix-sdk 0.18
+### 2b. Storage and Autonomous Agent migrations 0009–0010
+
+Migrations 0009 and 0010 apply automatically alongside the foundation:
+
+- **0009 adds `receipt_storage_key` to `transactions`.** Additive column with
+  index `idx_transactions_receipt_storage_key`. Non-locking and zero-downtime.
+  Ensure storage configuration is present before booting if receipt image
+  ingestion is enabled:
+  - `STORAGE_BACKEND`: `local` (default) or `s3`.
+  - For local storage: `STORAGE_LOCAL_ROOT` (defaults to `data/storage`).
+  - For S3: `STORAGE_S3_BUCKET`, `STORAGE_S3_REGION`, and optional `STORAGE_S3_ENDPOINT`.
+- **0010 creates the Autonomous Agent subsystem.** Adds `agent_runs`,
+  `agent_steps`, `agent_approvals`, and `scheduled_agent_tasks`. All tables are
+  owner-keyed (`owner_id UUID REFERENCES accounts(id) ON DELETE CASCADE`) and
+  indexed for fast lookup by owner and status.
+  - The job queue registers handler `agent.execute_run`.
+  - The scheduler registers recurring task tick `scheduler.agent_tasks` (every 60s).
+
+### 2c. Multi-channel environment checklist
+
+Before starting the bot, verify all channel credentials in `.env`:
+
+| Channel | Key Variables | Pre-flight Notes |
+|---|---|---|
+| **Matrix** | `MATRIX_HOMESERVER`, `MATRIX_USER`, `MATRIX_DEVICE_ID` | Session and crypto store in `data/bot_store/` |
+| **Discord** | `DISCORD_TOKEN`, `DISCORD_ALLOWED_USERS` | Bot requires Gateway Message Content intent for DM handling |
+| **Telegram** | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_MODE`, `TELEGRAM_ALLOWED_USERS` | Webhook mode requires `TELEGRAM_WEBHOOK_SECRET` and HTTPS `WEB_URL` |
+| **Email** | `EMAIL_IMAP_URL`, `EMAIL_SMTP_URL`, `EMAIL_USERNAME`, `EMAIL_PASSWORD`, `EMAIL_FROM`, `EMAIL_AUTHSERV_ID` | Requires DMARC pass validation against `EMAIL_AUTHSERV_ID` |
+| **Storage** | `STORAGE_BACKEND`, `STORAGE_LOCAL_ROOT`, `STORAGE_S3_BUCKET` | Directory must be writable by bot process |
+| **LLM** | `AI_ENDPOINT`, `AI_API_KEY`, `AI_MODEL` | Used for interactive turn tools and agent ReAct loop |
+
+## 3. First boot on matrix-sdk 0.18 and PostgreSQL 18
 
 Watch the log for, in order:
 
