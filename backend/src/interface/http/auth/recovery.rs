@@ -108,14 +108,18 @@ pub async fn redeem_recovery(
 
     // 2. If not found in static codes, try 24-hour matured recovery requests
     if resolved_account_id.is_none() {
-        match crate::interface::chat::account::redeem_matured_recovery(&state.services, None, code).await {
+        match crate::interface::chat::account::redeem_matured_recovery(&state.services, None, code)
+            .await
+        {
             Ok(account_id) => {
                 resolved_account_id = Some(account_id);
             }
             Err(crate::interface::chat::account::RecoveryRejection::TooEarly)
             | Err(crate::interface::chat::account::RecoveryRejection::Unavailable) => {}
             Err(crate::interface::chat::account::RecoveryRejection::Database(err)) => {
-                return Err(ApiError::internal(format!("Database error during recovery check: {err}")));
+                return Err(ApiError::internal(format!(
+                    "Database error during recovery check: {err}"
+                )));
             }
         }
     }

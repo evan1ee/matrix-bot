@@ -74,7 +74,12 @@ impl JobHandler for ReminderFireHandler {
             // pending behind a failed job (e.g. a database error above).
             Err(JobError::Retryable(err)) if ctx.is_last_attempt() => {
                 error!(reminder_id = p.reminder_id, error = %err, "Last attempt failed; handling reminder exhaustion");
-                if let Ok(Some(reminder)) = self.services.reminders.find_for_delivery(p.reminder_id).await {
+                if let Ok(Some(reminder)) = self
+                    .services
+                    .reminders
+                    .find_for_delivery(p.reminder_id)
+                    .await
+                {
                     if let Err(advance_err) = self
                         .services
                         .reminders
@@ -457,10 +462,7 @@ mod tests {
         let trigger = f.reminder.trigger_at;
 
         let out = handler
-            .run(
-                &ctx(&f.owner, 5),
-                payload(&f.reminder, trigger),
-            )
+            .run(&ctx(&f.owner, 5), payload(&f.reminder, trigger))
             .await;
 
         assert!(matches!(out, Err(JobError::Permanent(_))), "{out:?}");
