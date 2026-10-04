@@ -75,7 +75,9 @@ test('shows optimistic user message and clears input while AI is replying', asyn
     unblock = resolve;
   });
 
+  let chatCalled = false;
   await app.route('**/api/v1/ai/chat', async (route) => {
+    chatCalled = true;
     await gate;
     await route.fulfill({
       status: 200,
@@ -113,19 +115,27 @@ test('shows optimistic user message and clears input while AI is replying', asyn
   });
 
   await app.route('**/api/v1/ai/conversations', async (route) => {
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify([
-        {
-          id: 'conv_delay_test',
-          owner_id: 'owner',
-          room_id: '!room1:example.com',
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-        },
-      ]),
-    });
+    if (!chatCalled) {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: '[]',
+      });
+    } else {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify([
+          {
+            id: 'conv_delay_test',
+            owner_id: 'owner',
+            room_id: '!room1:example.com',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+        ]),
+      });
+    }
   });
 
   const promptText = 'What tasks do I have due today?';

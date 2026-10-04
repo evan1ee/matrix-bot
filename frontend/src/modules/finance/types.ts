@@ -32,3 +32,53 @@ export type ReceiptExtraction = components['schemas']['ReceiptExtractionDto'];
 export type OcrTextBlock = components['schemas']['OcrBlockDto'];
 
 export type OcrScanResponse = components['schemas']['OcrScanResponse'];
+
+export type Direction = 'expense' | 'income';
+
+export interface Transaction {
+  id: number;
+  room_id: string;
+  owner_id: string;
+  sender_name: string;
+  direction: string;
+  /** Minor units — always positive; `direction` carries the sign. */
+  amount_minor: number;
+  currency: string;
+  currency_exponent: number;
+  category_id?: number | null;
+  category_name?: string | null;
+  note?: string | null;
+  occurred_at: string;
+  created_at?: string | null;
+  source_kind?: string | null;
+  source_id?: number | null;
+}
+
+export interface Category {
+  id: number;
+  owner_id: string;
+  name: string;
+  created_at?: string | null;
+}
+
+export interface LedgerResponse {
+  items: Transaction[];
+  page: number;
+  limit: number;
+  total: number;
+}
+
+export interface CategoryTotal {
+  category: string | null;
+  expense_minor: number;
+  income_minor: number;
+}
+
+export interface CurrencySummary {
+  currency: string;
+  currency_exponent: number;
+  expense_minor: number;
+  income_minor: number;
+  net_minor: number;
+  categories: CategoryTotal[];
+}

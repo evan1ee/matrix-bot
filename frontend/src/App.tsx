@@ -22,11 +22,18 @@ import { AppShell } from './components/AppShell';
 import { AuthModal } from './components/AuthModal';
 import { SettingsModal } from './components/SettingsModal';
 import { ToastContainer } from './components/ToastContainer';
-import { LinkPage } from './modules/link/LinkPage';
-import { PublicTransparencyView } from './modules/finance/components/PublicTransparencyView';
 import { AUTH_EXPIRED_EVENT } from './core/apiClient';
 import { useSession, useRefreshSession } from './core/session';
 import { Theme, getStoredTheme, setStoredTheme, applyTheme } from './core/theme';
+
+const LinkPage = React.lazy(() =>
+  import('./modules/link/LinkPage').then((m) => ({ default: m.LinkPage }))
+);
+const PublicTransparencyView = React.lazy(() =>
+  import('./modules/finance/components/PublicTransparencyView').then((m) => ({
+    default: m.PublicTransparencyView,
+  }))
+);
 
 // Safely register modules only once without HMR re-registration warnings
 [dashboardModule, coreModule, todoModule, reminderModule, bookmarksModule, financeModule, portfolioModule, recurringBillsModule, footprintsModule, habitsModule, moodModule, timeBlocksModule, lifeModule, webhooksModule, aiModule, agentModule].forEach((mod) => {
@@ -135,29 +142,35 @@ const AppContent: React.FC = () => {
   };
 
   if (onLinkRoute) {
-    return <LinkPage />;
+    return (
+      <React.Suspense fallback={null}>
+        <LinkPage />
+      </React.Suspense>
+    );
   }
 
   if (publicFinanceToken) {
     return (
-      <div className="min-h-screen bg-[var(--color-canvas)] text-[var(--color-text-primary)] font-sans px-6 md:px-12 py-8 max-w-5xl mx-auto space-y-6">
-        <header className="flex items-center justify-between pb-4 border-b border-neutral-200 dark:border-neutral-800">
-          <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold tracking-tight text-neutral-900 dark:text-neutral-100 font-sans">
-              Matrix Bot
-            </span>
-            <span className="text-xs text-neutral-400 font-mono">/</span>
-            <span className="text-xs font-mono text-neutral-500">Public Fiscal Transparency</span>
-          </div>
-          <a
-            href="/"
-            className="text-xs font-medium text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 transition"
-          >
-            Go to App →
-          </a>
-        </header>
-        <PublicTransparencyView publicToken={publicFinanceToken} />
-      </div>
+      <React.Suspense fallback={null}>
+        <div className="min-h-screen bg-[var(--color-canvas)] text-[var(--color-text-primary)] font-sans px-6 md:px-12 py-8 max-w-5xl mx-auto space-y-6">
+          <header className="flex items-center justify-between pb-4 border-b border-neutral-200 dark:border-neutral-800">
+            <div className="flex items-center gap-2">
+              <span className="text-sm font-semibold tracking-tight text-neutral-900 dark:text-neutral-100 font-sans">
+                Matrix Bot
+              </span>
+              <span className="text-xs text-neutral-400 font-mono">/</span>
+              <span className="text-xs font-mono text-neutral-500">Public Fiscal Transparency</span>
+            </div>
+            <a
+              href="/"
+              className="text-xs font-medium text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 transition"
+            >
+              Go to App →
+            </a>
+          </header>
+          <PublicTransparencyView publicToken={publicFinanceToken} />
+        </div>
+      </React.Suspense>
     );
   }
 

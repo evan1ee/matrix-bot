@@ -98,11 +98,20 @@ export const AppShell: React.FC<AppShellProps> = ({
         {/* Module View */}
         <main className="flex-1 overflow-y-auto px-6 md:px-8 py-6 flex flex-col">
           {activeModule && (
-            <activeModule.MainView
-              {...(activeModule.id === 'core' ? { events, isConnected } : {})}
-              onNavigate={onQuickNavigate}
-              autoFocus={activeModule.id === focusModuleId}
-            />
+            <React.Suspense
+              fallback={
+                <div className="py-16 flex flex-col items-center justify-center text-xs font-mono text-neutral-400 gap-2">
+                  <div className="w-5 h-5 border-2 border-neutral-300 dark:border-neutral-700 border-t-neutral-800 dark:border-t-neutral-200 rounded-full animate-spin" />
+                  <span>Loading view...</span>
+                </div>
+              }
+            >
+              <activeModule.MainView
+                {...(activeModule.id === 'core' ? { events, isConnected } : {})}
+                onNavigate={onQuickNavigate}
+                autoFocus={activeModule.id === focusModuleId}
+              />
+            </React.Suspense>
           )}
         </main>
       </div>

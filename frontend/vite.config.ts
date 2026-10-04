@@ -29,5 +29,16 @@ export default defineConfig({
   build: {
     outDir: '../backend/web/dist',
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom'],
+          'vendor-query': ['@tanstack/react-query'],
+          'vendor-icons': ['lucide-react'],
+          'vendor-leaflet': ['leaflet'],
+          'vendor-marked': ['marked', 'dompurify'],
+        },
+      },
+    },
   },
 });
