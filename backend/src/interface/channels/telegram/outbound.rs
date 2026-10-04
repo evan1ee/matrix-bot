@@ -2,9 +2,12 @@
 //! teloxide-core's `Bot`. teloxide errors become `ChannelError` here and nowhere
 //! else, with the bot token scrubbed from every message.
 
+use std::collections::HashMap;
 use std::future::Future;
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
+use sha2::{Digest, Sha256};
 use teloxide_core::payloads::{SendAudioSetters, SendDocumentSetters, SendMessageSetters};
 use teloxide_core::payloads::{SendPhotoSetters, SendVoiceSetters};
 use teloxide_core::prelude::*;
@@ -13,6 +16,7 @@ use teloxide_core::types::{
     ReplyParameters,
 };
 use teloxide_core::{ApiError, RequestError};
+use tracing::info;
 
 use super::inbound::{message_ref, parse_message_ref};
 use super::render::{file_method, plan, FileMethod, Part, Plan};
@@ -23,12 +27,56 @@ use crate::interface::channels::message::{Attachment, OutgoingMessage, Target};
 /// Every Bot API call is bounded by this (uploads included).
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(30);
 
+/// Sliding window deduplication cache for Telegram sends (R168).
+#[derive(Clone, Debug)]
+pub struct TelegramSendDeduper {
+    sent: Arc<Mutex<HashMap<(i64, String), Instant>>>,
+    ttl: Duration,
+}
+
+impl Default for TelegramSendDeduper {
+    fn default() -> Self {
+        Self::new(Duration::from_secs(60))
+    }
+}
+
+impl TelegramSendDeduper {
+    pub fn new(ttl: Duration) -> Self {
+        Self {
+            sent: Arc::new(Mutex::new(HashMap::new())),
+            ttl,
+        }
+    }
+
+    /// Returns `true` if the message is fresh and should be sent, or `false`
+    /// if it was already sent to `chat_id` with `key` within `ttl`.
+    pub fn check_and_record(&self, chat_id: i64, key: &str) -> bool {
+        let mut map = self.sent.lock().unwrap();
+        let now = Instant::now();
+        // Purge expired entries to keep memory bounded
+        map.retain(|_, &mut ts| now.duration_since(ts) < self.ttl);
+
+        let map_key = (chat_id, key.to_string());
+        if map.contains_key(&map_key) {
+            false
+        } else {
+            map.insert(map_key, now);
+            true
+        }
+    }
+}
+
 /// Posts `message`: `Conversation(Telegram(id))` to that chat, `Direct` on
 /// Telegram to the user's private chat (its id is the user id; Telegram answers
 /// 403 until the user has started the bot, which is `Rejected`). Anything else
-/// is `Rejected` before any call. T14: no dedupe, `idempotency_key` and
-/// `join_if_needed` are ignored. Returns the last message's ref.
-pub async fn send(bot: &Bot, message: OutgoingMessage) -> Result<SentRef, ChannelError> {
+/// is `Rejected` before any call. R168: 60s sliding window deduplication via
+/// `TelegramSendDeduper` (`idempotency_key` or sha256). Returns the last
+/// message's ref, or `None` if suppressed by deduplication.
+pub async fn send(
+    bot: &Bot,
+    deduper: &TelegramSendDeduper,
+    message: OutgoingMessage,
+) -> Result<SentRef, ChannelError> {
     let chat = match &message.target {
         Target::Conversation(ConversationAddress::Telegram(id)) => *id,
         Target::Direct(identity) if identity.channel() == Channel::Telegram => identity
@@ -44,6 +92,31 @@ pub async fn send(bot: &Bot, message: OutgoingMessage) -> Result<SentRef, Channe
     };
     // Telegram group and supergroup ids are negative; users' private chats are positive.
     let planned = plan(&message.content, message.visibility, chat < 0)?;
+
+    let dedupe_key = match &message.idempotency_key {
+        Some(k) => format!("idemp:{k}"),
+        None => {
+            let mut hasher = Sha256::new();
+            hasher.update(message.content.plain.as_bytes());
+            if let Some(html) = &message.content.html {
+                hasher.update(html.as_bytes());
+            }
+            for att in &message.content.attachments {
+                hasher.update(att.filename.as_bytes());
+                hasher.update(&att.bytes);
+            }
+            format!("hash:{:x}", hasher.finalize())
+        }
+    };
+
+    if !deduper.check_and_record(chat, &dedupe_key) {
+        info!(
+            chat_id = chat,
+            "Telegram send suppressed by deduplication window"
+        );
+        return Ok(SentRef { message: None });
+    }
+
     // A reply target in another chat, or a malformed ref, is simply not replied to.
     let reply_to = message
         .reply_to
@@ -249,20 +322,78 @@ mod tests {
     #[tokio::test]
     async fn targets_off_telegram_are_rejected_before_any_call() {
         let bot = Bot::new("x");
+        let deduper = TelegramSendDeduper::default();
         let discord = OutgoingMessage::to(
             Target::Conversation(ConversationAddress::Discord(5)),
             Reply::html("x"),
         );
-        assert!(is_rejected(&send(&bot, discord).await.unwrap_err()));
+        assert!(is_rejected(
+            &send(&bot, &deduper, discord).await.unwrap_err()
+        ));
         let matrix = OutgoingMessage::to(
             Target::Direct(PlatformIdentity::matrix("@a:b").unwrap()),
             Reply::html("x"),
         );
-        assert!(is_rejected(&send(&bot, matrix).await.unwrap_err()));
+        assert!(is_rejected(
+            &send(&bot, &deduper, matrix).await.unwrap_err()
+        ));
         let empty = OutgoingMessage::to(
             Target::Conversation(ConversationAddress::Telegram(5)),
             Reply::html("  "),
         );
-        assert!(is_rejected(&send(&bot, empty).await.unwrap_err()));
+        assert!(is_rejected(&send(&bot, &deduper, empty).await.unwrap_err()));
+    }
+
+    #[tokio::test]
+    async fn deduper_suppresses_duplicate_sends_within_window_and_allows_after_expiry() {
+        let deduper = TelegramSendDeduper::new(Duration::from_millis(50));
+        assert!(deduper.check_and_record(123, "k1"));
+        // Duplicate key to same chat is suppressed
+        assert!(!deduper.check_and_record(123, "k1"));
+        // Different chat with same key is allowed
+        assert!(deduper.check_and_record(456, "k1"));
+        // Same chat with different key is allowed
+        assert!(deduper.check_and_record(123, "k2"));
+
+        // Wait for window to expire
+        tokio::time::sleep(Duration::from_millis(60)).await;
+        // Key is allowed again after expiration
+        assert!(deduper.check_and_record(123, "k1"));
+    }
+
+    #[tokio::test]
+    async fn deduplication_suppresses_second_send_without_calling_deliver() {
+        let bot = Bot::new("x");
+        let deduper = TelegramSendDeduper::default();
+        let msg = OutgoingMessage::to(
+            Target::Conversation(ConversationAddress::Telegram(12345)),
+            Reply::html("Hello Telegram"),
+        );
+        // First send reaches deliver and fails because bot is a dummy
+        let first = send(&bot, &deduper, msg.clone()).await;
+        assert!(first.is_err());
+
+        // Second send with identical target and content within 60s is suppressed by deduper and returns Ok
+        let second = send(&bot, &deduper, msg).await;
+        assert!(second.is_ok());
+        assert_eq!(second.unwrap().message, None);
+    }
+
+    #[tokio::test]
+    async fn deduplication_works_with_idempotency_key() {
+        let bot = Bot::new("x");
+        let deduper = TelegramSendDeduper::default();
+        let mut msg = OutgoingMessage::to(
+            Target::Conversation(ConversationAddress::Telegram(12345)),
+            Reply::html("Hello Telegram 2"),
+        );
+        msg.idempotency_key = Some("delivery-uuid-1".into());
+
+        let first = send(&bot, &deduper, msg.clone()).await;
+        assert!(first.is_err());
+
+        let second = send(&bot, &deduper, msg).await;
+        assert!(second.is_ok());
+        assert_eq!(second.unwrap().message, None);
     }
 }

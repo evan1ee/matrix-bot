@@ -18,7 +18,7 @@ use url::Url;
 
 use super::commands::ADVERTISED;
 use super::ingress::{RecentUpdates, TelegramIngress, QUEUE_CAPACITY};
-use super::outbound::{self, bounded, redact, CALL_TIMEOUT};
+use super::outbound::{self, bounded, redact, TelegramSendDeduper, CALL_TIMEOUT};
 use super::polling::{backoff, is_fatal, poll};
 use super::worker::{run_worker, WorkerCtx, TELEGRAM_WORKERS};
 use crate::config::{TelegramConfig, TelegramMode};
@@ -45,6 +45,7 @@ pub struct TelegramAdapter {
     rx: StdMutex<Option<mpsc::Receiver<Bytes>>>,
     /// Set once by the composition root inside `Arc::new_cyclic` (A5).
     inbound: OnceLock<Arc<Inbound>>,
+    deduper: TelegramSendDeduper,
 }
 
 impl TelegramAdapter {
@@ -68,6 +69,7 @@ impl TelegramAdapter {
             ingress,
             rx: StdMutex::new(Some(rx)),
             inbound: OnceLock::new(),
+            deduper: TelegramSendDeduper::default(),
         })
     }
 
@@ -221,7 +223,7 @@ impl ChannelAdapter for TelegramAdapter {
     }
 
     async fn send(&self, message: OutgoingMessage) -> Result<SentRef, ChannelError> {
-        outbound::send(&self.bot, message).await
+        outbound::send(&self.bot, &self.deduper, message).await
     }
     // `authorize_delivery` and `find_conversation_by_name` keep their defaults:
     // the outbox sends Telegram only `IdentityLinked`, whose destination is not
