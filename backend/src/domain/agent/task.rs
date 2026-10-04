@@ -1,9 +1,74 @@
 //! Extensible task plugin framework for autonomous agent recurring jobs.
 
 use std::collections::BTreeMap;
+use std::fmt;
+use std::str::FromStr;
 use std::sync::Arc;
 
-use super::TaskId;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use super::AgentError;
+use crate::domain::accounts::AccountId;
+
+/// Validated identifier for a scheduled or built-in task plugin (e.g. `weekly_bookmark_digest`).
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+pub struct TaskId(String);
+
+impl TaskId {
+    /// Creates a validated `TaskId`.
+    pub fn new(s: impl AsRef<str>) -> Result<Self, AgentError> {
+        let s = s.as_ref().trim();
+        if s.len() < 3 || s.len() > 64 {
+            return Err(AgentError::InvalidTaskId(
+                "task_id must be between 3 and 64 characters".to_string(),
+            ));
+        }
+        if !s
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_' || c == '-')
+        {
+            return Err(AgentError::InvalidTaskId(
+                "task_id must consist only of lowercase alphanumeric characters, '_', or '-'"
+                    .to_string(),
+            ));
+        }
+        Ok(Self(s.to_string()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl fmt::Display for TaskId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl FromStr for TaskId {
+    type Err = AgentError;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Self::new(s)
+    }
+}
+
+/// Definition for a scheduled recurring agent task.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScheduledTaskDefinition {
+    pub id: Uuid,
+    pub account_id: AccountId,
+    pub task_id: TaskId,
+    pub cron_expression: String,
+    pub enabled: bool,
+    pub config: serde_json::Value,
+    pub last_run_at: Option<DateTime<Utc>>,
+    pub next_run_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
 
 /// Trait defining a scheduled autonomous agent task plugin.
 ///
@@ -248,6 +313,16 @@ impl ScheduledAgentTask for HabitConsistencyReviewTask {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn task_id_validation_rules() {
+        assert!(TaskId::new("weekly_digest").is_ok());
+        assert!(TaskId::new("financial-audit-1").is_ok());
+        assert!(TaskId::new("ab").is_err()); // too short
+        assert!(TaskId::new("Uppercase").is_err()); // no uppercase
+        assert!(TaskId::new("has space").is_err());
+        assert!(TaskId::new("special!").is_err());
+    }
 
     #[test]
     fn builtin_registry_contains_planned_tasks() {

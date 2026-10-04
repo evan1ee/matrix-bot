@@ -999,3 +999,29 @@ fn interface_does_not_import_mcp_repository() {
         hits.join("\n")
     );
 }
+
+/// AGENTS.md rule: "No file in backend/src/ or inference/src/ exceeds 500 lines of production code".
+/// Decomposed agent subsystem files must strictly remain under 500 lines.
+#[test]
+fn agent_files_do_not_exceed_500_production_lines() {
+    let agent_dirs = [
+        src("domain/agent"),
+        src("application/agent"),
+        src("infrastructure/postgres/repositories/agent"),
+    ];
+    for dir in agent_dirs {
+        for file in rust_files(&dir) {
+            let text = fs::read_to_string(&file).expect("readable file");
+            let prod_lines = text
+                .lines()
+                .take_while(|line| !line.trim_start().starts_with("#[cfg(test)]"))
+                .count();
+            assert!(
+                prod_lines <= 500,
+                "File {} has {} production lines (max allowed 500)",
+                relative_to_src(&file),
+                prod_lines
+            );
+        }
+    }
+}
