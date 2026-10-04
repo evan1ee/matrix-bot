@@ -334,6 +334,27 @@ Final verification (orchestrator, on `feat/tech-debt-remediation`):
 - `npm --prefix frontend run build`: clean (1742 modules transformed, zero TypeScript errors).
 - `npm --prefix frontend run test:e2e`: 199 passed / 0 failed (100% green).
 
+### Production Cutover Runbook, Reliability Hardening & Frontend Decomposition (`plans/2026-10-04-cutover-resilience-frontend-polish.md`, branch `feat/cutover-resilience-frontend-polish`)
+
+| Task | Scope | State | Commit |
+|---|---|---|---|
+| 1 | Production cutover runbook update (`docs/superpowers/runbooks/postgres-foundation-cutover.md` updated for migrations 0009–0010, storage asset dir, agent runtime permissions) | ✅ | `cf99b01` |
+| 2 | Error mapping in recovery redemption (`interface/chat/account.rs`, `interface/http/auth/recovery.rs` returns 500 on DB error instead of 401) | ✅ | `3b838d3` `6992f09` |
+| 3 | Reminder job exhaustion recurrence advance (`ReminderService::mark_failed_or_advance_recurring`, `interface/jobs/reminders.rs`) | ✅ | `dc46bbc` `6992f09` |
+| 4 | Playwright coverage for LinkPage `sign_in_required` and 403 step-up flows (`frontend/e2e/link.spec.ts`) | ✅ | `a143f60` |
+| 5 | Decompose `frontend/src/modules/todo/index.tsx` into subcomponents (`CreateTodoCard.tsx`, `TodoRow.tsx`, `types.ts`), all < 260 lines | ✅ | `00e9963` |
+| 6 | Decompose `frontend/src/modules/mood/index.tsx` into subcomponents (`MoodHeader.tsx`, `FeelAndEnvironmentCard.tsx`, `ReflectionCard.tsx`), all < 250 lines | ✅ | `7bae8f6` |
+| 7 | Decompose `frontend/src/modules/reminder/index.tsx` into subcomponents (`CreateReminderCard.tsx`, `PendingRemindersCard.tsx`, `ReminderRow.tsx`, `types.ts`), all < 240 lines | ✅ | `295a6f2` |
+| 8 | Verification (clippy clean, fmt clean, architecture 35 passed, openapi identical, frontend build clean, 201/201 E2E tests green) | ✅ | this commit |
+
+Final verification (orchestrator, on `feat/cutover-resilience-frontend-polish`):
+- `cargo fmt --all -- --check`: clean (zero diff).
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean (zero warnings).
+- `cargo test -p matrix-bot --test architecture`: 35 passed / 0 failed.
+- `cargo run --bin generate-openapi && git diff --exit-code backend/openapi.json`: byte-identical (zero drift).
+- `npm --prefix frontend run build`: clean (1752 modules transformed, zero TypeScript errors).
+- `npm --prefix frontend run test:e2e`: 201 passed / 0 failed (100% green across entire suite).
+
 ---
 
 
@@ -589,15 +610,15 @@ These need the human. Prepare them; don't perform them.
 - ~~Interface code still calls `repositories::mcp::McpTokenRepository` directly (`interface/chat/mcp.rs`, `interface/http/mcp.rs`, `interface/http/auth/mod.rs` tests): candidate for an `McpService`.~~ — resolved by R162 (`application/mcp::McpService` extracted, interface refactored, architecture rule added).
 - ~~`domain::accounts::StoredCredential::passkey` imports `webauthn_rs`/`serde_json`/`tracing`, outside the domain crate list (pre-existing).~~ — resolved in `feat/tech-debt-remediation` (`credentials.rs` stores raw `Vec<u8>` credential ID).
 - ~~`domain/accounts/session.rs` imports `sha2`/`webauthn_rs`/`serde_json`/`tracing`, also outside the domain crate list (pre-existing purity breach).~~ — resolved in `feat/tech-debt-remediation` (`SessionCookie` takes raw cookie hash, verified in `architecture.rs::domain_depends_on_nothing_outside_itself`).
-- A recurring reminder is marked `failed` if the send succeeded but advancing it hit a database error on the last attempt.
-- The HTTP recovery path reaches `interface::chat::redeem_matured_recovery`, whose `if let Ok` turns a database error into a 401.
+- ~~A recurring reminder is marked `failed` if the send succeeded but advancing it hit a database error on the last attempt.~~ — resolved by R174 (`ReminderService::mark_failed_or_advance_recurring` advances recurrence on final attempt exhaustion so recurring schedule survives transient failure).
+- ~~The HTTP recovery path reaches `interface::chat::redeem_matured_recovery`, whose `if let Ok` turns a database error into a 401.~~ — resolved by R173 (`RecoveryRejection::Database` exposed and mapped to `ApiError::internal` HTTP 500).
 - ~~Pre-existing re-link merge offer in `repositories/accounts/linking.rs:129-159`: an MXID removed from account A can pull A's data into a new account. Needs its own ticket.~~ — resolved by R165 (`application/identity/link.rs` strictly restricts automatic merge on re-link to unclaimed accounts only).
 - ~~`JOB_WORKERS` is not validated against `DATABASE_MAX_CONNECTIONS`~~ — resolved by R150 (`Config::validate` enforces `job_workers < db_max_connections`).
 - ~~Hub replay uses the oldest 500 events when `last_seen = 0`~~ — resolved by R65 (newest rows, seeded floor).
 - ~~The jobs listener (`infrastructure/postgres/job_notifications.rs`) still uses `PgListener::recv()`~~ — resolved by R151 (uses `try_recv()` and wakes idle workers on silent reconnect `Ok(None)`).
 - ~~`ReminderService::enqueue_due` is unbounded~~ — resolved by R152 (bounded by `MAX_ENQUEUE_DUE_BATCH = 100` via `LIMIT` in `get_due_reminders`).
 
-- Plan A e2e gaps: the link page's sign-in then re-inspect round trip (`sign_in_required` and "I already have an account") and the 403 step-up retry on `POST /link/claim` are covered only by unit-level and API tests, not end to end in Playwright.
+- ~~Plan A e2e gaps: the link page's sign-in then re-inspect round trip (`sign_in_required` and "I already have an account") and the 403 step-up retry on `POST /link/claim` are covered only by unit-level and API tests, not end to end in Playwright.~~ — resolved by R175 (full Playwright coverage in `frontend/e2e/link.spec.ts`).
 - ~~`ChannelSink::is_ready` means "any adapter connected" (R81): with a second destination channel a delivery whose own channel is down is claimed, fails as not connected and backs off, costing attempts. Revisit when Discord or Telegram can be a delivery destination.~~ — resolved by R166 (outbox delivery dispatcher checks destination channel connectivity and defers deliveries without burning retry attempts).
 - ~~Link tokens are never purged; expired and consumed rows are inert but accumulate (one per `/link`). Add retention if volume ever matters.~~ — resolved by R163 (`LinkService::purge_expired` called hourly from `events/purge.rs`, retaining tokens for 24h).
 - Four Playwright specs fail on the untouched baseline, before plan A too: `ai-chat.spec.ts:193`, `finance.spec.ts:156`, `screens.spec.ts:117`, `todo-due-reminder.spec.ts:141`. Cause: the custom select's option list stays open after a pick and intercepts the Save click. The sandbox Chromium is rev 1194 while Playwright 1.62.1 expects 1234, so this is unverified on the expected build.
@@ -747,6 +768,11 @@ These need the human. Prepare them; don't perform them.
 - **R169 (ReAct Tool Output Budgeting):** Tool outputs exceeding 2,000 characters in ReAct prompt history are truncated with an explicit note, while preserving full unabridged JSON in PostgreSQL `agent_steps` — bounds LLM prompt size and token cost — cost if wrong: LLM does not see full output beyond 2,000 chars without paging tools.
 - **R170 (Frontend Monolithic Decomposition Scope):** Decompose the two largest outliers `portfolio/index.tsx` (1,248 lines) and `finance/index.tsx` (807 lines) into modular subcomponents (< 350 lines each), deferring the ~600-line modules (`todo`, `mood`, `reminder`) — keeps UI regression risk bounded — cost if wrong: ~600-line modules remain slightly above the 500-line target until next pass.
 - **R171 (Frontend Test Toolchain):** Rely on the 199 Playwright E2E suite without introducing Vitest in this sprint — avoids dependency bloat — cost if wrong: unit-level tests for utilities require Playwright or manual test checks.
+- **R172 (Production Cutover Runbook Update):** `docs/superpowers/runbooks/postgres-foundation-cutover.md` updated with pre-cutover checklist and execution steps for migrations 0009 (`receipt_storage_key`) and 0010 (`agent_runtime`), storage asset directory creation (`STORAGE_LOCAL_DIR`), agent role/runtime grants, and pg_stat_activity advisory lock inspection — cost: none.
+- **R173 (Recovery Error Classification):** `RecoveryRejection::Database(AppError)` explicitly exposed in `interface/chat/account.rs` and mapped to `ApiError::internal` (HTTP 500) in `interface/http/auth/recovery.rs` instead of masking as 401 Unauthorized — preserves semantic distinction between client authentication failure and transient database errors — cost: none.
+- **R174 (Reminder Recurrence Advance Resilience):** When `ReminderFireHandler` encounters a retryable failure on its final attempt, it invokes `ReminderService::mark_failed_or_advance_recurring`, ensuring recurring reminders advance to their next occurrence rather than dying permanently — cost: one missed reminder notification occurrence in exchange for preserving the permanent recurring schedule.
+- **R175 (LinkPage E2E Verification):** Added automated Playwright coverage for `sign_in_required` round trip, "I already have an account" navigation, and 403 step-up passkey verification in `frontend/e2e/link.spec.ts` (10/10 passed) — closes testing gaps from Plan A — cost: none.
+- **R176 (Complete Frontend Module Decomposition):** Decomposed `frontend/src/modules/todo` (599 -> 248 lines), `frontend/src/modules/mood` (619 -> 245 lines), and `frontend/src/modules/reminder` (605 -> 234 lines) into modular subcomponents (< 260 lines each), achieving 100% adherence to `< 500 lines` across all handcrafted files in `frontend/src/` — cost: none.
 
 
 
