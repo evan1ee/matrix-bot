@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useId } from 'react';
 import { ChevronDown, Check } from 'lucide-react';
 
 export interface SelectOption {
@@ -52,11 +52,23 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
   position = 'auto',
 }) => {
   const [isOpen, setIsOpen] = useState(false);
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [effectivePosition, setEffectivePosition] = useState<'bottom' | 'top'>('bottom');
   const [maxMenuHeight, setMaxMenuHeight] = useState<number | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const listboxId = useId();
 
   const selectedOption = options.find((opt) => opt.value === value);
+
+  useEffect(() => {
+    if (isOpen) {
+      const idx = options.findIndex((opt) => opt.value === value);
+      setHighlightedIndex(idx >= 0 ? idx : 0);
+    } else {
+      setHighlightedIndex(-1);
+    }
+  }, [isOpen, value, options]);
 
   useEffect(() => {
     if (isOpen && containerRef.current) {
@@ -99,6 +111,35 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
     };
   }, []);
 
+  const handleTriggerKeyDown = (e: React.KeyboardEvent) => {
+    if (!isOpen) {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        setIsOpen(true);
+      }
+      return;
+    }
+
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      setIsOpen(false);
+      triggerRef.current?.focus();
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setHighlightedIndex((prev) => (prev + 1) % options.length);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setHighlightedIndex((prev) => (prev - 1 + options.length) % options.length);
+    } else if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      if (highlightedIndex >= 0 && highlightedIndex < options.length) {
+        onChange(options[highlightedIndex].value);
+        setIsOpen(false);
+        triggerRef.current?.focus();
+      }
+    }
+  };
+
   const posClass = effectivePosition === 'top' ? 'bottom-full mb-1.5' : 'top-full mt-1.5';
 
   const triggerClasses =
@@ -115,8 +156,16 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
     <div ref={containerRef} className={`relative ${variant === 'inline' ? 'inline-block' : 'w-full'} ${className}`}>
       {/* Trigger Button */}
       <button
+        ref={triggerRef}
         type="button"
+        aria-expanded={isOpen}
+        aria-haspopup="listbox"
+        aria-controls={listboxId}
+        aria-activedescendant={
+          isOpen && highlightedIndex >= 0 ? `${listboxId}-option-${highlightedIndex}` : undefined
+        }
         onClick={() => setIsOpen(!isOpen)}
+        onKeyDown={handleTriggerKeyDown}
         className={`${triggerClasses} ${mono ? 'font-mono' : 'font-sans'}`}
       >
         <span className="truncate">
@@ -132,32 +181,47 @@ export const CustomSelect: React.FC<CustomSelectProps> = ({
       {/* Floating Popover Dropdown Menu */}
       {isOpen && (
         <div
+          id={listboxId}
+          role="listbox"
+          tabIndex={-1}
           className={popoverClasses}
           style={maxMenuHeight ? { maxHeight: `${maxMenuHeight}px` } : undefined}
         >
-          {options.map((opt) => {
+          {options.map((opt, idx) => {
             const isSelected = opt.value === value;
+            const isHighlighted = idx === highlightedIndex;
             return (
-              <button
+              <div
                 key={opt.value}
-                type="button"
-                onClick={() => {
-                  onChange(opt.value);
-                  setIsOpen(false);
-                }}
-                className={`w-full ${variant === 'inline' ? 'px-2.5 py-1.5 rounded text-xs' : 'px-3 py-2 rounded-md text-xs'} flex items-center justify-between gap-2 transition-colors cursor-pointer text-left ${
-                  mono ? 'font-mono' : 'font-sans'
-                } ${
-                  isSelected
-                    ? 'bg-neutral-100 dark:bg-neutral-850 text-neutral-900 dark:text-neutral-100 font-medium'
-                    : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-900 hover:text-neutral-900 dark:hover:text-neutral-100'
-                }`}
+                id={`${listboxId}-option-${idx}`}
+                role="option"
+                aria-selected={isSelected}
+                className="w-full"
               >
-                <span className="truncate">{opt.label}</span>
-                {isSelected && showCheckmark && (
-                  <Check className="w-3.5 h-3.5 text-neutral-900 dark:text-neutral-100 shrink-0" />
-                )}
-              </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onChange(opt.value);
+                    setIsOpen(false);
+                    triggerRef.current?.focus();
+                  }}
+                  onMouseEnter={() => setHighlightedIndex(idx)}
+                  className={`w-full ${variant === 'inline' ? 'px-2.5 py-1.5 rounded text-xs' : 'px-3 py-2 rounded-md text-xs'} flex items-center justify-between gap-2 transition-colors cursor-pointer text-left ${
+                    mono ? 'font-mono' : 'font-sans'
+                  } ${
+                    isSelected
+                      ? 'bg-neutral-100 dark:bg-neutral-850 text-neutral-900 dark:text-neutral-100 font-medium'
+                      : isHighlighted
+                      ? 'bg-neutral-50 dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100'
+                      : 'text-neutral-700 dark:text-neutral-300 hover:bg-neutral-50 dark:hover:bg-neutral-900 hover:text-neutral-900 dark:hover:text-neutral-100'
+                  }`}
+                >
+                  <span className="truncate">{opt.label}</span>
+                  {isSelected && showCheckmark && (
+                    <Check className="w-3.5 h-3.5 text-neutral-900 dark:text-neutral-100 shrink-0" />
+                  )}
+                </button>
+              </div>
             );
           })}
         </div>
