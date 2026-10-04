@@ -121,6 +121,9 @@ pub async fn test_pool_private_database(name: &str, max_connections: u32) -> cra
     let admin = connect_pool(&base, 1)
         .await
         .expect("TEST_DATABASE_URL must point at a reachable server");
+    let _ = sqlx::query("SET statement_timeout = 0")
+        .execute(&admin)
+        .await;
     drop_database(&admin, name).await;
     sqlx::QueryBuilder::<sqlx::Postgres>::new("CREATE DATABASE ")
         .push(name)
@@ -141,6 +144,9 @@ pub async fn drop_private_database(pool: crate::db::DbPool, name: &str) {
     pool.close().await;
     let base = std::env::var("TEST_DATABASE_URL").expect("TEST_DATABASE_URL");
     let admin = connect_pool(&base, 1).await.expect("admin pool");
+    let _ = sqlx::query("SET statement_timeout = 0")
+        .execute(&admin)
+        .await;
     drop_database(&admin, name).await;
     admin.close().await;
 }
@@ -154,6 +160,9 @@ fn private_database_url(base: &str, name: &str) -> String {
 
 #[cfg(test)]
 async fn drop_database(admin: &crate::db::DbPool, name: &str) {
+    let _ = sqlx::query("SET statement_timeout = 0")
+        .execute(admin)
+        .await;
     sqlx::QueryBuilder::<sqlx::Postgres>::new("DROP DATABASE IF EXISTS ")
         .push(name)
         .push(" WITH (FORCE)")
