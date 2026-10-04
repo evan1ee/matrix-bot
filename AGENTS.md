@@ -273,7 +273,7 @@ Tests verify behavior, not implementation: Given/When/Then, at the lowest level 
 - `WEBAUTHN_RP_ID` is a bare host; `WEBAUTHN_ORIGIN` carries the port and must match the browsing origin.
 - Windows: a cold `openssl-sys` build needs a full Perl on `PATH` (Strawberry or scoop `perl`; Git for Windows' Perl lacks `Locale::Maketext::Simple`). Loading the real Kokoro model in a test needs sherpa's `onnxruntime.dll` in `target/debug/deps/`.
 - Migration and `.sqlx/` files are pinned to LF; a CRLF checkout breaks checksums.
-- Cutting production over to this branch follows `docs/superpowers/runbooks/postgres-foundation-cutover.md`.
+- Cutting production over follows `docs/superpowers/runbooks/postgres-foundation-cutover.md`.
 
 ## 12. Definition of done
 
