@@ -586,6 +586,10 @@ These need the human. Prepare them; don't perform them.
 - Telegram outbox deliveries are at-least-once (no Bot API idempotency keys; T14). A re-claimed outbox delivery could deliver twice.
 - ~~Telegram `/help` prints the shared help text with Matrix's `!` prefixes (same as Discord B10).~~ — resolved by R164 (`interface/chat/core/help.rs` renders `/` for Telegram).
 - Built-in task plugins implementation: the 5 planned tasks (`WeeklyBookmarkDigestTask`, `MonthlyFinancialAuditTask`, `PortfolioRebalanceAlertTask`, `BillDueDigestTask`, `HabitConsistencyReviewTask`) are stubbed with domain schemas and goals as TODO extensions in `domain/agent/task.rs`; execution of custom user goals and custom scheduled crons is fully functional.
+- Agent subsystem line-count limit violations (>500 production lines): `domain/agent/mod.rs` (~680 lines), `infrastructure/postgres/repositories/agent.rs` (~648 lines), and `application/agent/mod.rs` (~621 lines) need decomposition into submodules.
+- Frontend monolithic modules: `frontend/src/modules/portfolio/index.tsx` (1,248 lines) and `frontend/src/modules/finance/index.tsx` (807 lines) need decomposition into subcomponents.
+- ReAct engine tool output budgeting: raw JSON payloads in `llm/agent/engine.rs` need truncation to avoid context window blowup during 15-step runs.
+- `CustomSelect.tsx` accessibility: missing WAI-ARIA combobox/listbox attributes and keyboard arrow navigation.
 
 ## 12. Document map
 
@@ -608,6 +612,8 @@ These need the human. Prepare them; don't perform them.
 | `docs/superpowers/plans/2026-10-02-omnichannel-c-telegram.md` | Sub-project 2 plan C (Telegram adapter), draft for approval: Tasks 1–9, clarifications T1–T16 |
 | `docs/superpowers/specs/2026-10-03-agent-design.md` | Sub-project 3 design (Autonomous Agent Runtime, ReAct loop, durable jobs, approvals) |
 | `docs/superpowers/plans/2026-10-03-agent-runtime.md` | Sub-project 3 plan (Tasks 1–8: schema, domain, engine, jobs, chat/HTTP, plugins) |
+| `docs/superpowers/specs/2026-10-04-technical-debt-remediation-design.md` | Tech debt remediation design (security, agent split, purity, channel delivery) |
+| `docs/superpowers/plans/2026-10-04-technical-debt-remediation.md` | Tech debt remediation plan (Tasks 1–9) |
 | `AGENTS.md` | Rules for agents: architecture, workflow, constraints, verification, Definition of Done |
 | `docs/architecture.md` | Layers, one-capability-many-interfaces, Matrix/accounts/settings design rationale |
 | `docs/database.md` | Schema and SQLx conventions, migrations, test databases |
@@ -711,6 +717,13 @@ These need the human. Prepare them; don't perform them.
 - **R162 (McpService Application Extraction):** Extracted `McpService` into `application/mcp/mod.rs` and wired into `AppServices`. Replaced direct `McpTokenRepository` usage across `interface/http/mcp.rs`, `interface/chat/mcp.rs`, and `interface/http/auth/mod.rs`. Retired dead `McpTokenRepository` struct and added architecture test `interface_does_not_import_mcp_repository` — cost: none.
 - **R163 (Link Token Retention & Purge):** `repositories::link_tokens::purge_expired` and `LinkService::purge_expired` delete link tokens older than 24 hours (1-day forensic window beyond 10-minute expiry). Hourly invocation hooked into `events/purge.rs` — cost: none.
 - **R164 (Channel-Specific `/help` Formatting):** Updated `generate_help_html` in `interface/chat/core/help.rs` to format command prefixes dynamically (`/` for Discord and Telegram, `!` for Matrix and Email), with platform-tailored header and usage notes — cost: none.
+- **R165 (Re-Link Merge Guard):** In `application/identity/link.rs`, automatic merges on identity re-linking are strictly restricted to unclaimed holder accounts (`STATUS_UNCLAIMED`). Re-linking an identity previously unlinked from an active account (`STATUS_ACTIVE`) is treated as a clean fresh bind (`LinkOutcome::Linked`) with zero data absorbed from the prior account — prevents unauthorized cross-account data absorption — cost if wrong: a user wanting to merge two active accounts after re-linking must use explicit settings merge.
+- **R166 (Per-Channel Delivery Readiness):** Outbox delivery dispatch checks destination channel connectivity. Offline channel deliveries are skipped without claiming or burning attempts, resuming immediately upon adapter reconnect — prevents retry exhaustion during partial outages — cost if wrong: none.
+- **R167 (Agent File Decomposition):** Monolithic agent files (`domain/agent/mod.rs`, `repositories/agent.rs`, `application/agent/mod.rs`) decomposed into cohesive functional submodules (`run`, `step`, `approval`, `config`/`task`) < 300 lines each — enforces AGENTS.md §4.3 rule — cost if wrong: none.
+- **R168 (Telegram Delivery Deduplication):** In-memory 60-second sliding-window deduplication in `TelegramAdapter` / `outbound.rs` suppresses duplicate message transmissions from worker retries or re-claimed leases — mitigates Telegram API lack of client idempotency keys — cost if wrong: identical rapid messages within 60s are suppressed.
+- **R169 (ReAct Tool Output Budgeting):** Tool outputs exceeding 2,000 characters in ReAct prompt history are truncated with an explicit note, while preserving full unabridged JSON in PostgreSQL `agent_steps` — bounds LLM prompt size and token cost — cost if wrong: LLM does not see full output beyond 2,000 chars without paging tools.
+- **R170 (Frontend Monolithic Decomposition Scope):** Decompose the two largest outliers `portfolio/index.tsx` (1,248 lines) and `finance/index.tsx` (807 lines) into modular subcomponents (< 350 lines each), deferring the ~600-line modules (`todo`, `mood`, `reminder`) — keeps UI regression risk bounded — cost if wrong: ~600-line modules remain slightly above the 500-line target until next pass.
+- **R171 (Frontend Test Toolchain):** Rely on the 199 Playwright E2E suite without introducing Vitest in this sprint — avoids dependency bloat — cost if wrong: unit-level tests for utilities require Playwright or manual test checks.
 
 
 
