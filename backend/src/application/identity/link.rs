@@ -374,6 +374,11 @@ impl LinkService {
 
     /// The account the identity was last unlinked from, when it still holds
     /// data (and is not the claimer).
+    ///
+    /// R165: Only unclaimed placeholder accounts (`STATUS_UNCLAIMED`) can be
+    /// absorbed automatically. An active account (`STATUS_ACTIVE`) has its own
+    /// user identity and credentials; re-linking an identity detached from it
+    /// must never absorb its data.
     async fn previous_account_with_data(
         &self,
         conn: &mut PgConnection,
@@ -385,6 +390,12 @@ impl LinkService {
             return Ok(None);
         };
         if previous == *claimer {
+            return Ok(None);
+        }
+        let Some(account) = core::find(&mut *conn, &previous).await? else {
+            return Ok(None);
+        };
+        if !account.is_unclaimed() {
             return Ok(None);
         }
         let preview = MergeService::preview(&self.pool, &previous).await?;
@@ -449,7 +460,7 @@ mod tests {
 
     use super::*;
     use crate::application::identity::IdentityService;
-    use crate::domain::accounts::{hash_token, SecurityEventKind, STATUS_ACTIVE};
+    use crate::domain::accounts::{hash_token, SecurityEventKind, STATUS_ACTIVE, STATUS_UNCLAIMED};
     use crate::domain::channels::{Channel, ConversationAddress, PlatformIdentity, PlatformUserId};
     use crate::domain::todos::{NewTodo, TodoPriority};
     use crate::infrastructure::postgres::repositories::accounts::{core, security_events};
@@ -484,6 +495,9 @@ mod tests {
     }
     async fn account(pool: &PgPool, name: &str) -> AccountId {
         core::create(pool, name, STATUS_ACTIVE).await.unwrap()
+    }
+    async fn unclaimed_account(pool: &PgPool, name: &str) -> AccountId {
+        core::create(pool, name, STATUS_UNCLAIMED).await.unwrap()
     }
     async fn add_todo(pool: &PgPool, owner: &AccountId, text: &str) -> i64 {
         todo_repo::create(
@@ -798,8 +812,8 @@ mod tests {
         ));
     }
 
-    /// A3: an identity unlinked from an account that still holds data turns a
-    /// plain bind into a merge prompt, under either audit kind.
+    /// A3: an identity unlinked from an unclaimed account that still holds data
+    /// turns a plain bind into a merge prompt, under either audit kind.
     #[tokio::test]
     async fn a_previous_unlink_with_data_turns_a_bind_into_a_merge_prompt() {
         for (kind, detail) in [
@@ -807,7 +821,7 @@ mod tests {
             (SecurityEventKind::IdentityUnlinked, "matrix:@evan:mbm.one"),
         ] {
             let (service, pool) = setup().await;
-            let old = account(&pool, "old").await;
+            let old = unclaimed_account(&pool, "old").await;
             let todo = add_todo(&pool, &old, "history").await;
             security_events::record(&pool, &old, kind, Some(detail)).await;
             let new = account(&pool, "new").await;
@@ -846,6 +860,55 @@ mod tests {
                 Some(new)
             );
         }
+    }
+
+    /// R165: an identity unlinked from an active account must NOT merge its data
+    /// into a new account upon re-linking; it must be a clean bind.
+    #[tokio::test]
+    async fn a_previous_unlink_from_an_active_account_does_not_merge() {
+        let (service, pool) = setup().await;
+        let old = account(&pool, "old").await; // active account
+        let todo = add_todo(&pool, &old, "history").await;
+        security_events::record(
+            &pool,
+            &old,
+            SecurityEventKind::IdentityUnlinked,
+            Some("matrix:@evan:mbm.one"),
+        )
+        .await;
+        let new = account(&pool, "new").await;
+        let started = service
+            .start(
+                &mx("@evan:mbm.one"),
+                &ConversationAddress::Matrix("!dm:x".into()),
+                true,
+            )
+            .await
+            .unwrap();
+
+        match service.inspect(&started.token, Some(&new)).await.unwrap() {
+            LinkPreview::Bind { .. } => {}
+            other => panic!("expected Bind, got {other:?}"),
+        }
+
+        assert_eq!(
+            service.claim(&started.token, &new).await.unwrap(),
+            LinkOutcome::Linked { account: new }
+        );
+        // Data stays with the old account
+        assert!(todo_repo::find_owned(&pool, &old, todo)
+            .await
+            .unwrap()
+            .is_some());
+        assert!(todo_repo::find_owned(&pool, &new, todo)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(core::find(&pool, &old).await.unwrap().is_some());
+        assert_eq!(
+            owner_of_identity(&pool, &mx("@evan:mbm.one")).await,
+            Some(new)
+        );
     }
 
     #[tokio::test]
