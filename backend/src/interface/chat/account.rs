@@ -338,16 +338,30 @@ pub async fn redeem_matured_recovery(
         Ok(MaturedRecovery::Unavailable) => Err(RecoveryRejection::Unavailable),
         Err(err) => {
             tracing::error!("Could not redeem a recovery request: {:?}", err);
-            Err(RecoveryRejection::Unavailable)
+            Err(RecoveryRejection::Database(err))
         }
     }
 }
 
-#[derive(Debug, PartialEq, Eq)]
+#[derive(Debug)]
 pub enum RecoveryRejection {
     TooEarly,
     Unavailable,
+    Database(crate::application::AppError),
 }
+
+impl PartialEq for RecoveryRejection {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::TooEarly, Self::TooEarly) => true,
+            (Self::Unavailable, Self::Unavailable) => true,
+            (Self::Database(a), Self::Database(b)) => a.to_string() == b.to_string(),
+            _ => false,
+        }
+    }
+}
+
+impl Eq for RecoveryRejection {}
 
 #[cfg(test)]
 mod tests {
