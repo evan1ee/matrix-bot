@@ -8,6 +8,7 @@ use crate::infrastructure::inference::llm::{ChatCompletionRequest, LlmClient};
 use crate::llm::resolved_config::ResolvedAiConfig;
 use crate::llm::tools::ToolRegistry;
 
+pub use super::prompts::MAX_TOOL_OUTPUT_PROMPT_CHARS;
 use super::prompts::{self, ParsedReact};
 use super::sandbox;
 

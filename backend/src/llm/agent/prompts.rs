@@ -24,6 +24,26 @@ Rules:
 - Sensitive operations (financial transactions, trades, deletions) will require human confirmation before execution.
 - Be concise, accurate, and objective. Never invent data.";
 
+pub const MAX_TOOL_OUTPUT_PROMPT_CHARS: usize = 2000;
+
+/// Formats a tool output for insertion into the ReAct prompt observation,
+/// truncating at [`MAX_TOOL_OUTPUT_PROMPT_CHARS`] to avoid blowing up the context window (R169).
+pub fn format_tool_output(output: &serde_json::Value) -> String {
+    let raw = match output {
+        serde_json::Value::String(s) => s.clone(),
+        other => other.to_string(),
+    };
+    if raw.chars().count() > MAX_TOOL_OUTPUT_PROMPT_CHARS {
+        let truncated: String = raw.chars().take(MAX_TOOL_OUTPUT_PROMPT_CHARS).collect();
+        format!(
+            "{}\n... [output truncated for prompt length; full output stored in step record]",
+            truncated
+        )
+    } else {
+        raw
+    }
+}
+
 /// Parsed output from a single ReAct step evaluation.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ParsedReact {
@@ -105,7 +125,7 @@ pub fn build_messages(
         if let Some(output) = &step.tool_output {
             messages.push(ChatCompletionMessage {
                 role: "user".to_string(),
-                content: Some(format!("Observation: {}", output)),
+                content: Some(format!("Observation: {}", format_tool_output(output))),
                 tool_calls: None,
                 tool_call_id: None,
                 name: None,
@@ -284,5 +304,43 @@ Action Input:
                 tool_input: serde_json::json!({"title": "Review PR"}),
             }
         );
+    }
+
+    #[test]
+    fn truncates_oversized_tool_output_in_messages() {
+        use crate::domain::agent::{AgentRunId, StepStatus};
+        use chrono::Utc;
+
+        let big_payload = "A".repeat(3000);
+        let step = AgentStep::new(
+            AgentRunId::generate(),
+            1,
+            Some("Calling big tool".into()),
+            Some("fetch_data".into()),
+            Some(serde_json::json!({})),
+            Some(serde_json::json!(big_payload)),
+            StepStatus::Success,
+            10,
+            Utc::now(),
+        );
+
+        let messages = build_messages("test goal", &[step], &[]);
+        let observation = messages
+            .iter()
+            .find(|m| {
+                m.role == "user"
+                    && m.content
+                        .as_deref()
+                        .unwrap_or("")
+                        .starts_with("Observation:")
+            })
+            .expect("observation message found");
+
+        let content = observation.content.as_ref().unwrap();
+        assert!(content.contains(
+            "... [output truncated for prompt length; full output stored in step record]"
+        ));
+        assert!(content.starts_with(&format!("Observation: {}", "A".repeat(100))));
+        assert!(content.len() < 2200);
     }
 }
