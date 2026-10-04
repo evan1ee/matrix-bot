@@ -10,10 +10,9 @@ Rules for coding agents working in this repository. This file says **how to work
 | LLM, tool calling, agent limits, MCP | [`docs/llm.md`](docs/llm.md) |
 | Plans, designs, progress, hand-off state, runbooks | [`docs/superpowers/`](docs/superpowers/) — start with [`HANDOFF.md`](docs/superpowers/HANDOFF.md) |
 | Frontend design system | [`Design.md`](Design.md) |
-| Product roadmap (all phases) | [`SPEC.md`](SPEC.md) |
 | Setup, deployment, command reference | [`README.md`](README.md) |
 
-> **Refactor in progress.** This branch is mid-way through the layer-first PostgreSQL refactor. Before any change, read [`docs/superpowers/HANDOFF.md`](docs/superpowers/HANDOFF.md): status, next actions, settled decisions and hard safety rules.
+> **All architectural phases implemented.** Before any change, read [`docs/superpowers/HANDOFF.md`](docs/superpowers/HANDOFF.md): status, operational cutover gates, settled decisions, and hard safety rules.
 
 ```text
                           AGENTS.md

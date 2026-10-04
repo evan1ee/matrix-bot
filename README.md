@@ -494,7 +494,6 @@ docs/                         # architecture, database, api, llm; superpowers/ h
 | [`docs/api.md`](docs/api.md) | REST/SSE conventions, authentication, webhooks, OpenAPI workflow |
 | [`docs/llm.md`](docs/llm.md) | LLM transport, tool loop, agent limits, MCP |
 | [`docs/superpowers/`](docs/superpowers/) | Plans, designs, progress and hand-off state, runbooks |
-| [`SPEC.md`](SPEC.md) | Product roadmap across all phases |
 | [`Design.md`](Design.md) | Frontend design system |
 
-Near-term work: passkey autofill (conditional UI) on page load. Everything else is tracked in `SPEC.md` and `docs/superpowers/HANDOFF.md`.
+Near-term work: passkey autofill (conditional UI) on page load. Everything else is tracked in `docs/superpowers/HANDOFF.md`.
