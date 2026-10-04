@@ -56,12 +56,12 @@ impl TelegramSendDeduper {
         // Purge expired entries to keep memory bounded
         map.retain(|_, &mut ts| now.duration_since(ts) < self.ttl);
 
-        let map_key = (chat_id, key.to_string());
-        if map.contains_key(&map_key) {
-            false
-        } else {
-            map.insert(map_key, now);
-            true
+        match map.entry((chat_id, key.to_string())) {
+            std::collections::hash_map::Entry::Vacant(e) => {
+                e.insert(now);
+                true
+            }
+            std::collections::hash_map::Entry::Occupied(_) => false,
         }
     }
 }
