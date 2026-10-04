@@ -42,6 +42,7 @@ const NAV_GROUPS: NavGroup[] = [
       { id: 'bookmarks', label: 'Bookmarks', icon: Bookmark },
       { id: 'habits', label: 'Habits', icon: Zap },
       { id: 'ai', label: 'AI Assistant', icon: Sparkles },
+      { id: 'agent', label: 'Agent', icon: Bot },
     ],
   },
   {

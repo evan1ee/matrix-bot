@@ -9,6 +9,8 @@ import {
   SETTINGS_QUERY_KEY,
   UserSettings,
 } from './settings';
+import { showToast } from './toast';
+
 
 export function useSystemEvents(signedIn: boolean) {
   const queryClient = useQueryClient();
@@ -70,6 +72,76 @@ export function useSystemEvents(signedIn: boolean) {
           if (sysEvent.type === 'SettingsUpdated') {
             const { settings } = sysEvent.payload as { settings: UserSettings };
             queryClient.setQueryData(SETTINGS_QUERY_KEY, settings);
+          }
+
+          // Central React Query cache invalidation mapping
+          if (sysEvent.type.startsWith('Agent')) {
+            queryClient.invalidateQueries({ queryKey: ['agent-runs'] });
+            queryClient.invalidateQueries({ queryKey: ['agent-approvals'] });
+            queryClient.invalidateQueries({ queryKey: ['agent-tasks'] });
+            const payload = sysEvent.payload as Record<string, unknown> | undefined;
+            if (payload?.run_id) {
+              queryClient.invalidateQueries({ queryKey: ['agent-run-detail', payload.run_id] });
+            }
+
+            if (sysEvent.type === 'AgentApprovalRequired') {
+              const toolName = (payload?.tool_name as string) || 'sensitive action';
+              showToast({
+                title: 'Agent Approval Required',
+                description: `Agent requested permission to execute: ${toolName}`,
+                type: 'warning',
+                action: {
+                  label: 'Review',
+                  onClick: () => {
+                    window.dispatchEvent(
+                      new CustomEvent('app:navigate', { detail: { moduleId: 'agent' } })
+                    );
+                  },
+                },
+              });
+            } else if (sysEvent.type === 'AgentRunCompleted') {
+              const status = payload?.status as string;
+              showToast({
+                title: status === 'completed' ? 'Agent Run Completed' : 'Agent Run Failed',
+                description: (payload?.error as string) || `Run completed using ${payload?.total_tokens ?? 0} tokens`,
+                type: status === 'completed' ? 'success' : 'error',
+              });
+            }
+          } else if (sysEvent.type.startsWith('Todo')) {
+            queryClient.invalidateQueries({ queryKey: ['todos'] });
+          } else if (sysEvent.type.startsWith('Reminder')) {
+            queryClient.invalidateQueries({ queryKey: ['reminders'] });
+            if (sysEvent.type === 'ReminderTriggered') {
+              const payload = sysEvent.payload as Record<string, unknown> | undefined;
+              showToast({
+                title: 'Reminder Alert',
+                description: (payload?.title as string) || (payload?.message as string) || 'A scheduled reminder was triggered.',
+                type: 'info',
+                action: {
+                  label: 'View',
+                  onClick: () => {
+                    window.dispatchEvent(
+                      new CustomEvent('app:navigate', { detail: { moduleId: 'reminder' } })
+                    );
+                  },
+                },
+              });
+            }
+          } else if (sysEvent.type.startsWith('Transaction') || sysEvent.type.startsWith('Category')) {
+            queryClient.invalidateQueries({ queryKey: ['transactions'] });
+            queryClient.invalidateQueries({ queryKey: ['categories'] });
+            queryClient.invalidateQueries({ queryKey: ['finance-summary'] });
+          } else if (sysEvent.type.startsWith('Portfolio')) {
+            queryClient.invalidateQueries({ queryKey: ['portfolio-holdings'] });
+            queryClient.invalidateQueries({ queryKey: ['portfolio-summary'] });
+            queryClient.invalidateQueries({ queryKey: ['portfolio-cash'] });
+            queryClient.invalidateQueries({ queryKey: ['portfolio-alerts'] });
+          } else if (sysEvent.type.startsWith('RecurringBill')) {
+            queryClient.invalidateQueries({ queryKey: ['recurring-bills'] });
+          } else if (sysEvent.type.startsWith('Webhook')) {
+            queryClient.invalidateQueries({ queryKey: ['webhooks'] });
+          } else if (sysEvent.type === 'IdentityLinked') {
+            queryClient.invalidateQueries({ queryKey: ['identities'] });
           }
 
           // Notify all registered modules

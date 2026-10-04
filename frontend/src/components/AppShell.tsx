@@ -37,6 +37,7 @@ const MODULE_LABELS: Record<string, string> = {
   habits: 'Habits',
   webhooks: 'Webhooks',
   ai: 'AI Assistant',
+  agent: 'Autonomous Agent',
   core: 'System Overview',
 };
 

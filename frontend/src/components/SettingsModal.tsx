@@ -5,6 +5,7 @@ import { CustomSelect } from './CustomSelect';
 import { RoomsPanel } from './RoomsPanel';
 import { SecurityPanel } from './SecurityPanel';
 import { McpPanel } from './McpPanel';
+import { NotificationPanel } from './NotificationPanel';
 import { fetchApi } from '../core/apiClient';
 import {
   browserTimezone,
@@ -39,7 +40,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
   const saved = useSettings();
   const { mutateAsync, isPending } = useUpdateSettings();
 
-  const [tab, setTab] = useState<'preferences' | 'rooms' | 'security' | 'mcp'>('preferences');
+  const [tab, setTab] = useState<'preferences' | 'notifications' | 'rooms' | 'security' | 'mcp'>('preferences');
   const [timezone, setTimezone] = useState(saved.timezone);
   const [currency, setCurrency] = useState(saved.currency);
   const [devRoomId, setDevRoomId] = useState(saved.dev_room_id ?? '');
@@ -181,7 +182,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
             <h3 id="settings-modal-title" className="sr-only">
               Settings
             </h3>
-            {(['preferences', 'rooms', 'security', 'mcp'] as const).map((t) => (
+            {(['preferences', 'notifications', 'rooms', 'security', 'mcp'] as const).map((t) => (
               <button
                 key={t}
                 type="button"
@@ -208,6 +209,8 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
         {tab === 'security' ? (
           <SecurityPanel />
+        ) : tab === 'notifications' ? (
+          <NotificationPanel />
         ) : tab === 'rooms' ? (
           <RoomsPanel />
         ) : tab === 'mcp' ? (

@@ -231,6 +231,61 @@ export interface FakeBookmark {
   updated_at: string;
 }
 
+export interface FakeAgentRun {
+  id: string;
+  scheduled_task_id: string | null;
+  account_id: string;
+  task_name: string;
+  goal: string;
+  origin_conversation: string | null;
+  status: string;
+  max_steps: number;
+  current_step: number;
+  total_tokens: number;
+  error: string | null;
+  started_at: string;
+  completed_at: string | null;
+  updated_at: string;
+}
+
+export interface FakeAgentStep {
+  id: string;
+  run_id: string;
+  step_number: number;
+  thought: string | null;
+  tool_name: string | null;
+  tool_input: any;
+  tool_output: any;
+  status: string;
+  tokens_used: number;
+  created_at: string;
+}
+
+export interface FakeApprovalRequest {
+  id: string;
+  run_id: string;
+  account_id: string;
+  tool_name: string;
+  tool_input: any;
+  status: string;
+  expires_at: string;
+  resolved_at: string | null;
+  created_at: string;
+}
+
+export interface FakeScheduledTask {
+  id: string;
+  account_id: string;
+  task_id: string;
+  cron_expression: string;
+  enabled: boolean;
+  config: any;
+  last_run_at: string | null;
+  next_run_at: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface FakeAiConfig {
   owner_id: string;
   api_base_url: string | null;
@@ -389,6 +444,148 @@ export class FakeApi {
   lifeDayLogs: FakeLifeDayLog[] = [];
   bills: FakeRecurringBill[] = [];
   bookmarks: FakeBookmark[] = [];
+  agentRuns: FakeAgentRun[] = [
+    {
+      id: 'run-1',
+      scheduled_task_id: null,
+      account_id: 'acct_00000000000000000000000000000001',
+      task_name: 'ad_hoc_goal',
+      goal: 'Audit monthly expenses and categorize unassigned items',
+      origin_conversation: 'web',
+      status: 'completed',
+      max_steps: 10,
+      current_step: 3,
+      total_tokens: 1450,
+      error: null,
+      started_at: '2026-10-04T00:00:00Z',
+      completed_at: '2026-10-04T00:00:30Z',
+      updated_at: '2026-10-04T00:00:30Z',
+    },
+    {
+      id: 'run-2',
+      scheduled_task_id: null,
+      account_id: 'acct_00000000000000000000000000000001',
+      task_name: 'ad_hoc_goal',
+      goal: 'Deposit funds and buy AAPL shares',
+      origin_conversation: 'web',
+      status: 'waiting_approval',
+      max_steps: 10,
+      current_step: 2,
+      total_tokens: 820,
+      error: null,
+      started_at: '2026-10-04T00:10:00Z',
+      completed_at: null,
+      updated_at: '2026-10-04T00:10:15Z',
+    },
+  ];
+
+  agentSteps: Record<string, FakeAgentStep[]> = {
+    'run-1': [
+      {
+        id: 'step-1-1',
+        run_id: 'run-1',
+        step_number: 1,
+        thought: 'I need to fetch recent transactions from the finance service.',
+        tool_name: 'query_transactions',
+        tool_input: { limit: 20 },
+        tool_output: [{ id: 101, note: 'Coffee', amount: 4.5 }],
+        status: 'completed',
+        tokens_used: 450,
+        created_at: '2026-10-04T00:00:05Z',
+      },
+      {
+        id: 'step-1-2',
+        run_id: 'run-1',
+        step_number: 2,
+        thought: 'Categorizing uncategorized coffee expense as Dining.',
+        tool_name: 'categorize_transaction',
+        tool_input: { id: 101, category: 'Dining' },
+        tool_output: { success: true },
+        status: 'completed',
+        tokens_used: 520,
+        created_at: '2026-10-04T00:00:15Z',
+      },
+      {
+        id: 'step-1-3',
+        run_id: 'run-1',
+        step_number: 3,
+        thought: 'All expenses are audited. Synthesizing summary.',
+        tool_name: null,
+        tool_input: null,
+        tool_output: 'Audited 1 expense and categorized as Dining.',
+        status: 'completed',
+        tokens_used: 480,
+        created_at: '2026-10-04T00:00:25Z',
+      },
+    ],
+    'run-2': [
+      {
+        id: 'step-2-1',
+        run_id: 'run-2',
+        step_number: 1,
+        thought: 'Checking current balance before depositing.',
+        tool_name: 'get_portfolio_cash',
+        tool_input: { currency: 'USD' },
+        tool_output: { balance: 500 },
+        status: 'completed',
+        tokens_used: 320,
+        created_at: '2026-10-04T00:10:05Z',
+      },
+      {
+        id: 'step-2-2',
+        run_id: 'run-2',
+        step_number: 2,
+        thought: 'Executing portfolio deposit of 1000 USD is a sensitive action requiring user authorization.',
+        tool_name: 'execute_portfolio_deposit',
+        tool_input: { amount_minor: 100000, currency: 'USD' },
+        tool_output: null,
+        status: 'executing',
+        tokens_used: 500,
+        created_at: '2026-10-04T00:10:15Z',
+      },
+    ],
+  };
+
+  agentApprovals: FakeApprovalRequest[] = [
+    {
+      id: 'appr-1',
+      run_id: 'run-2',
+      account_id: 'acct_00000000000000000000000000000001',
+      tool_name: 'execute_portfolio_deposit',
+      tool_input: { amount_minor: 100000, currency: 'USD' },
+      status: 'pending',
+      expires_at: '2026-10-04T00:25:15Z',
+      resolved_at: null,
+      created_at: '2026-10-04T00:10:15Z',
+    },
+  ];
+
+  agentTasks: FakeScheduledTask[] = [
+    {
+      id: 'st-1',
+      account_id: 'acct_00000000000000000000000000000001',
+      task_id: 'WeeklyBookmarkDigestTask',
+      cron_expression: '0 9 * * 1',
+      enabled: true,
+      config: { max_items: 20 },
+      last_run_at: '2026-09-28T09:00:00Z',
+      next_run_at: '2026-10-05T09:00:00Z',
+      created_at: '2026-09-20T00:00:00Z',
+      updated_at: '2026-09-20T00:00:00Z',
+    },
+    {
+      id: 'st-2',
+      account_id: 'acct_00000000000000000000000000000001',
+      task_id: 'MonthlyFinancialAuditTask',
+      cron_expression: '0 8 1 * *',
+      enabled: true,
+      config: { include_cashflow: true },
+      last_run_at: '2026-10-01T08:00:00Z',
+      next_run_at: '2026-11-01T08:00:00Z',
+      created_at: '2026-09-20T00:00:00Z',
+      updated_at: '2026-09-20T00:00:00Z',
+    },
+  ];
   /** Mirrors the server default (`modules::settings::UserSettings::default`). */
   settings: { timezone: string; currency: string } = { timezone: 'UTC', currency: 'USD' };
 
@@ -2842,6 +3039,103 @@ export class FakeApi {
       return json(route, 200, {
         text: 'Spent $15 on lunch at Subway',
       });
+    }
+
+    // --- agent runs & approvals ---
+    if (path === '/agent/runs' && method === 'GET') {
+      return json(route, 200, this.agentRuns);
+    }
+
+    if (path === '/agent/runs' && method === 'POST') {
+      const newRun: FakeAgentRun = {
+        id: `run-${Date.now()}`,
+        scheduled_task_id: null,
+        account_id: 'acct_00000000000000000000000000000001',
+        task_name: 'ad_hoc_goal',
+        goal: body?.goal || 'New agent goal',
+        origin_conversation: body?.origin_conversation || 'web',
+        status: 'running',
+        max_steps: body?.max_steps || 10,
+        current_step: 1,
+        total_tokens: 150,
+        error: null,
+        started_at: new Date().toISOString(),
+        completed_at: null,
+        updated_at: new Date().toISOString(),
+      };
+      this.agentRuns.unshift(newRun);
+      this.agentSteps[newRun.id] = [
+        {
+          id: `step-${newRun.id}-1`,
+          run_id: newRun.id,
+          step_number: 1,
+          thought: 'Analyzing initial request...',
+          tool_name: null,
+          tool_input: null,
+          tool_output: 'Initialized goal execution.',
+          status: 'completed',
+          tokens_used: 150,
+          created_at: new Date().toISOString(),
+        },
+      ];
+      return json(route, 200, newRun);
+    }
+
+    if (path.startsWith('/agent/runs/') && path.endsWith('/cancel') && method === 'POST') {
+      const id = path.replace('/agent/runs/', '').replace('/cancel', '');
+      const run = this.agentRuns.find((r) => r.id === id);
+      if (!run) return json(route, 404, { error: 'Run not found', code: 404 });
+      run.status = 'cancelled';
+      run.updated_at = new Date().toISOString();
+      return json(route, 200, run);
+    }
+
+    if (path.startsWith('/agent/runs/') && method === 'GET') {
+      const id = path.replace('/agent/runs/', '');
+      const run = this.agentRuns.find((r) => r.id === id);
+      if (!run) return json(route, 404, { error: 'Run not found', code: 404 });
+      return json(route, 200, { run, steps: this.agentSteps[id] || [] });
+    }
+
+    if (path === '/agent/approvals' && method === 'GET') {
+      return json(route, 200, this.agentApprovals);
+    }
+
+    if (path.startsWith('/agent/approvals/') && path.endsWith('/approve') && method === 'POST') {
+      const id = path.replace('/agent/approvals/', '').replace('/approve', '');
+      const approval = this.agentApprovals.find((a) => a.id === id);
+      if (!approval) return json(route, 404, { error: 'Approval not found', code: 404 });
+      approval.status = 'approved';
+      approval.resolved_at = new Date().toISOString();
+      const run = this.agentRuns.find((r) => r.id === approval.run_id);
+      if (run) {
+        run.status = 'running';
+        run.updated_at = new Date().toISOString();
+      }
+      return json(route, 200, approval);
+    }
+
+    if (path.startsWith('/agent/approvals/') && path.endsWith('/reject') && method === 'POST') {
+      const id = path.replace('/agent/approvals/', '').replace('/reject', '');
+      const approval = this.agentApprovals.find((a) => a.id === id);
+      if (!approval) return json(route, 404, { error: 'Approval not found', code: 404 });
+      approval.status = 'rejected';
+      approval.resolved_at = new Date().toISOString();
+      return json(route, 200, approval);
+    }
+
+    if (path === '/agent/tasks' && method === 'GET') {
+      return json(route, 200, this.agentTasks);
+    }
+
+    if (path.startsWith('/agent/tasks/') && method === 'PUT') {
+      const id = decodeURIComponent(path.replace('/agent/tasks/', ''));
+      const task = this.agentTasks.find((t) => t.task_id === id);
+      if (!task) return json(route, 404, { error: 'Task not found', code: 404 });
+      if (body?.cron_expression) task.cron_expression = body.cron_expression;
+      if (body?.config !== undefined) task.config = body.config;
+      task.updated_at = new Date().toISOString();
+      return json(route, 200, task);
     }
 
     return json(route, 404, { error: `Unhandled route ${method} ${path}`, code: 404 });

@@ -35,6 +35,7 @@ export const TAB = {
   time_blocks: 'Time Blocks',
   webhooks: 'Webhooks',
   ai: 'AI Assistant',
+  agent: 'Agent',
 } as const;
 
 interface Fixtures {

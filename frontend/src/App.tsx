@@ -16,10 +16,12 @@ import { lifeModule } from './modules/life';
 import { moodModule } from './modules/mood';
 import { timeBlocksModule } from './modules/time_blocks';
 import { bookmarksModule } from './modules/bookmarks';
+import { agentModule } from './modules/agent';
 import { useSystemEvents } from './core/useSystemEvents';
 import { AppShell } from './components/AppShell';
 import { AuthModal } from './components/AuthModal';
 import { SettingsModal } from './components/SettingsModal';
+import { ToastContainer } from './components/ToastContainer';
 import { LinkPage } from './modules/link/LinkPage';
 import { PublicTransparencyView } from './modules/finance/components/PublicTransparencyView';
 import { AUTH_EXPIRED_EVENT } from './core/apiClient';
@@ -27,7 +29,7 @@ import { useSession, useRefreshSession } from './core/session';
 import { Theme, getStoredTheme, setStoredTheme, applyTheme } from './core/theme';
 
 // Safely register modules only once without HMR re-registration warnings
-[dashboardModule, coreModule, todoModule, reminderModule, bookmarksModule, financeModule, portfolioModule, recurringBillsModule, footprintsModule, habitsModule, moodModule, timeBlocksModule, lifeModule, webhooksModule, aiModule].forEach((mod) => {
+[dashboardModule, coreModule, todoModule, reminderModule, bookmarksModule, financeModule, portfolioModule, recurringBillsModule, footprintsModule, habitsModule, moodModule, timeBlocksModule, lifeModule, webhooksModule, aiModule, agentModule].forEach((mod) => {
   if (!registry.get(mod.id)) {
     registry.register(mod);
   }
@@ -190,6 +192,7 @@ const AppContent: React.FC = () => {
       />
 
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+      <ToastContainer />
     </>
   );
 };

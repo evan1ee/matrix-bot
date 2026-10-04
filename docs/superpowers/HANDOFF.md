@@ -34,9 +34,9 @@ Do not reopen a settled decision without new evidence and the user's agreement.
 | **1 — PostgreSQL Foundation** | 1–3 | PostgreSQL-only; versioned migrations; compile-checked SQL; layer-first architecture for **every backend feature**; account UUIDs; durable job queue; transactional outbox | **In progress** (designed, partly implemented) |
 | 2 — Omnichannel | 4 | `ChannelAdapter` / `ChannelRegistry`; Matrix refactored onto it; Discord (`serenity`), Telegram (`teloxide`) and Email (IMAP/SMTP) adapters; `platform_identities`; chat-initiated linking | **Complete: plans A, B, C, and D implemented and verified.** Design `specs/2026-10-01-omnichannel-design.md`; plan A (`plans/2026-10-01-omnichannel-a-framework.md`); plan B (Discord, `plans/2026-10-02-omnichannel-b-discord.md`); plan C (Telegram, `plans/2026-10-02-omnichannel-c-telegram.md`); plan D (Email, `plans/2026-10-03-omnichannel-d-email.md`); branch `feat/omnichannel` |
 | 3 — Scheduled agent & storage | 5 | Storage decoupling (`StorageService`, local/S3, presigned streaming, durable `media.process_receipt` job, chat image ingestion); `ScheduledAgentTask` runtime | **Complete: storage decoupling and autonomous agent runtime implemented and verified.** Plans `plans/2026-10-03-storage-decoupling.md` and `plans/2026-10-03-agent-runtime.md`; branch `feat/agent-runtime` |
-| 4 — Web polish | 6 | Regenerated TypeScript client; live UI through the unified SSE stream; UI for linked identities and notification routing | Not designed |
+| **4 — Web polish** | 6 | Regenerated TypeScript client; live UI through the unified SSE stream; UI for linked identities and notification routing; Autonomous Agent module | **Complete: design, plan, and frontend implementation verified.** Design `specs/2026-10-04-web-polish-design.md`; plan `plans/2026-10-04-web-polish.md`; branch `feat/web-polish` |
 
-The order is strict. Each sub-project builds on the previous one: channels need the layers and the tool registry, the agent needs the job queue, and the web UI needs the outbox events. **Do not start sub-project 2 until sub-project 1 is merged**, unless the user says otherwise.
+The order is strict. Each sub-project builds on the previous one: channels need the layers and the tool registry, the agent needs the job queue, and the web UI needs the outbox events. **All four sub-projects are now fully implemented and verified.**
 
 The **React frontend** (`frontend/`) is essentially untouched by sub-project 1: it only switched to the `/health/*` endpoints. The public HTTP contract is frozen, so `backend/openapi.json` must not change.
 
@@ -273,6 +273,25 @@ Final verification (orchestrator, on `feat/agent-runtime`):
 - `cargo test -p matrix-bot -- --test-threads=4`: 1298 passed / 0 failed / 7 ignored; `main.rs` 2 passed.
 - `cargo test -p matrix-bot-inference`: 71 passed / 0 failed / 2 ignored.
 - `npm --prefix frontend run build`: clean (1722 modules transformed, 0 errors).
+
+### Sub-project 4 — Web Console & Multi-Interface Polish (`plans/2026-10-04-web-polish.md`, branch `feat/web-polish`)
+
+| Task | Scope | State | Commit |
+|---|---|---|---|
+| 1 | Baseline verification & E2E suite stability check (193/193 passed) | ✅ | this PR |
+| 2 | Reactive SSE Sync & React Query cache invalidation (`useSystemEvents.ts`, toast alerts) | ✅ | this PR |
+| 3 | Autonomous Agent module (`frontend/src/modules/agent/`: types, API hooks, RunList, RunDetailDrawer, ApprovalBanner, StartRunModal, ScheduledTasksTab, TaskConfigModal) | ✅ | this PR |
+| 4 | Module integration & navigation (registered in `App.tsx`, `Sidebar.tsx`, `AppShell.tsx`, `registry.ts`) | ✅ | this PR |
+| 5 | Notification routing settings panel (`NotificationPanel.tsx` in `SettingsModal.tsx`) | ✅ | this PR |
+| 6 | Playwright E2E mock routes (`fake-api.ts`) & test suite (`agent.spec.ts`) | ✅ | this PR |
+| 7 | Full verification (clippy, check, architecture tests, frontend build, 199/199 E2E tests) | ✅ | this PR |
+
+Final verification (orchestrator, on `feat/web-polish`):
+- `cargo check -p matrix-bot --all-targets`: clean, no warnings.
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean (zero warnings).
+- `cargo test -p matrix-bot --test architecture`: 33 passed / 0 failed.
+- `npm --prefix frontend run build`: clean (1733 modules transformed, 0 errors).
+- `npm --prefix frontend run test:e2e`: 199 passed / 0 failed (100% green across entire suite).
 
 ---
 
@@ -665,6 +684,10 @@ These need the human. Prepare them; don't perform them.
 - **R153 (A1 — Autonomous Agent Runtime Schema & Jobs):** Migration 0010 adds `agent_runs`, `agent_steps`, `agent_approvals`, and `scheduled_agent_tasks` (all owner-keyed, added to `ACCOUNT_ID_FOLLOWS`). Run execution is handled asynchronously via the durable job runtime (`agent.execute_run`) with worker heartbeats (`update_heartbeat`), lease management, and cancellation support — cost: none.
 - **R154 (A2 — ReAct Engine & Sensitive Action Interception):** Single-step ReAct loop with pure prompt formatting, thought extraction, and tool whitelist sandboxing. Tools designated sensitive (`is_sensitive == true`) are intercepted into `agent_approvals`, pausing run execution as `waiting_approval` with transactional outbox notification. Approval or rejection resumes or skips the action via dedicated chat commands (`!agent confirm`/`!agent reject`) or REST endpoints — cost: none.
 - **R155 (A3 — Extensible Plugin Foundation & Domain Purity):** `ScheduledAgentTask` trait and `ScheduledTaskRegistry` in `domain/agent/task.rs` remain completely pure and synchronous (no async, no external dependencies outside domain rules). 5 built-in task types (`WeeklyBookmarkDigestTask`, `MonthlyFinancialAuditTask`, `PortfolioRebalanceAlertTask`, `BillDueDigestTask`, `HabitConsistencyReviewTask`) stubbed as TODO extensions per directive — cost: built-in task logic deferred to future extension PRs.
+- **R156 (W1 — Passkey Step-Up Parity for Agent Approvals):** `useApproveAction` reuses `useSensitiveAction` from `core/security.ts`, which automatically catches 403 step-up responses, prompts user for passkey verification via `signInWithPasskey()`, and transparently retries the approval mutation — cost: none.
+- **R157 (W2 — Global Reactive Invalidation):** `useSystemEvents` binds SSE events (`Agent*`, `Todo*`, `Reminder*`, `Transaction*`, `Portfolio*`, `RecurringBill*`, `Webhook*`, `IdentityLinked`) directly to central React Query cache invalidation keys, enabling instant cross-device and multi-channel UI updates without manual polling — cost: none.
+- **R158 (W3 — Ephemeral Lightweight Toast Alerts):** ToastContainer renders non-blocking status pills for high-priority SSE alerts (`AgentApprovalRequired`, `ReminderTriggered`) with auto-dismiss (4s) without altering core application state — cost: none.
+- **R159 (W4 — E2E Playwright Concurrency Stability):** Playwright tests on local dev server run with bounded workers (4) to prevent port navigation timeouts on Vite dev server under full-suite load — cost: none.
 
 
 
