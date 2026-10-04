@@ -293,6 +293,24 @@ Final verification (orchestrator, on `feat/web-polish`):
 - `npm --prefix frontend run build`: clean (1733 modules transformed, 0 errors).
 - `npm --prefix frontend run test:e2e`: 199 passed / 0 failed (100% green across entire suite).
 
+### Engineering Housekeeping & Hardening (`plans/2026-10-04-hardening-and-housekeeping.md`, branch `feat/hardening-housekeeping`)
+
+| Task | Scope | State | Commit |
+|---|---|---|---|
+| 1 | Add automated Clippy lint check (`-D warnings`) to CI workflow (`.github/workflows/ci.yml`) | ✅ | this PR |
+| 2 | Configure PostgreSQL pool statement timeout (`statement_timeout = '15s'`) in `backend/src/db/pool.rs` | ✅ | this PR |
+| 3 | Link token retention & hourly purge (`repositories/link_tokens.rs`, `LinkService`, `events/purge.rs`) | ✅ | this PR |
+| 4 | Channel-specific `/help` command formatting (`interface/chat/core/help.rs` adapted for Matrix, Discord, Telegram, Email) | ✅ | this PR |
+| 5 | Extract `McpService` to `application/mcp/mod.rs`, wire into `AppServices`, remove repo calls from `interface/`, add architecture guard | ✅ | this PR |
+| 6 | Verification (clippy, check, architecture tests, openapi drift check, full frontend e2e suite) | ✅ | this PR |
+
+Final verification (orchestrator, on `feat/hardening-housekeeping`):
+- `cargo check -p matrix-bot --all-targets`: clean (zero warnings).
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean (zero warnings).
+- `cargo test -p matrix-bot --test architecture`: 34 passed / 0 failed.
+- `cargo run --bin generate-openapi && git diff --exit-code backend/openapi.json`: byte-identical (zero drift).
+- `npm --prefix frontend run test:e2e`: 199 passed / 0 failed (100% green across entire suite).
+
 ---
 
 
@@ -528,8 +546,8 @@ These need the human. Prepare them; don't perform them.
 
 ## 11. Known deferred items
 
-- Clippy is not yet a CI job (workspace is at zero warnings).
-- `statement_timeout` is unset (R7).
+- ~~Clippy is not yet a CI job (workspace is at zero warnings).~~ — resolved by R160 (added `cargo clippy` check to CI workflow).
+- ~~`statement_timeout` is unset (R7).~~ — resolved by R161 (`connect_pool` sets `statement_timeout = '15s'` via `.after_connect`).
 - ~~The AI repository has a TTL timezone issue.~~ — resolved by R148 (timestamptz comparison against `DateTime<Utc>` cutoff and ISO 8601 UTC storage in `repositories/llm.rs`).
 - `SyncHealth`: if the timestamp fails to parse, it reads as "never synced" (theoretical).
 - ~~The AI tool `update_my_settings` advertises `dev_room_id` and `max_history_turns` but ignores them.~~ — resolved by R149 (parsed and updated in `llm/tools/settings.rs`).
@@ -545,7 +563,7 @@ These need the human. Prepare them; don't perform them.
 - The briefing window does not wrap the hour (`07:58` is due only at :58–:59). Frozen behaviour, kept.
 - ~~`!briefing now` still publishes `MorningBriefingSent` from the chat handler instead of `BriefingService::record_sent` (candidate cleanup).~~ — resolved by step 9.
 - ~~`BotModule::spawn_background_workers`, `BackgroundWorkers` and `ModuleContext` remain only for the webhook worker and go with step 9.~~ — resolved by step 9.
-- Interface code still calls `repositories::mcp::McpTokenRepository` directly (`interface/chat/mcp.rs`, `interface/http/mcp.rs`, `interface/http/auth/mod.rs` tests): candidate for an `McpService`.
+- ~~Interface code still calls `repositories::mcp::McpTokenRepository` directly (`interface/chat/mcp.rs`, `interface/http/mcp.rs`, `interface/http/auth/mod.rs` tests): candidate for an `McpService`.~~ — resolved by R162 (`application/mcp::McpService` extracted, interface refactored, architecture rule added).
 - `domain::accounts::StoredCredential::passkey` imports `webauthn_rs`/`serde_json`/`tracing`, outside the domain crate list (pre-existing).
 - `domain/accounts/session.rs` imports `sha2`/`webauthn_rs`/`serde_json`/`tracing`, also outside the domain crate list (pre-existing purity breach).
 - A recurring reminder is marked `failed` if the send succeeded but advancing it hit a database error on the last attempt.
@@ -558,15 +576,15 @@ These need the human. Prepare them; don't perform them.
 
 - Plan A e2e gaps: the link page's sign-in then re-inspect round trip (`sign_in_required` and "I already have an account") and the 403 step-up retry on `POST /link/claim` are covered only by unit-level and API tests, not end to end in Playwright.
 - `ChannelSink::is_ready` means "any adapter connected" (R81): with a second destination channel a delivery whose own channel is down is claimed, fails as not connected and backs off, costing attempts. Revisit when Discord or Telegram can be a delivery destination.
-- Link tokens are never purged; expired and consumed rows are inert but accumulate (one per `/link`). Add retention if volume ever matters.
+- ~~Link tokens are never purged; expired and consumed rows are inert but accumulate (one per `/link`). Add retention if volume ever matters.~~ — resolved by R163 (`LinkService::purge_expired` called hourly from `events/purge.rs`, retaining tokens for 24h).
 - Four Playwright specs fail on the untouched baseline, before plan A too: `ai-chat.spec.ts:193`, `finance.spec.ts:156`, `screens.spec.ts:117`, `todo-due-reminder.spec.ts:141`. Cause: the custom select's option list stays open after a pick and intercepts the Save click. The sandbox Chromium is rev 1194 while Playwright 1.62.1 expects 1234, so this is unverified on the expected build.
 - `frontend/e2e/portfolio.spec.ts:68` (currency mismatch rejected) is intermittently flaky under full-suite load; it passes in isolation.
-- Discord `/help` prints the shared help text with Matrix's `!` prefixes (R94); a per-channel help format is open.
+- ~~Discord `/help` prints the shared help text with Matrix's `!` prefixes (R94); a per-channel help format is open.~~ — resolved by R164 (`interface/chat/core/help.rs` renders `/` for Discord).
 - `ChannelSink::is_ready` is still "any adapter connected" (R93): while Discord is down and Matrix up, an `IdentityLinked` confirmation to a Discord DM burns delivery attempts.
 - The Discord adapter keeps two `serenity::Http` clients (its own for sends and the workers, the gateway client's for registration and deferral), so their rate-limit buckets are tracked separately; serenity retries a 429 either way (R101).
 - Discord has no buttons (R89), no typed slash options and no media ingestion (spec §14).
 - Telegram outbox deliveries are at-least-once (no Bot API idempotency keys; T14). A re-claimed outbox delivery could deliver twice.
-- Telegram `/help` prints the shared help text with Matrix's `!` prefixes (same as Discord B10).
+- ~~Telegram `/help` prints the shared help text with Matrix's `!` prefixes (same as Discord B10).~~ — resolved by R164 (`interface/chat/core/help.rs` renders `/` for Telegram).
 - Built-in task plugins implementation: the 5 planned tasks (`WeeklyBookmarkDigestTask`, `MonthlyFinancialAuditTask`, `PortfolioRebalanceAlertTask`, `BillDueDigestTask`, `HabitConsistencyReviewTask`) are stubbed with domain schemas and goals as TODO extensions in `domain/agent/task.rs`; execution of custom user goals and custom scheduled crons is fully functional.
 
 ## 12. Document map
@@ -688,6 +706,11 @@ These need the human. Prepare them; don't perform them.
 - **R157 (W2 — Global Reactive Invalidation):** `useSystemEvents` binds SSE events (`Agent*`, `Todo*`, `Reminder*`, `Transaction*`, `Portfolio*`, `RecurringBill*`, `Webhook*`, `IdentityLinked`) directly to central React Query cache invalidation keys, enabling instant cross-device and multi-channel UI updates without manual polling — cost: none.
 - **R158 (W3 — Ephemeral Lightweight Toast Alerts):** ToastContainer renders non-blocking status pills for high-priority SSE alerts (`AgentApprovalRequired`, `ReminderTriggered`) with auto-dismiss (4s) without altering core application state — cost: none.
 - **R159 (W4 — E2E Playwright Concurrency Stability):** Playwright tests on local dev server run with bounded workers (4) to prevent port navigation timeouts on Vite dev server under full-suite load — cost: none.
+- **R160 (CI Clippy):** Added automated `cargo clippy --all-targets -- -D warnings` step to GitHub Actions CI workflow for both `matrix-bot` and `matrix-bot-inference` jobs — cost: none.
+- **R161 (PostgreSQL statement timeout, R7):** `connect_pool` in `backend/src/db/pool.rs` executes `SET statement_timeout = '15s'` on connection initialization via `.after_connect`, guarding against runaway long-running transactions while leaving unconstrained test setup unaffected — cost: queries running >15s without explicit transaction timeout override will fail.
+- **R162 (McpService Application Extraction):** Extracted `McpService` into `application/mcp/mod.rs` and wired into `AppServices`. Replaced direct `McpTokenRepository` usage across `interface/http/mcp.rs`, `interface/chat/mcp.rs`, and `interface/http/auth/mod.rs`. Retired dead `McpTokenRepository` struct and added architecture test `interface_does_not_import_mcp_repository` — cost: none.
+- **R163 (Link Token Retention & Purge):** `repositories::link_tokens::purge_expired` and `LinkService::purge_expired` delete link tokens older than 24 hours (1-day forensic window beyond 10-minute expiry). Hourly invocation hooked into `events/purge.rs` — cost: none.
+- **R164 (Channel-Specific `/help` Formatting):** Updated `generate_help_html` in `interface/chat/core/help.rs` to format command prefixes dynamically (`/` for Discord and Telegram, `!` for Matrix and Email), with platform-tailored header and usage notes — cost: none.
 
 
 

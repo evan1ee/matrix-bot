@@ -112,6 +112,7 @@ impl EventsRuntime {
         ));
         tasks.spawn(purge::run(
             self.services.outbox.clone(),
+            self.services.link.clone(),
             self.config.clone(),
             shutdown.clone(),
         ));

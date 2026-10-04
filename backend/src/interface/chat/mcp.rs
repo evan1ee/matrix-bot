@@ -2,8 +2,7 @@ use async_trait::async_trait;
 
 use crate::interface::channels::message::Reply;
 
-use crate::db::Database;
-use crate::infrastructure::postgres::repositories::mcp::McpTokenRepository;
+use crate::application::AppServices;
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 use crate::interface::mcp::{adapter, models, prompts, resources};
 use crate::utils::html::html_escape;
@@ -41,14 +40,14 @@ impl BotModule for McpModule {
     async fn handle_command(
         &self,
         ctx: &CommandContext,
-        _services: &crate::application::AppServices,
-        db: &Database,
+        services: &crate::application::AppServices,
+        _db: &crate::db::Database,
     ) -> Option<Reply> {
-        handle_command(ctx, db).await.map(Reply::from)
+        handle_command(ctx, services).await.map(Reply::from)
     }
 }
 
-pub async fn handle_command(ctx: &CommandContext, db: &Database) -> Option<String> {
+pub async fn handle_command(ctx: &CommandContext, services: &AppServices) -> Option<String> {
     if ctx.command != "mcp" {
         return None;
     }
@@ -76,13 +75,10 @@ pub async fn handle_command(ctx: &CommandContext, db: &Database) -> Option<Strin
                 }
             };
 
-            let (raw_token, token) = match McpTokenRepository::create(
-                &db.pool,
-                &ctx.owner_id,
-                &token_name,
-                None,
-            )
-            .await
+            let (raw_token, token) = match services
+                .mcp
+                .create_token(&ctx.owner_id, &token_name, None)
+                .await
             {
                 Ok(res) => res,
                 Err(err) => {
@@ -118,7 +114,7 @@ pub async fn handle_command(ctx: &CommandContext, db: &Database) -> Option<Strin
             Some(reply)
         }
         "list" | "ls" => {
-            let tokens = match McpTokenRepository::list_for_account(&db.pool, &ctx.owner_id).await {
+            let tokens = match services.mcp.list_tokens(&ctx.owner_id).await {
                 Ok(t) => t,
                 Err(err) => return Some(format!("❌ Could not list MCP tokens: {}", err)),
             };
@@ -158,7 +154,10 @@ pub async fn handle_command(ctx: &CommandContext, db: &Database) -> Option<Strin
                 return Some("⚠️ Please provide a token ID or prefix to revoke: <code>!mcp revoke &lt;ID&gt;</code>".to_string());
             }
 
-            match McpTokenRepository::revoke_by_id_or_prefix(&db.pool, &ctx.owner_id, target).await
+            match services
+                .mcp
+                .revoke_by_id_or_prefix(&ctx.owner_id, target)
+                .await
             {
                 Ok(true) => Some("✅ MCP token revoked successfully.".to_string()),
                 Ok(false) => {
@@ -227,10 +226,10 @@ mod tests {
     #[tokio::test]
     async fn test_mcp_token_refuses_public_room() {
         let pool = crate::db::pool::test_pool().await;
-        let db = Database { pool };
+        let services = crate::application::AppServices::new(&pool);
         let ctx = dummy_ctx("mcp", "token", false);
 
-        let reply = handle_command(&ctx, &db).await.unwrap();
+        let reply = handle_command(&ctx, &services).await.unwrap();
         assert!(reply.contains("Security Notice"));
         assert!(reply.contains("private direct message"));
     }
@@ -246,10 +245,10 @@ mod tests {
         )
         .await;
 
-        let db = Database { pool };
+        let services = crate::application::AppServices::new(&pool);
         let ctx = dummy_ctx("mcp", "token Claude Laptop", true);
 
-        let reply = handle_command(&ctx, &db).await.unwrap();
+        let reply = handle_command(&ctx, &services).await.unwrap();
         assert!(reply.contains("MCP Token Generated"));
         assert!(reply.contains("Claude Laptop"));
         assert!(reply.contains("mb_mcp_"));

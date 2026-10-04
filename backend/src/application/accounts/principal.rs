@@ -4,7 +4,7 @@
 use crate::application::AppError;
 use crate::domain::accounts::{Credential, Principal};
 use crate::infrastructure::postgres::repositories::accounts::{core, sessions};
-use crate::infrastructure::postgres::repositories::mcp::McpTokenRepository;
+use crate::infrastructure::postgres::repositories::mcp as mcp_repo;
 
 use super::AccountService;
 
@@ -26,7 +26,7 @@ impl AccountService {
     }
 
     async fn resolve_mcp_token(&self, token: &str) -> Result<Option<Principal>, AppError> {
-        let Some(mcp_token) = McpTokenRepository::resolve(&self.pool, token).await? else {
+        let Some(mcp_token) = mcp_repo::resolve(&self.pool, token).await? else {
             tracing::debug!("MCP token is invalid or has expired");
             return Ok(None);
         };
@@ -36,7 +36,7 @@ impl AccountService {
         let pool_for_touch = self.pool.clone();
         let token_id = mcp_token.id.clone();
         tokio::spawn(async move {
-            let _ = McpTokenRepository::touch_last_used(&pool_for_touch, &token_id).await;
+            let _ = mcp_repo::touch_last_used(&pool_for_touch, &token_id).await;
         });
 
         let Some(account) = core::find(&self.pool, &mcp_token.account_id).await? else {
@@ -106,7 +106,7 @@ mod tests {
     async fn an_mcp_token_never_satisfies_step_up() {
         let service = service().await;
         let account = service.create("evan", STATUS_ACTIVE).await.unwrap();
-        let (raw, _) = McpTokenRepository::create(service.pool(), &account, "a machine", None)
+        let (raw, _) = mcp_repo::create(service.pool(), &account, "a machine", None)
             .await
             .unwrap();
 

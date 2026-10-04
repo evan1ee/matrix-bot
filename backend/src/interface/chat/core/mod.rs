@@ -42,7 +42,7 @@ impl CoreModule {
                 let guard = self.registry_ref.read().await;
                 if let Some(registry) = guard.as_ref() {
                     let helps = registry.get_all_help();
-                    Some(help::generate_help_html(&helps))
+                    Some(help::generate_help_html(&helps, ctx.sender.channel()))
                 } else {
                     Some("🤖 <b>Matrix Bot</b> (Core commands: !hello, !ping, !help)".to_string())
                 }

@@ -136,6 +136,21 @@ pub async fn consume(
     Ok(())
 }
 
+/// Purges expired or consumed link tokens older than `cutoff`.
+pub async fn purge_expired(
+    conn: impl PgExecutor<'_>,
+    cutoff: DateTime<Utc>,
+) -> Result<u64, sqlx::Error> {
+    let mut builder =
+        sqlx::QueryBuilder::<sqlx::Postgres>::new("DELETE FROM link_tokens WHERE expires_at < ");
+    builder.push_bind(cutoff);
+    builder.push(" OR (consumed_at IS NOT NULL AND consumed_at < ");
+    builder.push_bind(cutoff);
+    builder.push(")");
+    let res = builder.build().execute(conn).await?;
+    Ok(res.rows_affected())
+}
+
 /// Test-only: how many tokens exist.
 #[cfg(test)]
 pub async fn count(ex: impl PgExecutor<'_>) -> Result<i64, sqlx::Error> {
@@ -252,5 +267,28 @@ mod tests {
             Some(now)
         );
         assert!(lock(&mut tx, "missing").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn purge_expired_deletes_tokens_older_than_cutoff() {
+        let pool = db().await;
+        let now = now_at_storage_precision();
+        let mut conn = pool.acquire().await.unwrap();
+
+        let old_created = now - Duration::days(2);
+        insert(&mut conn, "old_tok", &tg("10"), "telegram:10", old_created)
+            .await
+            .unwrap();
+
+        insert(&mut conn, "new_tok", &tg("11"), "telegram:11", now)
+            .await
+            .unwrap();
+
+        let cutoff = now - Duration::days(1);
+        let deleted = purge_expired(&pool, cutoff).await.unwrap();
+        assert_eq!(deleted, 1);
+
+        assert!(find(&pool, "old_tok").await.unwrap().is_none());
+        assert!(find(&pool, "new_tok").await.unwrap().is_some());
     }
 }

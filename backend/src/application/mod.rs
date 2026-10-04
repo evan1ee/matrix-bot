@@ -14,6 +14,7 @@ pub mod habits;
 pub mod identity;
 pub mod life;
 pub mod llm;
+pub mod mcp;
 pub mod outbox;
 pub mod portfolio;
 pub mod recurring_bills;
@@ -39,6 +40,7 @@ use self::habits::HabitService;
 use self::identity::{IdentityService, LinkService};
 use self::life::LifeService;
 use self::llm::LlmService;
+use self::mcp::McpService;
 use self::outbox::OutboxService;
 use self::portfolio::PortfolioService;
 use self::recurring_bills::RecurringBillsService;
@@ -106,6 +108,7 @@ pub struct AppServices {
     pub life: LifeService,
     pub link: LinkService,
     pub llm: LlmService,
+    pub mcp: McpService,
     pub outbox: OutboxService,
     pub portfolio: PortfolioService,
     pub recurring_bills: RecurringBillsService,
@@ -136,6 +139,7 @@ impl AppServices {
         // allowlist through `with_link_config`.
         let link = LinkService::new(pool.clone(), String::new(), Default::default());
         let llm = LlmService::new(pool.clone());
+        let mcp = McpService::new(pool.clone());
         let rooms = RoomService::new(pool.clone(), settings.clone(), identity.clone());
         let reminders = ReminderService::new(pool.clone());
         let todos = TodoService::new(pool.clone(), reminders.clone());
@@ -173,6 +177,7 @@ impl AppServices {
             life,
             link,
             llm,
+            mcp,
             outbox,
             portfolio,
             recurring_bills,

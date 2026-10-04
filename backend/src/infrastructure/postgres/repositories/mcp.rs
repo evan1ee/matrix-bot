@@ -169,56 +169,6 @@ pub async fn revoke_by_id_or_prefix(
     Ok(res.rows_affected() > 0)
 }
 
-pub struct McpTokenRepository;
-
-impl McpTokenRepository {
-    pub async fn create(
-        conn: impl sqlx::PgExecutor<'_>,
-        account_id: &AccountId,
-        name: &str,
-        expires_in_days: Option<i64>,
-    ) -> Result<(String, McpToken), sqlx::Error> {
-        create(conn, account_id, name, expires_in_days).await
-    }
-
-    pub async fn list_for_account(
-        conn: impl sqlx::PgExecutor<'_>,
-        account_id: &AccountId,
-    ) -> Result<Vec<McpToken>, sqlx::Error> {
-        list_for_account(conn, account_id).await
-    }
-
-    pub async fn resolve(
-        conn: impl sqlx::PgExecutor<'_>,
-        raw_token: &str,
-    ) -> Result<Option<McpToken>, sqlx::Error> {
-        resolve(conn, raw_token).await
-    }
-
-    pub async fn touch_last_used(
-        conn: impl sqlx::PgExecutor<'_>,
-        id: &str,
-    ) -> Result<(), sqlx::Error> {
-        touch_last_used(conn, id).await
-    }
-
-    pub async fn delete(
-        conn: impl sqlx::PgExecutor<'_>,
-        account_id: &AccountId,
-        token_id: &str,
-    ) -> Result<bool, sqlx::Error> {
-        delete(conn, account_id, token_id).await
-    }
-
-    pub async fn revoke_by_id_or_prefix(
-        conn: impl sqlx::PgExecutor<'_>,
-        account_id: &AccountId,
-        target: &str,
-    ) -> Result<bool, sqlx::Error> {
-        revoke_by_id_or_prefix(conn, account_id, target).await
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -17,6 +17,14 @@ pub async fn connect_pool(database_url: &str, max_connections: u32) -> Result<Db
     PgPoolOptions::new()
         .max_connections(max_connections)
         .acquire_timeout(std::time::Duration::from_secs(10))
+        .after_connect(|conn, _meta| {
+            Box::pin(async move {
+                sqlx::query("SET statement_timeout = '15s'")
+                    .execute(conn)
+                    .await?;
+                Ok(())
+            })
+        })
         .connect(database_url)
         .await
         .context("Failed to connect to PostgreSQL")
@@ -246,6 +254,16 @@ mod tests {
     async fn test_connect_pool_refuses_sqlite() {
         let err = connect_pool("sqlite::memory:", 1).await.unwrap_err();
         assert!(err.to_string().contains("DATABASE_URL"));
+    }
+
+    #[tokio::test]
+    async fn test_pool_sets_statement_timeout() {
+        let pool = test_pool().await;
+        let timeout: String = sqlx::query_scalar("SHOW statement_timeout")
+            .fetch_one(&pool)
+            .await
+            .expect("fetch statement_timeout");
+        assert_eq!(timeout, "15s");
     }
 
     /// The refusal that used to live here is gone: every repository, the

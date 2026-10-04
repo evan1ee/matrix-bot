@@ -68,7 +68,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt
+          components: rustfmt, clippy
 
       # Installed explicitly rather than assumed from the runner image.
       # GitHub's ubuntu-latest happens to ship these, so this job worked without
@@ -94,6 +94,9 @@ jobs:
 
       - name: Format check
         run: cargo fmt --all -- --check
+
+      - name: Clippy check
+        run: cargo clippy -p matrix-bot --all-targets -- -D warnings
 
       - name: Cache sqlx-cli
         id: cache-sqlx-cli
@@ -141,7 +144,7 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: rustfmt
+          components: rustfmt, clippy
 
       # Declared for the same reason as in the backend jobs: never assume the
       # runner image. `ort-sys` build-depends on `ureq` -> `native-tls`, which
@@ -204,6 +207,9 @@ jobs:
 
       - name: Format check
         run: cargo fmt --all -- --check
+
+      - name: Clippy check
+        run: cargo clippy -p matrix-bot-inference --all-targets -- -D warnings
 
       - name: Run inference tests
         run: cargo test -p matrix-bot-inference --all-targets

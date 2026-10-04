@@ -987,3 +987,13 @@ fn storage_crates_stay_inside_the_storage_infrastructure() {
         hits.join("\n")
     );
 }
+
+#[test]
+fn interface_does_not_import_mcp_repository() {
+    let hits = production_violations("interface", &["repositories::mcp", "McpTokenRepository"]);
+    assert!(
+        hits.is_empty(),
+        "interface/ must manage MCP tokens via McpService, never repositories::mcp directly:\n{}",
+        hits.join("\n")
+    );
+}

@@ -297,13 +297,10 @@ mod tests {
             .create("evan", STATUS_ACTIVE)
             .await
             .unwrap();
-        let (raw, _token) =
-            crate::infrastructure::postgres::repositories::mcp::McpTokenRepository::create(
-                &state.db.pool,
-                &account,
-                "a machine",
-                None,
-            )
+        let (raw, _token) = state
+            .services
+            .mcp
+            .create_token(&account, "a machine", None)
             .await
             .unwrap();
 

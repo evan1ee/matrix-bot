@@ -11,14 +11,13 @@ use std::time::Duration;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::infrastructure::postgres::repositories::mcp::McpTokenRepository;
 use crate::interface::http::auth::{ApiState, AuthUser};
 use crate::interface::http::error::ApiError;
 use crate::interface::mcp::models::{
     self, CreateMcpTokenRequest, CreateMcpTokenResponse, McpTokenSummary,
 };
 use crate::interface::mcp::protocol::{JsonRpcRequest, JsonRpcResponse};
-use crate::interface::mcp::service::McpService;
+use crate::interface::mcp::service::McpService as McpProtocolService;
 
 #[derive(Debug, Deserialize)]
 pub struct McpQuery {
@@ -73,7 +72,7 @@ pub async fn mcp_message_handler(
     Query(_query): Query<McpQuery>,
     Json(req): Json<JsonRpcRequest>,
 ) -> Result<Json<Option<JsonRpcResponse>>, ApiError> {
-    let service = McpService::new(&state.services, &state.db.pool, &user.account_id);
+    let service = McpProtocolService::new(&state.services, &state.db.pool, &user.account_id);
     let resp = service.handle_request(req).await;
     Ok(Json(resp))
 }
@@ -88,7 +87,7 @@ pub async fn mcp_direct_handler(
     user: AuthUser,
     Json(req): Json<JsonRpcRequest>,
 ) -> Result<Json<Option<JsonRpcResponse>>, ApiError> {
-    let service = McpService::new(&state.services, &state.db.pool, &user.account_id);
+    let service = McpProtocolService::new(&state.services, &state.db.pool, &user.account_id);
     let resp = service.handle_request(req).await;
     Ok(Json(resp))
 }
@@ -108,7 +107,10 @@ pub async fn list_mcp_tokens(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<Vec<McpTokenSummary>>, ApiError> {
-    let tokens = McpTokenRepository::list_for_account(&state.db.pool, &user.account_id)
+    let tokens = state
+        .services
+        .mcp
+        .list_tokens(&user.account_id)
         .await
         .map_err(|err| {
             tracing::error!("Failed to list MCP tokens: {:?}", err);
@@ -147,17 +149,15 @@ pub async fn create_mcp_token(
         ));
     }
 
-    let (raw_token, token) = McpTokenRepository::create(
-        &state.db.pool,
-        &user.account_id,
-        name,
-        payload.expires_in_days,
-    )
-    .await
-    .map_err(|err| {
-        tracing::error!("Failed to create MCP token: {:?}", err);
-        ApiError::internal("Failed to create MCP token")
-    })?;
+    let (raw_token, token) = state
+        .services
+        .mcp
+        .create_token(&user.account_id, name, payload.expires_in_days)
+        .await
+        .map_err(|err| {
+            tracing::error!("Failed to create MCP token: {:?}", err);
+            ApiError::internal("Failed to create MCP token")
+        })?;
 
     let endpoint_url = "/api/v1/mcp/sse";
     let claude_config = models::build_claude_config(endpoint_url, &raw_token);
@@ -193,7 +193,10 @@ pub async fn delete_mcp_token(
     user: AuthUser,
     axum::extract::Path(id): axum::extract::Path<String>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let deleted = McpTokenRepository::delete(&state.db.pool, &user.account_id, &id)
+    let deleted = state
+        .services
+        .mcp
+        .delete_token(&user.account_id, &id)
         .await
         .map_err(|err| {
             tracing::error!("Failed to delete MCP token: {:?}", err);
@@ -217,7 +220,7 @@ mod tests {
         let pool = crate::db::pool::test_pool().await;
         let services = crate::application::AppServices::new(&pool);
         let owner = crate::domain::accounts::AccountId::from_seed("test_owner");
-        let service = McpService::new(&services, &pool, &owner);
+        let service = McpProtocolService::new(&services, &pool, &owner);
 
         let req = JsonRpcRequest {
             jsonrpc: "2.0".to_string(),
@@ -239,20 +242,20 @@ mod tests {
         let owner = crate::domain::accounts::AccountId::from_seed("test");
         crate::db::pool::seed_account(&pool, &owner).await;
 
-        let (raw, token) = McpTokenRepository::create(&pool, &owner, "API Test", None)
+        let services = crate::application::AppServices::new(&pool);
+
+        let (raw, token) = services
+            .mcp
+            .create_token(&owner, "API Test", None)
             .await
             .unwrap();
         assert!(raw.starts_with("mb_mcp_"));
 
-        let list = McpTokenRepository::list_for_account(&pool, &owner)
-            .await
-            .unwrap();
+        let list = services.mcp.list_tokens(&owner).await.unwrap();
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].id, token.id);
 
-        let deleted = McpTokenRepository::delete(&pool, &owner, &token.id)
-            .await
-            .unwrap();
+        let deleted = services.mcp.delete_token(&owner, &token.id).await.unwrap();
         assert!(deleted);
     }
 }

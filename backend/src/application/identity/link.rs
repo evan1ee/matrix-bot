@@ -390,6 +390,15 @@ impl LinkService {
         let preview = MergeService::preview(&self.pool, &previous).await?;
         Ok((preview.total() > 0).then_some((previous, preview)))
     }
+
+    /// Purges expired or consumed link tokens older than `older_than`.
+    pub async fn purge_expired(&self, older_than: std::time::Duration) -> Result<u64, AppError> {
+        let chrono_dur =
+            chrono::Duration::from_std(older_than).unwrap_or_else(|_| chrono::Duration::days(1));
+        let cutoff = Utc::now() - chrono_dur;
+        let purged = link_tokens::purge_expired(&self.pool, cutoff).await?;
+        Ok(purged)
+    }
 }
 
 fn is_live(row: &LinkTokenRow, now: DateTime<Utc>) -> bool {
