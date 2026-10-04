@@ -25,6 +25,32 @@ async function addVirtualAuthenticator(page: Page): Promise<void> {
   });
 }
 
+async function plantCredential(page: Page) {
+  await page.evaluate(async () => {
+    const res = await fetch('/api/v1/auth/passkey/register/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ display_name: 'tester' }),
+      credentials: 'include',
+    });
+    const { options } = await res.json();
+    const pk = options.publicKey;
+    const toBuffer = (value: string) => {
+      const padded = value.replace(/-/g, '+').replace(/_/g, '/');
+      const binary = atob(padded + '='.repeat((4 - (padded.length % 4)) % 4));
+      return Uint8Array.from(binary, (c) => c.charCodeAt(0)).buffer;
+    };
+    await navigator.credentials.create({
+      publicKey: {
+        ...pk,
+        challenge: toBuffer(pk.challenge),
+        user: { ...pk.user, id: toBuffer(pk.user.id) },
+        excludeCredentials: [],
+      },
+    } as CredentialCreationOptions);
+  });
+}
+
 test.describe('link page', () => {
   test('binds the chat account and scrubs the token from the address bar', async ({ app, api }) => {
     await app.goto('/link?token=bind-token');
@@ -72,10 +98,71 @@ test.describe('link page', () => {
   test('a signed-out owner is asked to sign in, then the token is inspected again', async ({ anonApp, api }) => {
     await addVirtualAuthenticator(anonApp);
     await anonApp.goto('/link?token=signin-token');
+    await plantCredential(anonApp);
 
     await expect(anonApp.getByRole('button', { name: 'Sign in with a passkey' })).toBeVisible();
     // Not the global sign-in modal: this page owns the prompt.
     await expect(anonApp.getByRole('dialog')).toHaveCount(0);
+
+    // Clicking "Sign in with a passkey" signs in and re-inspects
+    api.linkPreviews['signin-token'] = {
+      state: 'bind',
+      channel: 'telegram',
+      user_id: '42',
+      merge_item_count: null,
+    };
+    await anonApp.getByRole('button', { name: 'Sign in with a passkey' }).click();
+
+    // Now re-inspected as signed in and ready to connect
+    await expect(anonApp.getByRole('button', { name: 'Connect', exact: true })).toBeVisible();
+    await anonApp.getByRole('button', { name: 'Connect', exact: true }).click();
+    await expect(anonApp.getByText('Connected. You can close this tab.')).toBeVisible();
+  });
+
+  test('an allowlisted stranger with existing account can choose "I already have an account" and sign in', async ({ anonApp, api }) => {
+    await addVirtualAuthenticator(anonApp);
+    await anonApp.goto('/link?token=signup-token');
+    await plantCredential(anonApp);
+
+    await expect(anonApp.getByRole('button', { name: 'Create an account with a passkey' })).toBeVisible();
+    await anonApp.getByRole('button', { name: 'I already have an account' }).click();
+
+    await expect(anonApp.getByRole('button', { name: 'Sign in with a passkey' })).toBeVisible();
+
+    api.linkPreviews['signup-token'] = {
+      state: 'bind',
+      channel: 'telegram',
+      user_id: '77',
+      merge_item_count: null,
+    };
+    await anonApp.getByRole('button', { name: 'Sign in with a passkey' }).click();
+
+    await expect(anonApp.getByRole('button', { name: 'Connect', exact: true })).toBeVisible();
+    await anonApp.getByRole('button', { name: 'Connect', exact: true }).click();
+    await expect(anonApp.getByText('Connected. You can close this tab.')).toBeVisible();
+  });
+
+  test('claiming a link handles 403 passkey step-up and retries successfully', async ({ app, api }) => {
+    await addVirtualAuthenticator(app);
+    await app.goto('/link?token=bind-token');
+    await plantCredential(app);
+
+    await expect(app.getByRole('button', { name: 'Connect', exact: true })).toBeVisible();
+
+    // First attempt to claim will fail with 403 step-up request
+    api.failNext = {
+      path: /\/link\/claim/,
+      status: 403,
+      error: 'Confirm with your passkey to continue',
+    };
+
+    await app.getByRole('button', { name: 'Connect', exact: true }).click();
+
+    // useSensitiveAction caught 403, re-asserted passkey, and retried claim successfully
+    await expect(app.getByText('Connected. You can close this tab.')).toBeVisible();
+    const claims = api.requests.filter((r) => r.url === '/link/claim');
+    expect(claims.length).toBe(2);
+    expect(api.requests.some((r) => r.url === '/auth/passkey/login/finish')).toBe(true);
   });
 
   test('a merge shows how many items move and needs a second confirmation', async ({ app, api }) => {
