@@ -35,7 +35,7 @@ pub async fn add_passkey_start(
         .unwrap_or_default();
     let exclude: Vec<webauthn_rs::prelude::CredentialID> = stored
         .iter()
-        .filter_map(|c| c.passkey())
+        .filter_map(crate::application::accounts::AccountService::parse_passkey)
         .map(|p| p.cred_id().clone())
         .collect();
     let exclude_opt = if exclude.is_empty() {

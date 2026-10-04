@@ -358,7 +358,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(listed.len(), 1);
-        assert!(listed[0].passkey().is_none());
+        assert_eq!(listed[0].passkey_json, "{}");
     }
 
     #[tokio::test]

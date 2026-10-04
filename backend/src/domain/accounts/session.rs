@@ -104,18 +104,6 @@ pub struct StoredCredential {
     pub last_used_at: Option<DateTime<Utc>>,
 }
 
-impl StoredCredential {
-    pub fn passkey(&self) -> Option<webauthn_rs::prelude::Passkey> {
-        match serde_json::from_str(&self.passkey_json) {
-            Ok(passkey) => Some(passkey),
-            Err(err) => {
-                tracing::error!("Credential {} will not deserialise: {:?}", self.id, err);
-                None
-            }
-        }
-    }
-}
-
 #[derive(Debug, PartialEq, Eq)]
 pub enum DeleteOutcome {
     Removed,

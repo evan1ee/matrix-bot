@@ -38,8 +38,23 @@ impl AccountService {
             .list_passkeys(account_id)
             .await?
             .iter()
-            .filter_map(StoredCredential::passkey)
+            .filter_map(Self::parse_passkey)
             .collect())
+    }
+
+    /// Deserialises a passkey from its stored JSON representation.
+    pub fn parse_passkey(credential: &StoredCredential) -> Option<Passkey> {
+        match serde_json::from_str(&credential.passkey_json) {
+            Ok(passkey) => Some(passkey),
+            Err(err) => {
+                tracing::error!(
+                    "Credential {} will not deserialise: {:?}",
+                    credential.id,
+                    err
+                );
+                None
+            }
+        }
     }
 
     /// The stored row for the credential id an authenticator presented.

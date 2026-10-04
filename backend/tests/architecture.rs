@@ -224,6 +224,8 @@ fn domain_depends_on_nothing_outside_itself() {
             "crate::infrastructure",
             "crate::modules",
             "crate::db",
+            "webauthn_rs",
+            "tracing::",
         ],
     );
     assert!(v.is_empty(), "domain/ must stay pure:\n{}", v.join("\n"));
