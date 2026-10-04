@@ -495,5 +495,6 @@ docs/                         # architecture, database, api, llm; superpowers/ h
 | [`docs/llm.md`](docs/llm.md) | LLM transport, tool loop, agent limits, MCP |
 | [`docs/superpowers/`](docs/superpowers/) | Plans, designs, progress and hand-off state, runbooks |
 | [`Design.md`](Design.md) | Frontend design system |
+| [`docs/brainstorming.md`](docs/brainstorming.md) | Feature ideation and future roadmap backlog |
 
 Near-term work: passkey autofill (conditional UI) on page load. Everything else is tracked in `docs/superpowers/HANDOFF.md`.
