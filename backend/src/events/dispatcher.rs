@@ -19,6 +19,10 @@ use crate::events::EventsConfig;
 pub trait DeliverySink: Send + Sync {
     /// False while the channel is down.
     fn is_ready(&self) -> bool;
+    /// Whether a specific delivery can proceed (e.g. target channel is connected).
+    fn can_deliver(&self, _delivery: &ClaimedDelivery) -> bool {
+        true
+    }
     async fn deliver(&self, delivery: &ClaimedDelivery) -> Result<(), String>;
 }
 
@@ -80,6 +84,10 @@ pub(crate) async fn dispatch_once(
             release_unsent(outbox, &claimed[index..]).await;
             break;
         }
+        if !sink.can_deliver(delivery) {
+            defer_delivery(outbox, delivery, config.defer_delay).await;
+            continue;
+        }
         let timeout = config.deliver_timeout.min(remaining);
         let outcome = match tokio::time::timeout(timeout, sink.deliver(delivery)).await {
             Ok(result) => result,
@@ -139,6 +147,35 @@ async fn release_unsent(outbox: &OutboxService, unsent: &[ClaimedDelivery]) {
     }
 }
 
+async fn defer_delivery(
+    outbox: &OutboxService,
+    delivery: &ClaimedDelivery,
+    delay: std::time::Duration,
+) {
+    match outbox.defer(delivery, delay).await {
+        Ok(true) => {
+            info!(
+                delivery_id = delivery.id.0,
+                destination = %delivery.destination,
+                "Channel offline; deferred delivery without burning attempt"
+            );
+        }
+        Ok(false) => {
+            warn!(
+                delivery_id = delivery.id.0,
+                "Could not defer delivery; claim had lost its lease"
+            );
+        }
+        Err(err) => {
+            warn!(
+                error = %err,
+                delivery_id = delivery.id.0,
+                "Could not defer delivery; the lease will retry it"
+            );
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -182,6 +219,7 @@ mod tests {
 
     struct FakeSink {
         ready: AtomicBool,
+        can_deliver: AtomicBool,
         fail: AtomicBool,
         calls: AtomicUsize,
         seen: Mutex<Vec<DeliveryId>>,
@@ -195,6 +233,9 @@ mod tests {
     impl DeliverySink for FakeSink {
         fn is_ready(&self) -> bool {
             self.ready.load(Ordering::SeqCst)
+        }
+        fn can_deliver(&self, _d: &ClaimedDelivery) -> bool {
+            self.can_deliver.load(Ordering::SeqCst)
         }
         async fn deliver(&self, d: &ClaimedDelivery) -> Result<(), String> {
             self.calls.fetch_add(1, Ordering::SeqCst);
@@ -216,6 +257,7 @@ mod tests {
     fn sink(ready: bool, fail: bool) -> Arc<FakeSink> {
         Arc::new(FakeSink {
             ready: AtomicBool::new(ready),
+            can_deliver: AtomicBool::new(true),
             fail: AtomicBool::new(fail),
             calls: AtomicUsize::new(0),
             seen: Mutex::new(Vec::new()),
@@ -427,5 +469,31 @@ mod tests {
             .await
             .expect("stops while waiting")
             .unwrap();
+    }
+
+    #[tokio::test]
+    async fn offline_channel_defers_without_burning_attempts() {
+        let (services, owner, _id) = services_with_alert("acct_disp_defer").await;
+        let s = sink(true, false);
+        // Target channel is offline
+        s.can_deliver.store(false, Ordering::SeqCst);
+
+        let handled = dispatch(&services, &s).await;
+        assert_eq!(handled, 1);
+        assert_eq!(
+            s.calls.load(Ordering::SeqCst),
+            0,
+            "deliver must not be called when can_deliver is false"
+        );
+
+        // Verify attempt was restored: claim_due set attempts to 1, defer decremented back to 0
+        let probe = outbox_repo::delivery_probe_for(services.outbox.pool(), &owner)
+            .await
+            .unwrap();
+        assert_eq!(probe[0], ("pending".to_string(), 0, true));
+
+        // Webhook failure counter was NOT incremented
+        let hooks = services.webhooks.list(&owner).await.unwrap();
+        assert_eq!(hooks[0].failure_count, 0);
     }
 }

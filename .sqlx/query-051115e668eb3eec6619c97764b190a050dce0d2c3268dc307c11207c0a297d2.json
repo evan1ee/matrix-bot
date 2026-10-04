@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE outbox_deliveries SET attempts = attempts - 1, available_at = NOW() + make_interval(secs => $3) WHERE id = $1 AND status = 'pending' AND attempts = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int4",
+        "Float8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "051115e668eb3eec6619c97764b190a050dce0d2c3268dc307c11207c0a297d2"
+}

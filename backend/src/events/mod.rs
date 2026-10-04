@@ -41,6 +41,8 @@ pub struct EventsConfig {
     /// started, and its timeout never runs, past `lease - lease_margin` of the
     /// claim, so a mark is written while the claim is still ours.
     pub lease_margin: Duration,
+    /// Delay before re-checking a delivery whose destination channel is offline.
+    pub defer_delay: Duration,
 }
 
 impl EventsConfig {
@@ -57,6 +59,7 @@ impl EventsConfig {
             batch: 20,
             deliver_timeout: Duration::from_secs(30),
             lease_margin: Duration::from_secs(5),
+            defer_delay: Duration::from_secs(15),
         }
     }
 
@@ -68,6 +71,7 @@ impl EventsConfig {
             lease: Duration::from_secs(1),
             deliver_timeout: Duration::from_millis(500),
             lease_margin: Duration::from_millis(100),
+            defer_delay: Duration::from_millis(50),
             ..Self::production()
         }
     }

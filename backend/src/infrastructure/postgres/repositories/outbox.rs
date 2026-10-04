@@ -261,6 +261,26 @@ pub async fn mark_failed(
     Ok(r.rows_affected() == 1)
 }
 
+/// Defers a delivery whose channel is offline or unavailable:
+/// restores its attempt counter (`attempts = attempts - 1`) and schedules
+/// it `delay` seconds into the future so it does not busy-loop.
+pub async fn defer(
+    ex: impl PgExecutor<'_>,
+    id: DeliveryId,
+    claimed_attempts: i32,
+    delay: Duration,
+) -> sqlx::Result<bool> {
+    let r = sqlx::query!(
+        "UPDATE outbox_deliveries SET attempts = attempts - 1, available_at = NOW() + make_interval(secs => $3) WHERE id = $1 AND status = 'pending' AND attempts = $2",
+        id.0,
+        claimed_attempts,
+        secs(delay)
+    )
+    .execute(ex)
+    .await?;
+    Ok(r.rows_affected() == 1)
+}
+
 /// Gives back a claim that was never sent (batch budget spent, shutdown):
 /// the attempt is not burned and the row is due at once.
 pub async fn release(

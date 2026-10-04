@@ -30,12 +30,24 @@ impl ChannelSink {
 
 #[async_trait]
 impl DeliverySink for ChannelSink {
-    /// Idle while no adapter is connected, so the dispatcher does not burn
-    /// attempts. A delivery's channel is unknown before it is claimed, so with
-    /// several channels one that is down still costs its deliveries an attempt
-    /// (`deliver` fails them as not connected, and they back off).
+    /// Idle while no adapter is connected, so the dispatcher does not claim
+    /// deliveries pointlessly when every channel is offline.
     fn is_ready(&self) -> bool {
         self.registry.any_connected()
+    }
+
+    /// Checks if the destination channel is connected (R166). If offline,
+    /// returns false so the dispatcher defers the delivery without burning an attempt.
+    fn can_deliver(&self, delivery: &ClaimedDelivery) -> bool {
+        if let Some(Destination::Conversation(address)) = Destination::parse(&delivery.destination)
+        {
+            if let Some(channel) = address.channel() {
+                if let Some(adapter) = self.registry.get(channel) {
+                    return adapter.is_connected();
+                }
+            }
+        }
+        true
     }
 
     async fn deliver(&self, delivery: &ClaimedDelivery) -> Result<(), String> {
@@ -292,5 +304,22 @@ mod tests {
         assert!(sink(&up).is_ready());
         let down = Arc::new(FakeAdapter::disconnected(Channel::Matrix));
         assert!(!sink(&down).is_ready());
+    }
+
+    #[test]
+    fn can_deliver_respects_adapter_connectivity() {
+        let telegram = Arc::new(FakeAdapter::connected(Channel::Telegram));
+        let discord = Arc::new(FakeAdapter::disconnected(Channel::Discord));
+
+        let reg = ChannelRegistry::from_unique(vec![telegram, discord]);
+        let sink = ChannelSink::new(Arc::new(reg));
+
+        assert!(sink.is_ready());
+
+        let tg_delivery = linked_delivery(1, "telegram:42", Channel::Telegram);
+        let dc_delivery = linked_delivery(2, "discord:456", Channel::Discord);
+
+        assert!(sink.can_deliver(&tg_delivery));
+        assert!(!sink.can_deliver(&dc_delivery));
     }
 }

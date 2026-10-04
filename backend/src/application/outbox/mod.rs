@@ -116,6 +116,16 @@ impl OutboxService {
         Ok(repo::release(&self.pool, delivery.id, delivery.attempts).await?)
     }
 
+    /// Defers a delivery without burning an attempt counter, making it
+    /// available again after `delay`.
+    pub async fn defer(
+        &self,
+        delivery: &ClaimedDelivery,
+        delay: Duration,
+    ) -> Result<bool, AppError> {
+        Ok(repo::defer(&self.pool, delivery.id, delivery.attempts, delay).await?)
+    }
+
     pub async fn purge(&self, older_than: Duration) -> Result<u64, AppError> {
         Ok(repo::purge(&self.pool, older_than).await?)
     }
@@ -240,5 +250,37 @@ mod tests {
             svc.claim_due(10, Duration::from_secs(60)).await,
             Err(AppError::Database(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn defer_reschedules_delivery_without_incrementing_attempts() {
+        let (svc, pool) = service_with_alert("acct_defer").await;
+        let claimed = svc.claim_due(10, Duration::from_secs(60)).await.unwrap();
+        assert_eq!(claimed.len(), 1);
+        let orig_attempts = claimed[0].attempts;
+
+        svc.defer(&claimed[0], Duration::from_millis(50))
+            .await
+            .unwrap();
+
+        // Immediately claiming again (with 0 delay) should yield nothing if it was deferred into the future
+        let immediate = svc.claim_due(10, Duration::from_secs(60)).await.unwrap();
+        assert!(
+            immediate.is_empty(),
+            "delivery was deferred into the future"
+        );
+
+        // Wait for defer delay to elapse
+        tokio::time::sleep(Duration::from_millis(60)).await;
+
+        let reclaimed = svc.claim_due(10, Duration::from_secs(60)).await.unwrap();
+        assert_eq!(reclaimed.len(), 1);
+        // Note: claim_due increments attempts upon claiming. But defer decremented it back to orig_attempts - 1,
+        // so re-claiming brings it back to orig_attempts.
+        assert_eq!(reclaimed[0].attempts, orig_attempts);
+
+        let owner = AccountId::from_seed("acct_defer");
+        let probe = repo::delivery_probe_for(&pool, &owner).await.unwrap();
+        assert_eq!(probe, vec![("pending".to_string(), orig_attempts, true)]);
     }
 }
