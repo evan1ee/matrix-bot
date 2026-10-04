@@ -116,6 +116,28 @@ impl ReminderService {
         Ok(())
     }
 
+    /// On final attempt failure, fails the reminder if it is one-off, or
+    /// advances it to the next occurrence if it is recurring so a transient
+    /// failure on one occurrence does not permanently disable the reminder series.
+    pub async fn mark_failed_or_advance_recurring(
+        &self,
+        reminder: &Reminder,
+        trigger_at: DateTime<Utc>,
+        now: DateTime<Utc>,
+    ) -> Result<(), AppError> {
+        if let Some(next) = next_occurrence(trigger_at, reminder.recurrence, now) {
+            tracing::warn!(
+                reminder_id = reminder.id,
+                %next,
+                "Exhausted attempts on current occurrence of recurring reminder; advancing to next scheduled occurrence rather than marking failed"
+            );
+            repositories::reminders::reschedule(&self.pool, reminder.id, next).await?;
+        } else {
+            repositories::reminders::mark_failed_at(&self.pool, reminder.id, trigger_at).await?;
+        }
+        Ok(())
+    }
+
     /// Remembers which reminder/todo a reaction on the delivered message acts on.
     pub async fn record_delivery_target(
         &self,

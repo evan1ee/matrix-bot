@@ -34,9 +34,12 @@ impl ReminderFireHandler {
             error!(
                 reminder_id = reminder.id,
                 attempts = ctx.attempt,
-                "Reminder exhausted its delivery attempts; marking failed"
+                "Reminder exhausted its delivery attempts; handling exhaustion"
             );
-            self.services.reminders.mark_failed(reminder.id).await?;
+            self.services
+                .reminders
+                .mark_failed_or_advance_recurring(reminder, reminder.trigger_at, Utc::now())
+                .await?;
             return Err(JobError::Permanent(anyhow::anyhow!(reason)));
         }
         if let Err(err) = self
@@ -70,8 +73,17 @@ impl JobHandler for ReminderFireHandler {
             // Defence in depth: the final attempt must not leave the reminder
             // pending behind a failed job (e.g. a database error above).
             Err(JobError::Retryable(err)) if ctx.is_last_attempt() => {
-                error!(reminder_id = p.reminder_id, error = %err, "Last attempt failed; marking the reminder failed");
-                if let Err(mark_err) = self
+                error!(reminder_id = p.reminder_id, error = %err, "Last attempt failed; handling reminder exhaustion");
+                if let Ok(Some(reminder)) = self.services.reminders.find_for_delivery(p.reminder_id).await {
+                    if let Err(advance_err) = self
+                        .services
+                        .reminders
+                        .mark_failed_or_advance_recurring(&reminder, p.trigger_at, Utc::now())
+                        .await
+                    {
+                        warn!(reminder_id = p.reminder_id, error = %advance_err, "Could not advance or mark the reminder failed");
+                    }
+                } else if let Err(mark_err) = self
                     .services
                     .reminders
                     .mark_failed_at(p.reminder_id, p.trigger_at)
@@ -431,6 +443,31 @@ mod tests {
             after.retry_count, 4,
             "the last attempt keeps the mirrored count"
         );
+    }
+
+    #[tokio::test]
+    async fn the_last_failed_attempt_advances_a_recurring_reminder_rather_than_failing_it() {
+        let f = fixture("acct_fire_last_rec", RecurrencePattern::Daily).await;
+        let fake = FakeOutbound::failing_once("boom");
+        fake.results
+            .lock()
+            .unwrap()
+            .push_back(Err(ChannelError::Transient("boom".to_string())));
+        let handler = ReminderFireHandler::new(f.services.clone(), fake);
+        let trigger = f.reminder.trigger_at;
+
+        let out = handler
+            .run(
+                &ctx(&f.owner, 5),
+                payload(&f.reminder, trigger),
+            )
+            .await;
+
+        assert!(matches!(out, Err(JobError::Permanent(_))), "{out:?}");
+        let after = current(&f).await;
+        assert_eq!(after.status, ReminderStatus::Pending);
+        assert!(after.trigger_at > trigger);
+        assert_eq!(after.retry_count, 0);
     }
 
     #[tokio::test]
