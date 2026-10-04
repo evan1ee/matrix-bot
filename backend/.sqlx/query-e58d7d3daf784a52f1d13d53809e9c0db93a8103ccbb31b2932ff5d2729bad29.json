@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO transactions (room_id, owner_id, sender_name, direction, amount_minor, currency, currency_exponent, occurred_at)\n            VALUES ('web', $1, 'User', 'income', 5000, 'USD', 2, CURRENT_TIMESTAMP)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e58d7d3daf784a52f1d13d53809e9c0db93a8103ccbb31b2932ff5d2729bad29"
+}

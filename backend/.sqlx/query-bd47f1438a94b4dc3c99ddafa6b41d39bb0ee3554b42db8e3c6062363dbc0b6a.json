@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COUNT(*) as \"count!\"\n        FROM bookmarks\n        WHERE owner_id = $1\n          AND ($2::boolean IS NULL OR is_archived = $2)\n          AND ($3::boolean IS NULL OR is_favorite = $3)\n          AND ($4::text IS NULL OR domain = $4)\n          AND ($5::text IS NULL OR tags LIKE $5 OR tags = $6)\n          AND ($7::text IS NULL OR title LIKE $7 OR description LIKE $7 OR url LIKE $7)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bool",
+        "Bool",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "bd47f1438a94b4dc3c99ddafa6b41d39bb0ee3554b42db8e3c6062363dbc0b6a"
+}

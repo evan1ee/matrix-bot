@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO account_rooms (account_id, room_id, name) VALUES ($1, '!only-from:x', 'Only from')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "befe64bec6d3e376728746a685a4f5e46771beda29c0e94b3409605b7db8fab6"
+}

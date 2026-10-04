@@ -25,6 +25,7 @@ pub struct MergePreview {
     pub footprints: i64,
     pub ai_conversations: i64,
     pub webhooks: i64,
+    pub notes: i64,
     pub other: i64,
 }
 
@@ -46,6 +47,7 @@ impl MergePreview {
             + self.footprints
             + self.ai_conversations
             + self.webhooks
+            + self.notes
             + self.other
     }
 
@@ -71,6 +73,7 @@ impl MergePreview {
             "footprints" => self.footprints = count,
             "ai_conversations" => self.ai_conversations = count,
             "webhooks" => self.webhooks = count,
+            "notes" => self.notes = count,
             _ => self.other += count,
         }
     }

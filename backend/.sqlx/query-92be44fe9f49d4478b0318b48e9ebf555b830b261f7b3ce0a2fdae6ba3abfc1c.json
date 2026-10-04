@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE portfolio_cash_balances\n        SET balance_minor = balance_minor - $1, updated_at = CURRENT_TIMESTAMP\n        WHERE id = $2\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "92be44fe9f49d4478b0318b48e9ebf555b830b261f7b3ce0a2fdae6ba3abfc1c"
+}

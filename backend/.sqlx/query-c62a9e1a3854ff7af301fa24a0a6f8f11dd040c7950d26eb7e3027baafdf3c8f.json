@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO knowledge_embeddings (\n            owner_id, item_type, item_id, chunk_index, content_snippet, embedding, updated_at\n        )\n        VALUES ($1, $2, $3, $4, $5, $6, NOW())\n        ON CONFLICT (owner_id, item_type, item_id, chunk_index)\n        DO UPDATE SET\n            content_snippet = EXCLUDED.content_snippet,\n            embedding = EXCLUDED.embedding,\n            updated_at = NOW()\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int8",
+        "Int4",
+        "Text",
+        {
+          "Custom": {
+            "name": "vector",
+            "kind": "Simple"
+          }
+        }
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c62a9e1a3854ff7af301fa24a0a6f8f11dd040c7950d26eb7e3027baafdf3c8f"
+}

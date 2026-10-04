@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO platform_identities (account_id, platform, platform_user_id) VALUES ($1, 'matrix', '@alice:matrix.org')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "44a4b3c308a13065a0e8a65ef56d45c4933ecc407038e4d157a427d4395e62db"
+}

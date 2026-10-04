@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT platform_user_id FROM platform_identities\n         WHERE account_id = $1 AND platform = $2 ORDER BY created_at, id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "platform_user_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "platform_identities",
+            "name": "platform_user_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "53dec9b46517f773d65ba6640ef6dd511a5c14c5084ca53d7fb0ef59ea9baea8"
+}

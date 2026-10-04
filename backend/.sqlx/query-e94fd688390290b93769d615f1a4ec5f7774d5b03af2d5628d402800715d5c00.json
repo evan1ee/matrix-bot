@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO life_profiles (owner_id, birth_date, expected_lifespan_years) VALUES ($1, '1990-01-01', 90)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e94fd688390290b93769d615f1a4ec5f7774d5b03af2d5628d402800715d5c00"
+}

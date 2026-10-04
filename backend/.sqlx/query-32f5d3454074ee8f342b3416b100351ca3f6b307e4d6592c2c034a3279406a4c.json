@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO mcp_tokens (id, account_id, name, token_hash, prefix) VALUES ('tok1', $1, 'my token', 'hash123', 'mcp_')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "32f5d3454074ee8f342b3416b100351ca3f6b307e4d6592c2c034a3279406a4c"
+}

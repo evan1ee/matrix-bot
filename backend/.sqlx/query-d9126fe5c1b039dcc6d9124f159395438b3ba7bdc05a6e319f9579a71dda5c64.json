@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE reminders SET retry_count = $3 WHERE id = $1 AND trigger_at = $2 AND status = 'pending'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d9126fe5c1b039dcc6d9124f159395438b3ba7bdc05a6e319f9579a71dda5c64"
+}

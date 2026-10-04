@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM todos WHERE owner_id = $1 AND completed = TRUE",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "176cd9bcd3827ce870fe0e667c4dff4e59bec637b8cf454792e356b9de6c37a5"
+}

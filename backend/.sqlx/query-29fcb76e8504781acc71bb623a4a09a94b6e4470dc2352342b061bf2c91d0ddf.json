@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE recovery_codes SET used_at = $1 WHERE id = $2 AND used_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Timestamptz",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "29fcb76e8504781acc71bb623a4a09a94b6e4470dc2352342b061bf2c91d0ddf"
+}

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO life_day_logs (owner_id, log_date, mood) VALUES ($1, '2026-09-06', 'happy')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6b2a7791da44bec5d25b969da2297190b1f1e66798e3ebd50af6d5045bde655c"
+}

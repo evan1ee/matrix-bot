@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO reminders (room_id, owner_id, sender_name, message, trigger_at) VALUES ('!r:x', $1, 'a', 'm', CURRENT_TIMESTAMP)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "eab43a331f9eb20c9ae7f1328b274ebd822861aac9c15c6102a1d525aa812b93"
+}

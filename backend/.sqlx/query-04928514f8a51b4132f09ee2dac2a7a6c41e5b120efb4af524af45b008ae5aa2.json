@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE habit_logs\n                SET completed = $1\n                WHERE habit_id = $2 AND owner_id = $3 AND log_date = $4\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Bool",
+        "Int8",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "04928514f8a51b4132f09ee2dac2a7a6c41e5b120efb4af524af45b008ae5aa2"
+}

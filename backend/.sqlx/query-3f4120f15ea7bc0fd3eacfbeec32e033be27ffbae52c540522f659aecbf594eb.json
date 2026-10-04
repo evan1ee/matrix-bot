@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO ai_conversations (id, owner_id, room_id) VALUES ('conv1', $1, '!r:x')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3f4120f15ea7bc0fd3eacfbeec32e033be27ffbae52c540522f659aecbf594eb"
+}

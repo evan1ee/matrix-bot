@@ -1,0 +1,100 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT timezone, currency, dev_room_id, max_history_turns, briefing_enabled, briefing_time, tts_voice FROM user_settings WHERE owner_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "timezone",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "user_settings",
+            "name": "timezone"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "currency",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "user_settings",
+            "name": "currency"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "dev_room_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "user_settings",
+            "name": "dev_room_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "max_history_turns",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "user_settings",
+            "name": "max_history_turns"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "briefing_enabled",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "user_settings",
+            "name": "briefing_enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "briefing_time",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "user_settings",
+            "name": "briefing_time"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "tts_voice",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "user_settings",
+            "name": "tts_voice"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "8688a6f6cbb2515a89724c580cac6d3a883a8491eb2955b6f303af913e3983e8"
+}

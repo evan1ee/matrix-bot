@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE webhooks SET total_delivered_count = total_delivered_count + 1 WHERE id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1bf9e7dfa76b6fb208ce3d7302de09040b3c4f3ff244c6721a5537880af52a38"
+}

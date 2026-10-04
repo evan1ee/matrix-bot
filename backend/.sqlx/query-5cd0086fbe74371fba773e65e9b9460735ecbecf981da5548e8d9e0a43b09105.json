@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXISTS (\n               SELECT 1 FROM account_rooms WHERE account_id = $1 AND room_id = $2\n           ) AS \"cached!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "cached!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "5cd0086fbe74371fba773e65e9b9460735ecbecf981da5548e8d9e0a43b09105"
+}

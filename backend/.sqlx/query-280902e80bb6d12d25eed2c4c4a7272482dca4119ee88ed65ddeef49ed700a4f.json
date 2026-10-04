@@ -1,0 +1,288 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE recurring_bills\n        SET\n            name = COALESCE($1, name),\n            category = COALESCE($2, category),\n            amount_minor = COALESCE($3, amount_minor),\n            currency = COALESCE($4, currency),\n            frequency = COALESCE($5, frequency),\n            due_day = CASE WHEN $6 THEN $7 ELSE due_day END,\n            next_due_at = COALESCE($8, next_due_at),\n            total_installments = CASE WHEN $9 THEN $10 ELSE total_installments END,\n            paid_installments = COALESCE($11, paid_installments),\n            auto_pay = COALESCE($12, auto_pay),\n            status = COALESCE($13, status),\n            notes = CASE WHEN $14 THEN $15 ELSE notes END,\n            remind_before_minutes = CASE WHEN $16 THEN $17 ELSE remind_before_minutes END,\n            remind_room_id = CASE WHEN $18 THEN $19 ELSE remind_room_id END,\n            updated_at = (NOW()::text)\n        WHERE id = $20 AND owner_id = $21\n        RETURNING\n            id, room_id, owner_id, sender_name, name, category,\n            amount_minor, currency, currency_exponent, frequency,\n            due_day, next_due_at, total_installments, paid_installments,\n            auto_pay, status, notes, remind_before_minutes, remind_room_id,\n            created_at, updated_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "room_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "room_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "owner_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "sender_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "sender_name"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "category",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "category"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "amount_minor",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "amount_minor"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "currency",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "currency"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "currency_exponent",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "currency_exponent"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "frequency",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "frequency"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "due_day",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "due_day"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "next_due_at",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "next_due_at"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "total_installments",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "total_installments"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "paid_installments",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "paid_installments"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "auto_pay",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "auto_pay"
+          }
+        }
+      },
+      {
+        "ordinal": 15,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 16,
+        "name": "notes",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "notes"
+          }
+        }
+      },
+      {
+        "ordinal": 17,
+        "name": "remind_before_minutes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "remind_before_minutes"
+          }
+        }
+      },
+      {
+        "ordinal": 18,
+        "name": "remind_room_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "remind_room_id"
+          }
+        }
+      },
+      {
+        "ordinal": 19,
+        "name": "created_at",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 20,
+        "name": "updated_at",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recurring_bills",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Int8",
+        "Text",
+        "Text",
+        "Bool",
+        "Int4",
+        "Text",
+        "Bool",
+        "Int4",
+        "Int4",
+        "Bool",
+        "Text",
+        "Bool",
+        "Text",
+        "Bool",
+        "Int8",
+        "Bool",
+        "Text",
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "280902e80bb6d12d25eed2c4c4a7272482dca4119ee88ed65ddeef49ed700a4f"
+}

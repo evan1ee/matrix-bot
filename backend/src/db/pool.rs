@@ -100,7 +100,7 @@ pub async fn test_pool_sized(max_connections: u32) -> crate::db::DbPool {
     admin.close().await;
 
     let separator = if base.contains('?') { "&" } else { "?" };
-    let scoped = format!("{base}{separator}options=-c%20search_path%3D{schema}");
+    let scoped = format!("{base}{separator}options=-c%20search_path%3D{schema}%2Cpublic");
     connect_pool(&scoped, max_connections)
         .await
         .expect("scoped test pool")
@@ -198,7 +198,7 @@ pub async fn connect_pg_schema(schema: &str) -> crate::db::DbPool {
         .unwrap();
 
     let separator = if base.contains('?') { "&" } else { "?" };
-    let scoped = format!("{base}{separator}options=-c%20search_path%3D{schema}");
+    let scoped = format!("{base}{separator}options=-c%20search_path%3D{schema}%2Cpublic");
     connect_pool(&scoped, 2).await.expect("scoped pool")
 }
 

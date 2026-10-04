@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT valid_after FROM recovery_requests WHERE account_id = $1 AND cancelled_at IS NULL AND consumed_at IS NULL AND expires_at > $2 ORDER BY requested_at DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "valid_after",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "recovery_requests",
+            "name": "valid_after"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "ebc2786cb6d2b986b7693b529899dd204bbe019e0199115fd91f8158fa382f51"
+}

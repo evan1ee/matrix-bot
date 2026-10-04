@@ -1,0 +1,44 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT c.name AS \"category_name?\",\n               CAST(SUM(t.amount_minor) AS BIGINT) AS total_minor,\n               COUNT(*) AS tx_count\n        FROM transactions t\n        LEFT JOIN finance_categories c ON c.id = t.category_id\n        WHERE t.owner_id = $1 AND t.currency = $2 AND t.direction = 'expense' AND t.occurred_at >= $3\n        GROUP BY c.name\n        ORDER BY total_minor DESC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "category_name?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "finance_categories",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "total_minor",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "tx_count",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      null
+    ]
+  },
+  "hash": "b4d1f2449ae609c3c7e36de93170e46aca95b71cd40c7eb2c5d122436c7f7ce5"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM portfolio_holdings\n        WHERE owner_id = $1 AND symbol = $2\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "6b78191b4893d9abcf01d31ad19934e32925369dee79e30ce9317852d041e815"
+}

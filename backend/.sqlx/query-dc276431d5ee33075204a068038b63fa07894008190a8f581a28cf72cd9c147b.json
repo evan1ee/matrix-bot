@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO habit_logs (habit_id, owner_id, log_date, completed, note)\n                VALUES ($1, $2, $3, TRUE, $4)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "dc276431d5ee33075204a068038b63fa07894008190a8f581a28cf72cd9c147b"
+}

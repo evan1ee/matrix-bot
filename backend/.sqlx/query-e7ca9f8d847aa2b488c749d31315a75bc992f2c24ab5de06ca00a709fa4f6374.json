@@ -1,0 +1,142 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE habits\n        SET name = $1, description = $2, frequency = $3, category = $4, target_days_per_week = $5, updated_at = CAST(CURRENT_TIMESTAMP AS TEXT)\n        WHERE id = $6 AND owner_id = $7\n        RETURNING id, owner_id, name, description, frequency, category, target_days_per_week, archived, created_at, updated_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "habits",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "owner_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "habits",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "habits",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "description",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "habits",
+            "name": "description"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "frequency",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "habits",
+            "name": "frequency"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "category",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "habits",
+            "name": "category"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "target_days_per_week",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "habits",
+            "name": "target_days_per_week"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "archived",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "habits",
+            "name": "archived"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "habits",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "updated_at",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "habits",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Int8",
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "e7ca9f8d847aa2b488c749d31315a75bc992f2c24ab5de06ca00a709fa4f6374"
+}

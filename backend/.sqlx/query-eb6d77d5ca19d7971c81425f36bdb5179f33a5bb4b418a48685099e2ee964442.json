@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COUNT(*)\n        FROM reminders\n        WHERE owner_id = $1\n          AND ($2::text IS NULL OR room_id = $2)\n          AND (\n            ($3 = 'pending' AND status = 'pending') OR\n            ($3 = 'history' AND status != 'pending') OR\n            ($3 = 'all') OR\n            ($3 = 'triggered' AND status = 'triggered') OR\n            ($3 = 'cancelled' AND status = 'cancelled') OR\n            ($3 = 'failed' AND status = 'failed') OR\n            (status = $3)\n          )\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "eb6d77d5ca19d7971c81425f36bdb5179f33a5bb4b418a48685099e2ee964442"
+}

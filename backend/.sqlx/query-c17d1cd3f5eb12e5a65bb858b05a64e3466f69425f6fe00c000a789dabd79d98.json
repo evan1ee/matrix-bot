@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(pg_terminate_backend(pid)) AS \"n!\" FROM pg_stat_activity\n           WHERE datname = current_database() AND pid <> pg_backend_pid()",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "c17d1cd3f5eb12e5a65bb858b05a64e3466f69425f6fe00c000a789dabd79d98"
+}

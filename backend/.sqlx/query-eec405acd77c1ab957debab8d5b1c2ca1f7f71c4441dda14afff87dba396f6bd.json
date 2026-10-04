@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO bookmarks (owner_id, url, title, domain) VALUES ($1, 'https://example.com', 'Example', 'example.com')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "eec405acd77c1ab957debab8d5b1c2ca1f7f71c4441dda14afff87dba396f6bd"
+}

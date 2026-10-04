@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE agent_runs\n        SET\n            status = $2,\n            current_step = $3,\n            total_tokens = $4,\n            error = $5,\n            completed_at = $6,\n            updated_at = $7\n        WHERE id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int4",
+        "Int4",
+        "Text",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "dd0d551254108725ee217e049dd13ac4858a34d607a40838dc177b6d4abc2b5f"
+}

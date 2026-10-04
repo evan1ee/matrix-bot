@@ -186,6 +186,8 @@ pub const OWNED_TABLES: &[&str] = &[
     "ai_user_configs",
     "webhooks",
     "bot_message_targets",
+    "notes",
+    "knowledge_embeddings",
 ];
 
 /// Tables carrying `owner_id` that a merge moves through a dedicated routine.

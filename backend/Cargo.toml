@@ -62,6 +62,7 @@ bcrypt = "0.19.3"
 ogg = "0.9"
 rust-embed = { version = "8.5", features = ["mime-guess"] }
 mime_guess = "2.0"
+pgvector = { version = "0.4.2", features = ["sqlx", "serde"] }
 
 [dev-dependencies]
 tower = { version = "0.5.3", features = ["util"] }

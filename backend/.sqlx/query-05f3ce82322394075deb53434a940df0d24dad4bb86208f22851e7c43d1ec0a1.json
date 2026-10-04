@@ -1,0 +1,82 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            ke.item_type,\n            ke.item_id,\n            ke.content_snippet,\n            COALESCE(n.title, b.title, ke.item_type) AS title,\n            COALESCE(n.source_ref, b.url) AS source_ref,\n            (\n                0.7 * (1.0 - (ke.embedding <=> $2) / 2.0) +\n                0.3 * LEAST(1.0::FLOAT8, ts_rank_cd(to_tsvector('english', ke.content_snippet), plainto_tsquery('english', $3)))\n            )::FLOAT4 AS combined_score\n        FROM knowledge_embeddings ke\n        LEFT JOIN notes n\n            ON ke.item_type = 'note' AND ke.item_id = n.id AND ke.owner_id = n.owner_id\n        LEFT JOIN bookmarks b\n            ON ke.item_type = 'bookmark' AND ke.item_id = b.id AND ke.owner_id = b.owner_id\n        WHERE ke.owner_id = $1\n          AND ($4::TEXT[] IS NULL OR ke.item_type = ANY($4))\n        ORDER BY combined_score DESC\n        LIMIT $5\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "item_type",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "knowledge_embeddings",
+            "name": "item_type"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "item_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "knowledge_embeddings",
+            "name": "item_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "content_snippet",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "knowledge_embeddings",
+            "name": "content_snippet"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "title",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "source_ref",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "combined_score",
+        "type_info": "Float4",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        {
+          "Custom": {
+            "name": "vector",
+            "kind": "Simple"
+          }
+        },
+        "Text",
+        "TextArray",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "05f3ce82322394075deb53434a940df0d24dad4bb86208f22851e7c43d1ec0a1"
+}

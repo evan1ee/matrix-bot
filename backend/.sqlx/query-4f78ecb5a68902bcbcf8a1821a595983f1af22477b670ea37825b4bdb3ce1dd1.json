@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO portfolio_cash_balances (owner_id, currency, balance_minor) VALUES ($1, 'USD', 5000)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4f78ecb5a68902bcbcf8a1821a595983f1af22477b670ea37825b4bdb3ce1dd1"
+}

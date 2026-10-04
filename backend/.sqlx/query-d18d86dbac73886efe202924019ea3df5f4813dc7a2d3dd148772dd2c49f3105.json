@@ -1,0 +1,164 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT\n                id, room_id, owner_id, sender_name, message, trigger_at,\n                recurrence, status, retry_count, source_kind, source_id, created_at\n            FROM reminders\n            WHERE owner_id = $1\n              AND ($2::text IS NULL OR room_id = $2)\n              AND (\n                ($3 = 'history' AND status != 'pending') OR\n                ($3 = 'all') OR\n                ($3 = 'triggered' AND status = 'triggered') OR\n                ($3 = 'cancelled' AND status = 'cancelled') OR\n                ($3 = 'failed' AND status = 'failed') OR\n                (status = $3)\n              )\n            ORDER BY trigger_at DESC, id DESC\n            LIMIT $4 OFFSET $5\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "reminders",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "room_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reminders",
+            "name": "room_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "owner_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "reminders",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "sender_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reminders",
+            "name": "sender_name"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "message",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reminders",
+            "name": "message"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "trigger_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "reminders",
+            "name": "trigger_at"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "recurrence",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reminders",
+            "name": "recurrence"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reminders",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "retry_count",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "reminders",
+            "name": "retry_count"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "source_kind",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "reminders",
+            "name": "source_kind"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "source_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "reminders",
+            "name": "source_id"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "reminders",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "d18d86dbac73886efe202924019ea3df5f4813dc7a2d3dd148772dd2c49f3105"
+}

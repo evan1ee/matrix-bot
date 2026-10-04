@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM portfolio_audit_log",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "271dfaad484a00d2ddf29381ddcf32061527c168d986d86957b74ac8c4e9dd8f"
+}

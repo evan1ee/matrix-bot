@@ -1,0 +1,64 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, account_id AS \"account_id: uuid::Uuid\", code_hash, valid_after FROM recovery_requests\n         WHERE cancelled_at IS NULL AND consumed_at IS NULL AND expires_at > $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recovery_requests",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "account_id: uuid::Uuid",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "recovery_requests",
+            "name": "account_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "code_hash",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "recovery_requests",
+            "name": "code_hash"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "valid_after",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "recovery_requests",
+            "name": "valid_after"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3e60ffd092dae0ab209cc86b02000d5e58d1467f4f6c40118e4a285eb3440dc8"
+}

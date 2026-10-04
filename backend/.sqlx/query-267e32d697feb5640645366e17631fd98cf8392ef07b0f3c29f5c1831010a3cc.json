@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM todos WHERE room_id = $1 AND completed = TRUE",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "267e32d697feb5640645366e17631fd98cf8392ef07b0f3c29f5c1831010a3cc"
+}

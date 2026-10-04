@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO ai_conversations (id, owner_id, room_id, created_at, updated_at)\n            VALUES ($1, $2, '!room:tz', $3, $3)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5983b50489c8e80c6d56809f3c46f6eb829c9c119f51f20230793c0dabf034ab"
+}

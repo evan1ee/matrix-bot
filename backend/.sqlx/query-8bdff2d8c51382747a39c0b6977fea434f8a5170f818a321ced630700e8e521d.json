@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO finance_categories (owner_id, name) VALUES ($1, 'food')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8bdff2d8c51382747a39c0b6977fea434f8a5170f818a321ced630700e8e521d"
+}

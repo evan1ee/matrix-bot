@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT account_id AS \"account_id: uuid::Uuid\" FROM security_events\n           WHERE (kind = 'matrix_unlinked' AND $3 AND detail = $1)\n              OR (kind = 'identity_unlinked' AND detail = $2)\n           ORDER BY id DESC LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "account_id: uuid::Uuid",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "security_events",
+            "name": "account_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "a15e90ad7f414066ce761e47e32d1091337f390962db9c2be38be07910614885"
+}

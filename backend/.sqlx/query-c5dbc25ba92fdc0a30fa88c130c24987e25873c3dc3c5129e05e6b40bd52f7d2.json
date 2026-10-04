@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT mood\n        FROM life_day_logs\n        WHERE owner_id = $1 AND mood != ''\n        GROUP BY mood\n        ORDER BY COUNT(*) DESC\n        LIMIT 1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "mood",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "life_day_logs",
+            "name": "mood"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c5dbc25ba92fdc0a30fa88c130c24987e25873c3dc3c5129e05e6b40bd52f7d2"
+}

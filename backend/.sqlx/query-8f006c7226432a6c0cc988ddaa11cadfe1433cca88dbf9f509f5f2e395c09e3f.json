@@ -1,0 +1,197 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, owner_id, url, title, description, author, image_url,\n               domain, reader_content, reading_time_minutes, is_favorite,\n               is_archived, tags, created_at, updated_at\n        FROM bookmarks\n        WHERE id = $1 AND owner_id = $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "bookmarks",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "owner_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "bookmarks",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "bookmarks",
+            "name": "url"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "bookmarks",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "description",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "bookmarks",
+            "name": "description"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "author",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "bookmarks",
+            "name": "author"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "image_url",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "bookmarks",
+            "name": "image_url"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "domain",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "bookmarks",
+            "name": "domain"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "reader_content",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "bookmarks",
+            "name": "reader_content"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "reading_time_minutes",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "bookmarks",
+            "name": "reading_time_minutes"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
+        "name": "is_favorite",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "bookmarks",
+            "name": "is_favorite"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "is_archived",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "bookmarks",
+            "name": "is_archived"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "tags",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "bookmarks",
+            "name": "tags"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "created_at",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "bookmarks",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 14,
+        "name": "updated_at",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "bookmarks",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "8f006c7226432a6c0cc988ddaa11cadfe1433cca88dbf9f509f5f2e395c09e3f"
+}

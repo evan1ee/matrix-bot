@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT log_date\n        FROM habit_logs\n        WHERE habit_id = $1 AND owner_id = $2 AND completed = TRUE\n        ORDER BY log_date ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "log_date",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "habit_logs",
+            "name": "log_date"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d37857bcec1f8ccaad1fab9345c0e6a2f1a8a281689b33eef67b5eb9e3f0f9a0"
+}

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE portfolio_audit_log SET owner_id = $1 WHERE owner_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2b453bfbb92f6435f7159968d2902e6c2b6d623f32a70f70b5651915be7c5db7"
+}

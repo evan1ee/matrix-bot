@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO user_settings (owner_id, last_briefing_date, updated_at) VALUES ($1, $2, CURRENT_TIMESTAMP) ON CONFLICT (owner_id) DO UPDATE SET last_briefing_date = excluded.last_briefing_date, updated_at = CURRENT_TIMESTAMP",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1f222356d8abcde675b19ba6132531a598ae34f2379f78ce7fe5b664f96cd41e"
+}

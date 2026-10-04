@@ -1,0 +1,145 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO agent_steps (\n            id, run_id, step_number, thought, tool_name,\n            tool_input, tool_output, status, tokens_used, created_at\n        )\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)\n        RETURNING\n            id, run_id, step_number, thought, tool_name,\n            tool_input, tool_output, status, tokens_used, created_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "agent_steps",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "run_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "agent_steps",
+            "name": "run_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "step_number",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "agent_steps",
+            "name": "step_number"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "thought",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "agent_steps",
+            "name": "thought"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "tool_name",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "agent_steps",
+            "name": "tool_name"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "tool_input",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "agent_steps",
+            "name": "tool_input"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "tool_output",
+        "type_info": "Jsonb",
+        "origin": {
+          "Table": {
+            "table": "agent_steps",
+            "name": "tool_output"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "status",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "agent_steps",
+            "name": "status"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "tokens_used",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "agent_steps",
+            "name": "tokens_used"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "agent_steps",
+            "name": "created_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Jsonb",
+        "Text",
+        "Int4",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ed5a355511d333433d17c31d1f4878de174e2fdbe3bd2b9b804a23554afd4145"
+}

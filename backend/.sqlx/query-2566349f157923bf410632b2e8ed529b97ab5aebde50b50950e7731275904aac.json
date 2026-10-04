@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT tags FROM bookmarks WHERE owner_id = $1 AND tags != ''",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tags",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "bookmarks",
+            "name": "tags"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2566349f157923bf410632b2e8ed529b97ab5aebde50b50950e7731275904aac"
+}
