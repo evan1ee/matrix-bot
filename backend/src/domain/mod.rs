@@ -13,6 +13,7 @@ pub mod finance;
 pub mod footprints;
 pub mod habits;
 pub mod jobs;
+pub mod knowledge;
 pub mod life;
 pub mod llm;
 pub mod mcp;
