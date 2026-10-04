@@ -152,6 +152,30 @@ jobs / outbox ─► ChannelRegistry::send(OutgoingMessage) ─► the target ch
 - **Outbound goes through the registry.** Job handlers take the narrow `Outbound` trait (`interface/jobs`; `ChannelRegistry` implements it, so handler tests keep a fake) and send to the channel of the stored conversation; a channel that is down is `Unavailable(30 s)` (see *Background jobs*). The outbox's `ChannelSink` (`interface/events/channel_sink.rs`, see *Events and the outbox*) delivers `Destination::Conversation` the same way. The AI outage alert targets the owner's `dev_room_id` (storage form) or the Matrix room named "dev", via the registry (A4).
 - **`ProgressSink`** (`llm/progress.rs`) is how the agent reports stages, tool calls and streamed text without knowing a channel; each adapter supplies its own (Matrix edits one message in place) and `NoProgress` is the null sink. `llm/` and `application/` import no channel SDK or `interface::channels` (`the_agent_knows_no_channel`, `application_knows_no_channel_sdk`); `domain/channels` stays pure (`channel_domain_is_pure`); adapters run no SQL (`channel_adapters_run_no_sql`); `interface/chat` modules know no platform SDK (`chat_modules_know_no_platform_sdk`).
 
+### Multi-channel operational behavior & invariants
+
+1. **Format Normalization (`render/`):**
+   - Application modules author messages using a clean, semantic HTML subset (`<b>`, `<code>`, `<blockquote>`, `<a>`, `<pre>`, `<ul>`/`<li>`).
+   - Adapters normalize this representation for their medium:
+     - **Matrix:** Native HTML with `html_escape()`, clean plain-text fallback via `strip_html()`, and MSC3245 audio bubbles for speech.
+     - **Discord:** Converted to Markdown via `render/markdown.rs` (rich embeds, tabular codeblocks, empty `allowed_mentions` to prevent mention spam).
+     - **Telegram:** Converted to Telegram HTML via `render/telegram_html.rs` (strips unsupported tags, preserves formatting, splits messages > 4096 characters).
+     - **Email:** Rendered as `multipart/alternative` via `render/email.rs` (plain text + sanitized HTML, action buttons converted to numbered lists).
+2. **Channel Privacy Models & Visibility Gating:**
+   - **Direct Messages:** Full personal workspace access across all channels (`!finance`, `!portfolio`, `/ask`, etc.).
+   - **Public / Shared Channels:**
+     - Matrix: Sensitive commands reply with `Visibility::Private` or are refused outside DM.
+     - Discord: Every guild command (except `/help`) is deferred **ephemeral** (visible only to the invoking user). `Visibility::Private` is strictly forbidden from posting publicly.
+     - Telegram: Group privacy mode is strictly enforced. `Visibility::Private` replies are refused with `PRIVATE_IN_GROUP` notice ("That answer is private — message me directly.").
+     - `/link` is strictly refused in any public channel/room on all platforms.
+3. **Outbox Delivery Fencing & Offline Deferral (R166):**
+   - Deliveries are fanned out per destination through `outbox_deliveries`.
+   - Before claiming a delivery, the outbox dispatcher verifies that the specific destination channel adapter is connected. If an adapter is offline (e.g. Discord gateway reconnecting or Matrix homeserver maintenance), pending deliveries for that channel are deferred *without burning retry attempts*. They resume immediately upon adapter reconnection.
+4. **Rate Limiting & Inbound Flow Control:**
+   - **Discord:** Workers throttle message editing to at most once per 1.5s to avoid 429s, deferring interactions immediately within 3s.
+   - **Telegram:** Inbound webhook requests are rate-limited to 120 req / 60s per IP, verified using constant-time secret comparison against `X-Telegram-Bot-Api-Secret-Token`. Outbound requests deduplicate identical rapid messages within a 60s window (`TelegramSendDeduper`, R168).
+   - **Email:** Inbound emails are deduplicated via a 1024-entry `Message-ID` sliding window. Emails without a valid DMARC pass matching `EMAIL_AUTHSERV_ID` are dropped silently with zero bounce or reply, preventing email backscatter.
+
 ### Identity and linking
 
 `platform_identities` maps `(platform, platform_user_id)` to one account; an account may hold many, across channels. `application/identity` (`IdentityService`, `LinkService`) is the only writer. Linking proves two things separately: the **direct conversation** that asked proves ownership of the chat identity, the **passkey session** that claims proves ownership of the account.
