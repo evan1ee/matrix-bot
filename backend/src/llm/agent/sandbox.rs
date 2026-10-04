@@ -18,6 +18,7 @@ pub const DEFAULT_SENSITIVE_TOOLS: &[&str] = &[
     "delete_bookmark",
     "delete_footprint",
     "delete_portfolio_price_alert",
+    "cancel_portfolio_price_alert",
 ];
 
 /// Checks if a tool name is allowed given an optional whitelist.
@@ -80,6 +81,8 @@ mod tests {
         assert!(is_sensitive_tool("buy_portfolio_holding", None));
         assert!(is_sensitive_tool("withdraw_portfolio_cash", None));
         assert!(is_sensitive_tool("delete_todo", None));
+        assert!(is_sensitive_tool("cancel_portfolio_price_alert", None));
+        assert!(is_sensitive_tool("delete_portfolio_price_alert", None));
         assert!(!is_sensitive_tool("get_my_tasks", None));
 
         let custom = vec!["custom_risky_tool".to_string()];

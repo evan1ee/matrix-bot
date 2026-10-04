@@ -152,7 +152,15 @@ pub fn sanitize_html(input: &str) -> String {
                 || lower_tag.contains("autofocus")
                 || lower_tag.contains("formaction")
                 || lower_tag
-                    .split(|c: char| c.is_whitespace() || c == '/' || c == '>' || c == '<')
+                    .split(|c: char| {
+                        c.is_whitespace()
+                            || c == '/'
+                            || c == '>'
+                            || c == '<'
+                            || c == '"'
+                            || c == '\''
+                            || c == '='
+                    })
                     .any(|part| {
                         let token = part.trim_start();
                         token.starts_with("on")
@@ -278,5 +286,30 @@ mod tests {
             .contains("&lt;a href=&quot;#&quot; autofocus onfocus=&quot;alert(1)&quot;&gt;"));
         assert!(!bypass_sanitized.contains("<font onanimationstart"));
         assert!(!bypass_sanitized.contains("<span ontoggle"));
+
+        // Unspaced and delimiter-adjacent attribute bypasses
+        let unspaced_double = "<a href=\"test\"onclick=\"alert(1)\">Click</a>";
+        assert_eq!(
+            sanitize_html(unspaced_double),
+            "&lt;a href=&quot;test&quot;onclick=&quot;alert(1)&quot;&gt;Click</a>"
+        );
+
+        let unspaced_single = "<a href='test'onfocus='alert(1)'>Click</a>";
+        assert_eq!(
+            sanitize_html(unspaced_single),
+            "&lt;a href=&#39;test&#39;onfocus=&#39;alert(1)&#39;&gt;Click</a>"
+        );
+
+        let equal_adjacent = "<a href=\"test\"=onclick=\"alert(1)\">Click</a>";
+        assert_eq!(
+            sanitize_html(equal_adjacent),
+            "&lt;a href=&quot;test&quot;=onclick=&quot;alert(1)&quot;&gt;Click</a>"
+        );
+
+        let legitimate = "<a href=\"https://example.com\" target=\"_blank\">Link</a> <b>bold</b>";
+        assert_eq!(
+            sanitize_html(legitimate),
+            "<a href=\"https://example.com\" target=\"_blank\">Link</a> <b>bold</b>"
+        );
     }
 }

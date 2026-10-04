@@ -355,6 +355,22 @@ Final verification (orchestrator, on `feat/cutover-resilience-frontend-polish`):
 - `npm --prefix frontend run build`: clean (1752 modules transformed, zero TypeScript errors).
 - `npm --prefix frontend run test:e2e`: 201 passed / 0 failed (100% green across entire suite).
 
+### Security Audit Remediation (run-2, `plans/2026-10-04-security-audit-run2-remediation.md`, branch `fix/security-audit-run2-remediation`)
+
+| Task | Scope | State | Commit |
+|---|---|---|---|
+| 1 | Webhook HTML sanitizer delimiter fix (`backend/src/domain/webhooks/renderer.rs` quotes and `=` added to tokenizer delimiters) | ✅ | this commit |
+| 2 | STT audio resampling sample rate guards & buffer bounds (`inference/src/stt/audio.rs` 8k-192k Hz sample rate bounds, 5-min sample ceiling) | ✅ | this commit |
+| 3 | Autonomous agent sensitive tools whitelist parity (`backend/src/llm/agent/sandbox.rs` add `cancel_portfolio_price_alert`) | ✅ | this commit |
+| 4 | Verification (clippy clean, architecture 35 passed, inference test suite 74 passed, openapi identical, files < 300 lines) | ✅ | this commit |
+
+Final verification (orchestrator, on `fix/security-audit-run2-remediation`):
+- `cargo check --workspace --all-targets`: clean (zero errors).
+- `cargo clippy --workspace --all-targets -- -D warnings`: clean (zero warnings).
+- `cargo test -p matrix-bot --test architecture`: 35 passed / 0 failed.
+- `cargo test -p matrix-bot-inference`: 74 passed / 0 failed.
+- `cargo run --bin generate-openapi && git diff --exit-code backend/openapi.json`: byte-identical (zero drift).
+
 ---
 
 
@@ -774,6 +790,6 @@ These need the human. Prepare them; don't perform them.
 - **R175 (LinkPage E2E Verification):** Added automated Playwright coverage for `sign_in_required` round trip, "I already have an account" navigation, and 403 step-up passkey verification in `frontend/e2e/link.spec.ts` (10/10 passed) — closes testing gaps from Plan A — cost: none.
 - **R176 (Complete Frontend Module Decomposition):** Decomposed `frontend/src/modules/todo` (599 -> 248 lines), `frontend/src/modules/mood` (619 -> 245 lines), and `frontend/src/modules/reminder` (605 -> 234 lines) into modular subcomponents (< 260 lines each), achieving 100% adherence to `< 500 lines` across all handcrafted files in `frontend/src/` — cost: none.
 - **R177 (Route-based Code Splitting & Bundle Optimization):** (1) Extracted heavy view components from monolithic index files: `FootprintsView` (219 lines), `PortfolioMainView` (310 lines), `FinanceMainView` (250 lines), `AgentMainView` (40 lines), `AiAssistantView` (442 lines), and `LifeView` (310 lines). (2) Converted `FrontendModule.MainView` for heavy modules to `React.lazy()` with `<React.Suspense>` fallback spinner in `AppShell.tsx`, and lazy loaded special route views (`LinkPage`, `PublicTransparencyView`) in `App.tsx`. (3) Extracted `aiPromptBus.ts` so cross-module AI triggers (`triggerAiPrompt`) operate without loading heavy markdown parser libraries (`marked`, `dompurify`). (4) Configured `manualChunks` in `vite.config.ts` for major vendor packages (`vendor-react`, `vendor-query`, `vendor-icons`, `vendor-leaflet`, `vendor-marked`). (5) Reduced initial production bundle from 1.08 MB to 485 kB (122 kB gzipped), completely eliminating the Vite 500 kB chunk warning. All 201 Playwright E2E tests and 35 backend architecture tests verified green — cost if wrong: initial navigation to a heavy module incurs a sub-second async chunk fetch with fallback spinner.
-
-
-
+- **R178 (Webhook HTML Sanitizer Delimiter Extension):** In HTML5 tokenization, quotes (`"`, `'`) and `=` terminate attribute names/values without requiring whitespace. Extending the split delimiters in `sanitize_html` (`backend/src/domain/webhooks/renderer.rs`) to `[' ', '\t', '\n', '\r', '/', '>', '<', '"', '\'', '=']` isolates event handlers immediately adjacent to quoted attributes, preventing unescaped event handler injection into Matrix messages (`webhook_sanitize_html_event_handler_bypass`) — cost: none.
+- **R179 (STT Audio Resampling Amplification & Bounds):** In `inference/src/stt/audio.rs`, enforce input sample rate bounds `MIN_SAMPLE_RATE = 8_000` to `MAX_SAMPLE_RATE = 192_000` Hz and decoded buffer ceiling `MAX_AUDIO_SAMPLES = 4_800_000` (5 minutes at 16kHz mono). Enforced across `decode_generic_audio`, `resample_linear`, and `decode_audio_to_16k_mono` to eliminate linear resampling amplification and unbounded buffer allocations leading to OOM (`inference.stt.audio-resample-amplification-oom`) — cost: audio with sample rates < 8kHz is rejected.
+- **R180 (Autonomous Agent Sensitive Tools Whitelist Parity):** Added `"cancel_portfolio_price_alert"` to `DEFAULT_SENSITIVE_TOOLS` in `backend/src/llm/agent/sandbox.rs` alongside `"delete_portfolio_price_alert"`, ensuring destructive portfolio alert cancellations requested by the autonomous agent ReAct loop require explicit human approval (`agent_cancel_price_alert_unintercepted_deletion`) — cost: none.

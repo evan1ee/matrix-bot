@@ -13,6 +13,9 @@ use tracing::{debug, warn};
 use super::sherpa::VoiceError;
 
 pub const TARGET_SAMPLE_RATE: u32 = 16_000;
+pub const MIN_SAMPLE_RATE: u32 = 8_000;
+pub const MAX_SAMPLE_RATE: u32 = 192_000;
+pub const MAX_AUDIO_SAMPLES: usize = 16_000 * 300; // 5 minutes at 16kHz mono = 4,800,000 samples
 
 /// Decodes an arbitrary audio byte slice (Matrix voice notes in Ogg Opus, WAV, MP3, AAC, FLAC)
 /// into a mono 16kHz normalized `f32` sample buffer ready for SenseVoiceSmall inference.
@@ -50,7 +53,7 @@ pub fn decode_audio_to_16k_mono(bytes: &[u8]) -> Result<Vec<f32>, VoiceError> {
         decode_generic_audio(bytes)
     }));
 
-    match decode_result {
+    let samples = match decode_result {
         Ok(res) => res,
         Err(panic_err) => {
             warn!("Audio decoder panicked on input: {:?}", panic_err);
@@ -58,7 +61,16 @@ pub fn decode_audio_to_16k_mono(bytes: &[u8]) -> Result<Vec<f32>, VoiceError> {
                 "Audio decoding failed due to an internal decoder error".to_string(),
             ))
         }
+    }?;
+
+    if samples.len() > MAX_AUDIO_SAMPLES {
+        return Err(VoiceError::AudioDecode(format!(
+            "Decoded audio exceeds maximum allowed length of {} samples (5 minutes)",
+            MAX_AUDIO_SAMPLES
+        )));
     }
+
+    Ok(samples)
 }
 
 fn is_ogg_container(bytes: &[u8]) -> bool {
@@ -147,6 +159,12 @@ pub fn decode_generic_audio(bytes: &[u8]) -> Result<Vec<f32>, VoiceError> {
 
     let track_id = track.id;
     let sample_rate = track.codec_params.sample_rate.unwrap_or(TARGET_SAMPLE_RATE);
+    if !(MIN_SAMPLE_RATE..=MAX_SAMPLE_RATE).contains(&sample_rate) {
+        return Err(VoiceError::AudioDecode(format!(
+            "Unsupported sample rate: {} Hz (must be between {} and {} Hz)",
+            sample_rate, MIN_SAMPLE_RATE, MAX_SAMPLE_RATE
+        )));
+    }
     let channels = track.codec_params.channels.map(|c| c.count()).unwrap_or(1);
 
     let dec_opts: DecoderOptions = Default::default();
@@ -196,6 +214,12 @@ pub fn decode_generic_audio(bytes: &[u8]) -> Result<Vec<f32>, VoiceError> {
             Err(SymphoniaError::DecodeError(_)) => continue,
             Err(e) => return Err(VoiceError::AudioDecode(format!("Decoder error: {:?}", e))),
         }
+
+        if raw_mono_samples.len() > MAX_AUDIO_SAMPLES * 2 {
+            return Err(VoiceError::AudioDecode(
+                "Audio input exceeds maximum allowed sample length".to_string(),
+            ));
+        }
     }
 
     if sample_rate == TARGET_SAMPLE_RATE || raw_mono_samples.is_empty() {
@@ -214,8 +238,14 @@ pub fn resample_linear(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32
     if from_rate == to_rate || samples.is_empty() {
         return samples.to_vec();
     }
+    if !(MIN_SAMPLE_RATE..=MAX_SAMPLE_RATE).contains(&from_rate) {
+        return samples.to_vec();
+    }
     let ratio = to_rate as f64 / from_rate as f64;
     let target_len = (samples.len() as f64 * ratio).round() as usize;
+    if target_len > MAX_AUDIO_SAMPLES {
+        return samples.to_vec();
+    }
     let mut resampled = Vec::with_capacity(target_len);
 
     for i in 0..target_len {
@@ -277,14 +307,46 @@ mod tests {
         assert_eq!(samples.len(), 16_000);
         assert!(samples.iter().all(|s| s.abs() < 1e-6));
     }
+
+    #[test]
+    fn test_resample_linear_extreme_low_sample_rate_does_not_abort() {
+        let samples = vec![0.1; 100];
+        // 1 Hz sample rate is below MIN_SAMPLE_RATE; must return safely without OOM
+        let res = resample_linear(&samples, 1, 16000);
+        assert_eq!(res.len(), 100);
+
+        // 0 Hz sample rate is invalid; must return safely
+        let res_zero = resample_linear(&samples, 0, 16000);
+        assert_eq!(res_zero.len(), 100);
+    }
+
+    #[test]
+    fn test_decode_wav_invalid_sample_rate_rejected() {
+        // 1 Hz WAV file (below MIN_SAMPLE_RATE)
+        let wav_1hz = test_audio::silent_wav(1, 1.0);
+        let res = decode_audio_to_16k_mono(&wav_1hz);
+        assert!(matches!(res, Err(VoiceError::AudioDecode(_))));
+
+        // 4000 Hz WAV file (below MIN_SAMPLE_RATE)
+        let wav_4khz = test_audio::silent_wav(4000, 1.0);
+        let res2 = decode_audio_to_16k_mono(&wav_4khz);
+        assert!(matches!(res2, Err(VoiceError::AudioDecode(_))));
+    }
+
+    #[test]
+    fn test_decode_wav_8khz_resampled_to_16khz() {
+        let wav_8khz = test_audio::silent_wav(8000, 1.0);
+        let samples =
+            decode_audio_to_16k_mono(&wav_8khz).expect("8kHz WAV should decode and resample");
+        assert_eq!(samples.len(), 16_000);
+    }
 }
 
 #[cfg(test)]
 pub mod test_audio {
-    /// A mono 16-bit PCM WAV of silence at 16 kHz: enough for the decoder to
+    /// A mono 16-bit PCM WAV with arbitrary sample rate: enough for the decoder to
     /// accept and for SenseVoice to run over, with no audio fixture on disk.
-    pub fn silent_wav_16k_mono(seconds: f32) -> Vec<u8> {
-        let sample_rate: u32 = 16_000;
+    pub fn silent_wav(sample_rate: u32, seconds: f32) -> Vec<u8> {
         let data_len = (sample_rate as f32 * seconds) as u32 * 2;
         let mut wav = Vec::with_capacity(44 + data_len as usize);
         wav.extend_from_slice(b"RIFF");
@@ -301,5 +363,10 @@ pub mod test_audio {
         wav.extend_from_slice(&data_len.to_le_bytes());
         wav.resize(44 + data_len as usize, 0);
         wav
+    }
+
+    /// A mono 16-bit PCM WAV of silence at 16 kHz.
+    pub fn silent_wav_16k_mono(seconds: f32) -> Vec<u8> {
+        silent_wav(16_000, seconds)
     }
 }
