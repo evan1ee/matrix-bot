@@ -36,6 +36,7 @@ pub async fn build_modules(config: &Config) -> Arc<ModuleRegistry> {
     registry.register(LifeModule::new());
     registry.register(JournalModule::new());
     registry.register(crate::interface::chat::bookmarks::BookmarksModule::new());
+    registry.register(crate::interface::chat::knowledge::KnowledgeModule::new());
     registry.register(RecurringBillsModule::new());
     registry.register(SettingsModule::new());
     registry.register(BriefingModule::new());
@@ -80,6 +81,6 @@ mod tests {
         let ai = position("AI Assistant");
         assert!(tts.is_some() && ai.is_some(), "{names:?}");
         assert!(tts < ai, "TTS must precede the AI catch-all: {names:?}");
-        assert_eq!(names.len(), 19, "{names:?}");
+        assert_eq!(names.len(), 20, "{names:?}");
     }
 }

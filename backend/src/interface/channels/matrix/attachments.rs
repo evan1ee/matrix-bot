@@ -37,6 +37,7 @@ use bytes::Bytes;
 enum Attachment<'a> {
     Image {
         content: &'a ImageMessageEventContent,
+        ocr: &'a crate::infrastructure::inference::ocr::OcrClient,
     },
     Audio {
         content: &'a AudioMessageEventContent,
@@ -48,12 +49,12 @@ enum Attachment<'a> {
 impl<'a> Attachment<'a> {
     fn from_msgtype(
         msgtype: &'a MessageType,
-        _ocr: &'a crate::infrastructure::inference::ocr::OcrClient,
+        ocr: &'a crate::infrastructure::inference::ocr::OcrClient,
         voice_config: &'a VoiceConfig,
         stt: &'a crate::infrastructure::inference::stt::SttClient,
     ) -> Option<Self> {
         match msgtype {
-            MessageType::Image(content) => Some(Self::Image { content }),
+            MessageType::Image(content) => Some(Self::Image { content, ocr }),
             MessageType::Audio(content) => Some(Self::Audio {
                 content,
                 voice_config,
@@ -79,11 +80,31 @@ impl<'a> Attachment<'a> {
 
     fn stage_labels(&self) -> (&'static str, &'static str) {
         match self {
-            Self::Image { .. } => (
-                "🧾 Saving receipt to storage...",
-                "🧾 <i>正在保存小票至存储并排队处理...</i>",
-            ),
-            Self::Audio { .. } => ("🎧 Transcribing voice...", "🎧 <i>正在转写语音...</i>"),
+            Self::Image { content, .. } => {
+                let b = content.body.trim();
+                if b.starts_with("/note") || b.starts_with("!note") {
+                    (
+                        "📝 Extracting text from photo note...",
+                        "📝 <i>正在识别并保存图片笔记...</i>",
+                    )
+                } else {
+                    (
+                        "🧾 Saving receipt to storage...",
+                        "🧾 <i>正在保存小票至存储并排队处理...</i>",
+                    )
+                }
+            }
+            Self::Audio { content, .. } => {
+                let b = content.body.trim();
+                if b.starts_with("/note") || b.starts_with("!note") {
+                    (
+                        "🎙️ Transcribing voice note...",
+                        "🎙️ <i>正在转写并保存语音笔记...</i>",
+                    )
+                } else {
+                    ("🎧 Transcribing voice...", "🎧 <i>正在转写语音...</i>")
+                }
+            }
         }
     }
 
@@ -177,12 +198,25 @@ impl<'a> Attachment<'a> {
         let conversation = room.room_id().as_str();
         let progress: Option<&dyn ProgressSink> = Some(reporter);
         let reply = match self {
-            Self::Image { content } => {
-                let conversation = ConversationAddress::Matrix(room.room_id().as_str().to_string());
+            Self::Image { content, ocr } => {
+                let caption = content.body.trim();
                 let mimetype = content
                     .info
                     .as_ref()
                     .and_then(|info| info.mimetype.as_deref());
+                if caption.starts_with("/note") || caption.starts_with("!note") {
+                    return crate::interface::chat::knowledge::capture_photo_note(
+                        services,
+                        room.room_id().as_str(),
+                        owner_id,
+                        caption,
+                        mimetype,
+                        media_bytes,
+                        ocr,
+                    )
+                    .await;
+                }
+                let conversation = ConversationAddress::Matrix(room.room_id().as_str().to_string());
                 match ingest_receipt_image(
                     db,
                     services,
@@ -203,6 +237,24 @@ impl<'a> Attachment<'a> {
                 voice_config,
                 stt,
             } => {
+                let caption = content.body.trim();
+                if caption.starts_with("/note") || caption.starts_with("!note") {
+                    return crate::interface::chat::knowledge::capture_voice_note(
+                        services,
+                        room.room_id().as_str(),
+                        owner_id,
+                        caption,
+                        media_bytes,
+                        content
+                            .info
+                            .as_ref()
+                            .and_then(|info| info.mimetype.as_deref()),
+                        voice_config,
+                        stt,
+                        progress,
+                    )
+                    .await;
+                }
                 crate::interface::chat::voice::process_audio(
                     db,
                     services,

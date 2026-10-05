@@ -12,6 +12,7 @@ pub mod finance;
 pub mod footprints;
 pub mod habits;
 pub mod journal;
+pub mod knowledge;
 pub mod life;
 pub mod link;
 pub mod llm;
@@ -410,6 +411,7 @@ mod tests {
     async fn test_every_registered_command_survives_the_real_dispatch_order() {
         use crate::interface::chat::core::CoreModule;
         use crate::interface::chat::finance::FinanceModule;
+        use crate::interface::chat::knowledge::KnowledgeModule;
         use crate::interface::chat::portfolio::PortfolioModule;
         use crate::interface::chat::reminders::ReminderModule;
         use crate::interface::chat::settings::SettingsModule;
@@ -427,6 +429,7 @@ mod tests {
         registry.register(ReminderModule::new());
         registry.register(FinanceModule::new());
         registry.register(PortfolioModule::new());
+        registry.register(KnowledgeModule::new());
         registry.register(SettingsModule::new());
         registry.register(TtsModule::new(
             crate::infrastructure::inference::tts::TtsClient::new(
@@ -445,6 +448,8 @@ mod tests {
             "!expense list",
             "!portfolio",
             "!portfolio buy AAPL 10 @ 150.00 USD",
+            "!notes",
+            "!search rust",
             "!settings",
             "!settings timezone Asia/Tokyo",
             "!settings currency CNY",

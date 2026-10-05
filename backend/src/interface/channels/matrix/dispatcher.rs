@@ -47,7 +47,7 @@ impl CommandParser {
             || body_lower == localpart_lower;
 
         let is_mentioned = is_plain_mentioned || is_html_mentioned;
-        let is_command_prefix = prompt_trimmed.starts_with('!');
+        let is_command_prefix = prompt_trimmed.starts_with('!') || prompt_trimmed.starts_with('/');
 
         if !is_command_prefix && !is_mentioned {
             return None;
@@ -84,7 +84,7 @@ impl CommandParser {
             let cmd = parts
                 .next()
                 .unwrap_or("")
-                .trim_start_matches('!')
+                .trim_start_matches(['!', '/'])
                 .to_string();
             let args = parts.next().unwrap_or("").trim().to_string();
             (cmd, args)
@@ -162,6 +162,9 @@ impl CommandParser {
                 "remind",
                 "reminder",
                 "reminders",
+                "note",
+                "notes",
+                "search",
                 "finance",
                 "expense",
                 "income",
@@ -216,6 +219,23 @@ mod tests {
 
         assert_eq!(ctx.command, "todo");
         assert_eq!(ctx.raw_args, "add Buy milk");
+        assert_eq!(ctx.sender_name(), "alice");
+    }
+
+    #[test]
+    fn test_parse_message_slash_command() {
+        let bot_id = UserId::parse("@hellobot:matrix.org").unwrap();
+        let ctx = CommandParser::parse_message(
+            "/note Deep Work Tactics #focus",
+            None,
+            &bot_id,
+            "!room:matrix.org",
+            &PlatformIdentity::matrix("@alice:matrix.org").unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(ctx.command, "note");
+        assert_eq!(ctx.raw_args, "Deep Work Tactics #focus");
         assert_eq!(ctx.sender_name(), "alice");
     }
 
