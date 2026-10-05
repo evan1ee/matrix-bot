@@ -7,6 +7,7 @@ pub struct InferenceConfig {
     pub ocr_model_dir: PathBuf,
     pub voice_model_dir: PathBuf,
     pub tts_model_dir: PathBuf,
+    pub embedding_model_dir: PathBuf,
 }
 
 impl Default for InferenceConfig {
@@ -16,6 +17,7 @@ impl Default for InferenceConfig {
             ocr_model_dir: PathBuf::from("models/ocr"),
             voice_model_dir: PathBuf::from("models/stt"),
             tts_model_dir: PathBuf::from("models/tts"),
+            embedding_model_dir: PathBuf::from("models/embeddings"),
         }
     }
 }
@@ -41,11 +43,16 @@ impl InferenceConfig {
             .map(PathBuf::from)
             .unwrap_or(defaults.tts_model_dir);
 
+        let embedding_model_dir = std::env::var("EMBEDDING_MODEL_DIR")
+            .map(PathBuf::from)
+            .unwrap_or(defaults.embedding_model_dir);
+
         Self {
             port,
             ocr_model_dir,
             voice_model_dir,
             tts_model_dir,
+            embedding_model_dir,
         }
     }
 }

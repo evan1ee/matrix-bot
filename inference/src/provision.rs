@@ -123,6 +123,7 @@ mod tests {
             ocr_model_dir: dir.clone(),
             voice_model_dir: dir.clone(),
             tts_model_dir: dir.clone(),
+            embedding_model_dir: dir.clone(),
         });
 
         tokio::time::timeout(Duration::from_secs(5), provision_models(config))

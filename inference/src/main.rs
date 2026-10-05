@@ -4,6 +4,7 @@ use tracing::info;
 mod api;
 mod config;
 mod download;
+mod embeddings;
 mod ocr;
 mod provision;
 mod stt;

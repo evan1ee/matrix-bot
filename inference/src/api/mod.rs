@@ -8,6 +8,7 @@ use std::sync::Arc;
 
 use crate::config::InferenceConfig;
 
+pub mod embeddings;
 pub mod ocr;
 pub mod stt;
 pub mod tts;
@@ -29,15 +30,17 @@ pub struct HealthResponse {
     pub stt: bool,
     pub tts: bool,
     pub ocr: bool,
+    pub embeddings: bool,
 }
 
 /// Reports which models are installed. Each flag is that capability's own
-/// presence check (`stt`/`ocr`: `models_present`; `tts`: `model_present`).
+/// presence check (`stt`/`ocr`/`embeddings`: `models_present`; `tts`: `model_present`).
 pub async fn health(State(state): State<AppState>) -> Json<HealthResponse> {
     Json(HealthResponse {
         stt: crate::stt::models_present(&state.config.voice_model_dir),
         tts: crate::tts::model_present(&state.config.tts_model_dir),
         ocr: crate::ocr::models_present(&state.config.ocr_model_dir),
+        embeddings: crate::embeddings::models_present(&state.config.embedding_model_dir),
     })
 }
 
@@ -47,6 +50,7 @@ pub fn build_router(state: AppState) -> Router {
         .route("/ocr", post(ocr::scan))
         .route("/v1/audio/transcriptions", post(stt::transcribe))
         .route("/v1/audio/speech", post(tts::speak))
+        .route("/v1/embeddings", post(embeddings::embed))
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .with_state(state)
 }
@@ -64,6 +68,7 @@ mod tests {
             ocr_model_dir: std::path::PathBuf::from("/nonexistent/ocr/models"),
             voice_model_dir: std::path::PathBuf::from("/nonexistent/voice/models"),
             tts_model_dir: std::path::PathBuf::from("/nonexistent/tts/models"),
+            embedding_model_dir: std::path::PathBuf::from("/nonexistent/embed/models"),
         };
         let state = AppState {
             config: Arc::new(config),
@@ -77,6 +82,7 @@ mod tests {
                 stt: false,
                 tts: false,
                 ocr: false,
+                embeddings: false,
             }
         );
     }
@@ -92,6 +98,7 @@ mod tests {
             ocr_model_dir: std::path::PathBuf::from("/nonexistent/ocr/models"),
             voice_model_dir: std::path::PathBuf::from("/nonexistent/voice/models"),
             tts_model_dir: std::path::PathBuf::from("/nonexistent/tts/models"),
+            embedding_model_dir: std::path::PathBuf::from("/nonexistent/embed/models"),
         };
         let state = AppState {
             config: Arc::new(config),
@@ -119,6 +126,7 @@ mod tests {
                 stt: false,
                 tts: false,
                 ocr: false,
+                embeddings: false,
             }
         );
     }

@@ -3,6 +3,7 @@
 //! `interface/` and `application/` define what the application does; `infrastructure/` is how external
 //! capabilities are reached. Nothing in here may import from `interface/` or `application/`.
 
+pub mod embedding;
 pub mod llm;
 pub mod ocr;
 pub mod stt;
