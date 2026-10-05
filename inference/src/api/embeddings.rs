@@ -53,7 +53,10 @@ pub async fn embed(
 ) -> Result<Json<EmbeddingResponse>, (StatusCode, String)> {
     let texts = req.input.into_vec();
     if texts.is_empty() || texts.iter().all(|t| t.trim().is_empty()) {
-        return Err((StatusCode::BAD_REQUEST, "Input text cannot be empty".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Input text cannot be empty".to_string(),
+        ));
     }
 
     let model_name = req.model.unwrap_or_else(|| "bge-small-en-v1.5".to_string());
@@ -112,7 +115,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_embed_missing_model_returns_503() {
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let tmp = std::env::temp_dir().join(format!("test_missing_embed_{}", now));
         let config = InferenceConfig {
             embedding_model_dir: tmp.clone(),
@@ -133,7 +139,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_embed_empty_input_returns_400() {
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let tmp = std::env::temp_dir().join(format!("test_empty_embed_{}", now));
         let config = InferenceConfig {
             embedding_model_dir: tmp.clone(),
@@ -154,7 +163,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_embed_with_installed_model_generates_vector() {
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let tmp = std::env::temp_dir().join(format!("test_installed_embed_{}", now));
         std::fs::create_dir_all(&tmp).unwrap();
         std::fs::write(tmp.join("model.onnx"), b"fake onnx").unwrap();
@@ -169,13 +181,17 @@ mod tests {
 
         let req = Request::post("/v1/embeddings")
             .header("content-type", "application/json")
-            .body(axum::body::Body::from(r#"{"input": ["deep work", "second brain"]}"#))
+            .body(axum::body::Body::from(
+                r#"{"input": ["deep work", "second brain"]}"#,
+            ))
             .unwrap();
 
         let resp = app.oneshot(req).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let body = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let body = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let res: EmbeddingResponse = serde_json::from_slice(&body).unwrap();
         assert_eq!(res.data.len(), 2);
         assert_eq!(res.data[0].embedding.len(), 384);

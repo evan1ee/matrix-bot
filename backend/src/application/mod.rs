@@ -194,7 +194,9 @@ impl AppServices {
             notes: NoteService::new(pool.clone()),
             knowledge_search: SearchService::new(
                 pool.clone(),
-                Arc::new(crate::infrastructure::inference::embedding::MockEmbeddingProvider::default()),
+                Arc::new(
+                    crate::infrastructure::inference::embedding::MockEmbeddingProvider::default(),
+                ),
             ),
         }
     }

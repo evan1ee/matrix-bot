@@ -299,3 +299,20 @@ All API calls go through `core/apiClient.ts` (`fetchApi`), which sends `credenti
 `core/session.ts` is the single source of "who is signed in": the cookie is unreadable by the page, so only the server can answer, and `useSession()` asking `/auth/me` is that answer. There is deliberately no client-side token to inspect and nothing that can drift from the server's view.
 
 `core/security.ts::useSensitiveAction` wraps any step-up-gated call. A 403 is not an error to show someone — it is the server asking for a passkey — so it prompts, retries, and only reports a second failure.
+
+## Knowledge base & vector search (Second Brain)
+
+The Second Brain subsystem (`domain/knowledge/`, `application/knowledge/`, `infrastructure/postgres/repositories/knowledge/`, `interface/http/knowledge.rs`, `interface/chat/knowledge.rs`, `interface/jobs/knowledge.rs`) turns the bot into a personal knowledge base with omnichannel capture, hierarchical tags, and hybrid semantic search:
+
+- **Pure Domain (`domain/knowledge/`):** Pure synchronous entities and value objects: `Note`, `NoteId`, `NoteFormat` (`markdown`, `plain`, `quote`), `KnowledgeSearchQuery`, and `SearchResultItem`. Invariants (titles non-empty and clamped to 200 chars, content non-empty, `#tag` lowercase normalization) are enforced at construction without async or external crates.
+- **PostgreSQL & pgvector (`0011_knowledge_base.sql`):** PostgreSQL 18 stores notes (`notes` table) and multi-chunk embeddings (`knowledge_embeddings` table) with the `pgvector` extension enabled (`vector(384)`). Embeddings use an HNSW index (`m = 16, ef_construction = 64`) over cosine distance (`vector_cosine_ops`), guaranteeing sub-millisecond approximate nearest neighbor retrieval under concurrent load.
+- **Durable Background Indexing (`interface/jobs/knowledge.rs`):** State mutations are committed alongside outbox events (`NoteCreated`, `NoteUpdated`, `NoteDeleted`). The service immediately enqueues a background durable job `knowledge.embed` (payload: `{ item_type: "note", item_id: i64 }`). A chunker splits documents into overlapping 500-character chunks with 100-character overlaps along UTF-8 char boundaries. The worker calls `EmbeddingProvider` and atomically swaps the chunk embeddings within a transaction.
+- **Pluggable Embedding Providers (`infrastructure/inference/embedding/`):** Implements `EmbeddingProvider` trait across local ONNX FastEmbed / BAAI `bge-small-en-v1.5` (zero external API calls) and remote OpenAI / Jina HTTP endpoints, falling back to mock vectors in isolated unit tests.
+- **Omnichannel Capture:**
+  - Chat commands: `!note`, `!notes`, `!search`, `/note`, `/notes`, `/search` supported across Matrix, Discord, Telegram, and Email.
+  - Voice note capture: voice messages with `/note` caption or in DM are transcribed via STT, formatted by LLM, and saved as a note.
+  - Photo quote capture: images sent with `/note` caption are run through OCR, cleaned, and stored as quote notes with image source references.
+- **Hybrid Search (`repositories/knowledge/search.rs`):** Combines vector cosine similarity with PostgreSQL trigram / text search across notes and bookmarks, deduplicating and ranking results by composite relevance score.
+- **REST API & Web UI (`frontend/src/modules/knowledge/`):** Axum endpoints at `/api/v1/notes` and `/api/v1/knowledge/search`. React SPA module with live markdown preview, tag filter chips, instant search panel, and keyboard shortcuts (`Escape`, `Cmd/Ctrl+Enter`).
+- **AI & MCP Tools (`llm/tools/knowledge.rs`):** Exposes `knowledge_search`, `knowledge_create_note`, and `knowledge_list_tags` to autonomous agent planning loops and external MCP clients (Cursor / Claude Desktop).
+

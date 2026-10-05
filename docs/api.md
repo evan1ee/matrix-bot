@@ -116,6 +116,22 @@ Management is also available from chat: `!webhook list | create <name> [room] | 
 - A request returns `202 Accepted` once its alert is written to the outbox (`WebhookTriggered` plus one `matrix:<room>` delivery, committed together with the webhook's `last_triggered_at`). The events runtime delivers it: up to 10 attempts, waiting `retry_delay` after each failure (1 s, doubling, capped at 512 s), each send bounded to 30 s. `failure_count` rises on every failed attempt and `total_delivered_count` on delivery, each only when the delivery row actually changed state. `GET /account/webhooks/:id/logs` reads the outbox deliveries, so history is kept 30 days; the `outbox_id` in the accepted response and the `id` of each log entry are delivery ids. The `WebhookTriggered` SSE payload carries `id`, `owner_id`, `room_id`, `severity`, `title`, `html_body` and `plain_body`, and no outbox id. See [`architecture.md`](architecture.md#events-and-the-outbox).
 - A sliding-window limiter allows 60 requests per minute per token.
 
+## Knowledge Base & Notes API
+
+Personal notes and semantic search endpoints are mounted under `/api/v1`:
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| `GET` | `/api/v1/notes` | Session / Bearer | List notes with optional `?archived=bool`, `?tag=string`, `?search=string` |
+| `POST` | `/api/v1/notes` | Session / Bearer | Create note (`CreateNoteInput: { title, content, format?, tags? }`) |
+| `GET` | `/api/v1/notes/tags` | Session / Bearer | List all unique tags used across notes |
+| `GET` | `/api/v1/notes/:id` | Session / Bearer | Fetch note details by ID |
+| `PUT` | `/api/v1/notes/:id` | Session / Bearer | Update note (`UpdateNoteInput: { title?, content?, format?, tags?, is_archived? }`) |
+| `DELETE` | `/api/v1/notes/:id` | Session / Bearer | Permanently delete note (204 No Content) |
+| `POST` | `/api/v1/knowledge/search` | Session / Bearer | Hybrid search (`KnowledgeSearchRequest: { query, filter_types?, limit? }`) returning `Vec<SearchResultItem>` |
+
+Mutations publish `NoteCreated`, `NoteUpdated`, or `NoteDeleted` outbox events with valid `owner_id()`. Background durable jobs (`knowledge.embed`) chunk and embed note content asynchronously for vector search.
+
 ## Testing passkey auth locally
 
 Everything runs on `localhost`, without HTTPS or a hardware key.

@@ -20,11 +20,14 @@ pub async fn execute_tool(
                     .get("query")
                     .and_then(|v| v.as_str())
                     .ok_or("Field 'query' is required")?;
-                let filter_types = args.get("filter_types").and_then(|v| v.as_array()).map(|arr| {
-                    arr.iter()
-                        .filter_map(|x| x.as_str().map(|s| s.to_string()))
-                        .collect::<Vec<_>>()
-                });
+                let filter_types = args
+                    .get("filter_types")
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                            .collect::<Vec<_>>()
+                    });
                 let limit = args.get("limit").and_then(|v| v.as_i64()).unwrap_or(5);
 
                 let results = services

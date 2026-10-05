@@ -248,14 +248,7 @@ pub async fn update_note(
     let note = state
         .services
         .notes
-        .update_note(
-            &user.account_id,
-            id,
-            title,
-            content,
-            format,
-            tags,
-        )
+        .update_note(&user.account_id, id, title, content, format, tags)
         .await
         .map_err(ApiError::from)?;
 
@@ -341,7 +334,8 @@ mod tests {
         let alice = AccountId::generate();
         seed_account(&pool, &alice).await;
 
-        let mock_embedder = Arc::new(crate::infrastructure::inference::embedding::MockEmbeddingProvider::new(384));
+        let mock_embedder =
+            Arc::new(crate::infrastructure::inference::embedding::MockEmbeddingProvider::new(384));
         let services = crate::application::AppServices::new(&pool).with_embedder(mock_embedder);
         let mut state = ApiState::new(
             crate::db::Database { pool: pool.clone() },

@@ -11,7 +11,10 @@ mod tests {
 
     #[test]
     fn test_models_present_detects_files() {
-        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
         let tmp = std::env::temp_dir().join(format!("test_embed_models_{}", now));
         std::fs::create_dir_all(&tmp).unwrap();
 

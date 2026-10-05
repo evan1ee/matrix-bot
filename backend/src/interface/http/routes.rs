@@ -6,8 +6,7 @@ use axum::{
 use super::{
     account, agent, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_categories,
     finance_net_worth, footprints, habits, identities, knowledge, life, life_activity, link, mcp,
-    ocr,
-    openapi, portfolio, portfolio_alerts, portfolio_cash, portfolio_history, portfolio_prices,
+    ocr, openapi, portfolio, portfolio_alerts, portfolio_cash, portfolio_history, portfolio_prices,
     recurring_bills, reminders, rooms, settings, sse, storage, todos, voice, webhooks,
 };
 

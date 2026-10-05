@@ -1025,3 +1025,95 @@ fn agent_files_do_not_exceed_500_production_lines() {
         }
     }
 }
+
+#[test]
+fn knowledge_domain_is_pure() {
+    let v = violations(
+        "domain/knowledge",
+        &[
+            "sqlx",
+            "axum",
+            "matrix_sdk",
+            "reqwest",
+            "utoipa",
+            "tokio",
+            "crate::application",
+            "crate::interface",
+            "crate::infrastructure",
+            "crate::db",
+            "tracing::",
+        ],
+    );
+    assert!(
+        v.is_empty(),
+        "domain/knowledge must stay pure:\n{}",
+        v.join("\n")
+    );
+}
+
+#[test]
+fn knowledge_application_knows_no_transports() {
+    let v = violations(
+        "application/knowledge",
+        &[
+            "axum",
+            "matrix_sdk",
+            "reqwest",
+            "utoipa",
+            "crate::interface",
+        ],
+    );
+    assert!(
+        v.is_empty(),
+        "application/knowledge must not depend on transports:\n{}",
+        v.join("\n")
+    );
+}
+
+#[test]
+fn knowledge_interface_runs_no_sql() {
+    let files = [
+        src("interface/http/knowledge.rs"),
+        src("interface/chat/knowledge.rs"),
+    ];
+    let forbidden = [
+        "sqlx::query",
+        "sqlx::query_as",
+        "sqlx::query_scalar",
+        "sqlx::QueryBuilder",
+    ];
+    for file in files {
+        let text = fs::read_to_string(&file).expect("readable file");
+        let hits = production_hits(&text, &forbidden);
+        assert!(
+            hits.is_empty(),
+            "{} must run no SQL:\n{:?}",
+            file.display(),
+            hits
+        );
+    }
+}
+
+#[test]
+fn knowledge_files_do_not_exceed_500_production_lines() {
+    let knowledge_dirs = [
+        src("domain/knowledge"),
+        src("application/knowledge"),
+        src("infrastructure/postgres/repositories/knowledge"),
+    ];
+    for dir in knowledge_dirs {
+        for file in rust_files(&dir) {
+            let text = fs::read_to_string(&file).expect("readable file");
+            let prod_lines = text
+                .lines()
+                .take_while(|line| !line.trim_start().starts_with("#[cfg(test)]"))
+                .count();
+            assert!(
+                prod_lines <= 500,
+                "File {} has {} production lines (max allowed 500)",
+                relative_to_src(&file),
+                prod_lines
+            );
+        }
+    }
+}

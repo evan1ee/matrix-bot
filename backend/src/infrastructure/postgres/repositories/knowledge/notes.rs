@@ -38,6 +38,7 @@ impl From<NoteRow> for Note {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_note(
     executor: impl PgExecutor<'_>,
     owner: &AccountId,

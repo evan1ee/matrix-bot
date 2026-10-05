@@ -15,18 +15,13 @@ impl std::fmt::Display for NoteId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum NoteFormat {
+    #[default]
     Markdown,
     Plain,
     Quote,
-}
-
-impl Default for NoteFormat {
-    fn default() -> Self {
-        Self::Markdown
-    }
 }
 
 impl std::str::FromStr for NoteFormat {
@@ -57,7 +52,6 @@ impl std::fmt::Display for NoteFormat {
         write!(f, "{}", self.as_str())
     }
 }
-
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Note {
@@ -99,7 +93,9 @@ pub fn validate_content(content: &str) -> Result<String, KnowledgeError> {
 pub fn normalize_tag(tag: &str) -> Result<String, KnowledgeError> {
     let raw = tag.trim().trim_start_matches('#').to_ascii_lowercase();
     if raw.is_empty() {
-        return Err(KnowledgeError::InvalidTag("tag cannot be empty".to_string()));
+        return Err(KnowledgeError::InvalidTag(
+            "tag cannot be empty".to_string(),
+        ));
     }
     if raw.len() > 50 {
         return Err(KnowledgeError::InvalidTag(
@@ -138,18 +134,27 @@ mod tests {
     #[test]
     fn validates_titles_properly() {
         assert_eq!(validate_title(" Hello World ").unwrap(), "Hello World");
-        assert_eq!(validate_title("   ").unwrap_err(), KnowledgeError::EmptyTitle);
+        assert_eq!(
+            validate_title("   ").unwrap_err(),
+            KnowledgeError::EmptyTitle
+        );
         let too_long = "a".repeat(201);
         assert!(matches!(
             validate_title(&too_long).unwrap_err(),
-            KnowledgeError::TitleTooLong { max: 200, actual: 201 }
+            KnowledgeError::TitleTooLong {
+                max: 200,
+                actual: 201
+            }
         ));
     }
 
     #[test]
     fn validates_content_properly() {
         assert_eq!(validate_content("note body").unwrap(), "note body");
-        assert_eq!(validate_content("   ").unwrap_err(), KnowledgeError::EmptyContent);
+        assert_eq!(
+            validate_content("   ").unwrap_err(),
+            KnowledgeError::EmptyContent
+        );
     }
 
     #[test]
@@ -166,14 +171,23 @@ mod tests {
             "#AI".to_string(),
             "invalid space".to_string(),
         ];
-        assert_eq!(normalize_tags(&raw), vec!["ai".to_string(), "rust".to_string()]);
+        assert_eq!(
+            normalize_tags(&raw),
+            vec!["ai".to_string(), "rust".to_string()]
+        );
     }
 
     #[test]
     fn format_parsing_works() {
-        assert_eq!("markdown".parse::<NoteFormat>().unwrap(), NoteFormat::Markdown);
+        assert_eq!(
+            "markdown".parse::<NoteFormat>().unwrap(),
+            NoteFormat::Markdown
+        );
         assert_eq!("quote".parse::<NoteFormat>().unwrap(), NoteFormat::Quote);
         assert_eq!("plain".parse::<NoteFormat>().unwrap(), NoteFormat::Plain);
-        assert_eq!("unknown".parse::<NoteFormat>().unwrap(), NoteFormat::Markdown);
+        assert_eq!(
+            "unknown".parse::<NoteFormat>().unwrap(),
+            NoteFormat::Markdown
+        );
     }
 }

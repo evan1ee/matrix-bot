@@ -2,15 +2,15 @@
 
 **Read this before touching code.** This document is the authoritative hand-off state for `matrix-bot`. It outlines the current state of the platform, immediate operational cutover actions, remaining roadmap enhancements, and settled architectural invariants.
 
-> **Current Status (2026-10):** All four major sub-projects (Phases 1–6) across the PostgreSQL foundation, omnichannel architecture, storage decoupling, autonomous agent runtime, and web console polish are **fully implemented, tested, and merged into `master`**.
+> **Current Status (2026-10):** All major subsystems across the PostgreSQL foundation, omnichannel architecture, storage decoupling, autonomous agent runtime, web console polish, and **Second Brain & Knowledge Base (pgvector + hybrid search)** are **fully implemented and verified**.
 
 ---
 
 ## 1. Quick Start & Architecture Overview
 
-`matrix-bot` is an **Omnichannel Personal AI/Life Workspace** built around Matrix, Discord, Telegram, Email, and a React 19 Web Console, powered by a modular Rust backend and local ONNX inference server.
+`matrix-bot` is an **Omnichannel Personal AI/Life Workspace & Second Brain** built around Matrix, Discord, Telegram, Email, and a React 19 Web Console, powered by a modular Rust backend and local ONNX inference server.
 
-- `backend/` (`matrix-bot`): Matrix bot, Axum REST/SSE API, MCP server, LLM gateway, durable jobs, transactional outbox, and domain capabilities.
+- `backend/` (`matrix-bot`): Matrix bot, Axum REST/SSE API, MCP server, LLM gateway, durable jobs, transactional outbox, knowledge base (pgvector), and domain capabilities.
 - `inference/` (`matrix-bot-inference`): Axum server hosting local ONNX models for OCR, speech-to-text (Sherpa/SenseVoice), and text-to-speech (Kokoro-82M).
 - `frontend/` (`web`): React 19 + Vite + Tailwind v4 SPA, built into `backend/web/dist/`.
 - `contracts/`: JSON wire fixtures asserting cross-platform compatibility.
@@ -62,20 +62,20 @@ app.rs / main.rs             Composition roots, supervision, graceful shutdown
 
 ## 3. Verified System Baseline
 
-All milestones are verified green on `master`:
+All milestones are verified green:
 - **Rust Backend:**
   - `cargo check -p matrix-bot --all-targets`: Clean (zero errors, zero warnings).
   - `cargo clippy --workspace --all-targets -- -D warnings`: Clean.
-  - `cargo test -p matrix-bot --lib`: 1309 passed / 0 failed.
-  - `cargo test -p matrix-bot --test architecture`: 35 passed / 0 failed.
+  - `cargo test -p matrix-bot --lib`: 1340 passed / 0 failed.
+  - `cargo test -p matrix-bot --test architecture`: 39 passed / 0 failed.
   - `cargo test -p matrix-bot live_postgres`: 3 passed / 0 failed.
   - `cargo run --bin generate-openapi && git diff --exit-code backend/openapi.json`: Byte-identical (zero drift).
 - **Inference Server:**
   - `cargo test -p matrix-bot-inference`: 74 passed / 0 failed.
 - **Frontend SPA:**
-  - `npm --prefix frontend run build`: Clean (1752 modules transformed, zero TypeScript errors).
-  - Route-based code splitting: Initial production bundle reduced to 485 kB (122 kB gzipped), eliminating chunk size warnings.
-  - `npm --prefix frontend run test:e2e`: 201 passed / 0 failed (100% green across all Playwright specs).
+  - `npm --prefix frontend run build`: Clean (1769 modules transformed, zero TypeScript errors).
+  - Route-based code splitting: Initial production bundle reduced to 486 kB (122 kB gzipped), eliminating chunk size warnings.
+  - `npm --prefix frontend run test:e2e`: 208 passed / 0 failed (100% green across all Playwright specs).
 
 ---
 
@@ -145,6 +145,7 @@ Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in exact seque
 - **PostgreSQL 18 Exclusivity:** The application database is PostgreSQL only. `BIGINT` for row IDs, native `UUID` for `accounts.id` and `owner_id`. No SQL in `domain/`, `application/`, `jobs/`, or `interface/`.
 - **Transactional Outbox:** State mutations and their corresponding `SystemEvent` must be committed in the same database transaction. Outbox deliveries handle external fan-out with independent retries.
 - **Unified Tool Registry:** Interactive user chat uses direct LLM + tool calling bounded by `MAX_TOOL_ROUNDS = 5`. The autonomous agent ReAct loop is strictly reserved for scheduled background workflows.
+- **pgvector Hybrid Search:** Multi-chunk embeddings (`vector(384)`) indexed via HNSW (`vector_cosine_ops`), populated asynchronously via transactional outbox + background durable jobs (`knowledge.embed`), combining vector cosine distance with full-text search without external vector DBs.
 - **Account Identity Model:** One human account (`accounts.id`) links multiple chat identities across Matrix, Discord, Telegram, and Email via `platform_identities`.
 - **File Length & Code Quality:** No file in `backend/src/` or `inference/src/` may exceed 500 lines of production code (target < 300 lines). Every feature follows:
   `domain/<f>` (pure rules) → `application/<f>` (service & transactions) → `infrastructure/postgres/repositories/<f>.rs` (SQL) → `interface/` (DTOs & chat handlers).

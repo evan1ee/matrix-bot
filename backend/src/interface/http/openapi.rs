@@ -33,9 +33,9 @@ use crate::interface::http::webhooks::{TelegramMessageResult, TelegramQuery, Tel
 use crate::interface::http::{
     account, agent, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_categories,
     finance_net_worth, footprints, habits, health, identities, knowledge, life, life_activity,
-    link, mcp, ocr,
-    portfolio, portfolio_alerts, portfolio_cash, portfolio_history, portfolio_prices,
-    recurring_bills, reminders, rooms, settings, sse, storage, todos, voice, webhooks,
+    link, mcp, ocr, portfolio, portfolio_alerts, portfolio_cash, portfolio_history,
+    portfolio_prices, recurring_bills, reminders, rooms, settings, sse, storage, todos, voice,
+    webhooks,
 };
 
 #[derive(OpenApi)]

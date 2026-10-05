@@ -3,8 +3,8 @@
 //! Owns business use cases, transactional boundaries, and outbox event
 //! publication for notes and cross-domain semantic hybrid search.
 
-use std::sync::Arc;
 use sqlx::PgPool;
+use std::sync::Arc;
 
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
@@ -39,6 +39,7 @@ impl NoteService {
     }
 
     /// Creates and persists a note within a transaction, emitting `SystemEvent::NoteCreated`.
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_note(
         &self,
         owner: &AccountId,
@@ -128,14 +129,9 @@ impl NoteService {
         limit: i64,
     ) -> Result<Vec<Note>, AppError> {
         let limit = limit.clamp(1, 100);
-        let notes = repositories::knowledge::list_notes(
-            &self.pool,
-            owner,
-            tag,
-            include_archived,
-            limit,
-        )
-        .await?;
+        let notes =
+            repositories::knowledge::list_notes(&self.pool, owner, tag, include_archived, limit)
+                .await?;
         Ok(notes)
     }
 
@@ -153,7 +149,8 @@ impl NoteService {
         is_archived: bool,
     ) -> Result<Note, AppError> {
         let mut tx = self.pool.begin().await?;
-        let success = repositories::knowledge::archive_note(&mut *tx, id, owner, is_archived).await?;
+        let success =
+            repositories::knowledge::archive_note(&mut *tx, id, owner, is_archived).await?;
         if !success {
             return Err(AppError::NotFound("Note not found".to_string()));
         }
@@ -176,7 +173,14 @@ impl NoteService {
         }
         repositories::knowledge::delete_embeddings_for_item(&mut *tx, owner, "note", id).await?;
 
-        outbox::publish(&mut tx, &SystemEvent::NoteDeleted { id, owner_id: *owner }).await?;
+        outbox::publish(
+            &mut tx,
+            &SystemEvent::NoteDeleted {
+                id,
+                owner_id: *owner,
+            },
+        )
+        .await?;
         tx.commit().await?;
 
         Ok(())
@@ -255,10 +259,7 @@ impl SearchService {
         item_id: i64,
     ) -> Result<(), AppError> {
         let content = repositories::knowledge::get_item_content_for_embedding(
-            &self.pool,
-            owner,
-            item_type,
-            item_id,
+            &self.pool, owner, item_type, item_id,
         )
         .await?;
 
@@ -286,10 +287,14 @@ impl SearchService {
             return Ok(());
         }
 
-        let embeddings = self.embedder.embed(&chunks).await.map_err(|e| AppError::External {
-            service: "embeddings",
-            source: anyhow::anyhow!("{e}"),
-        })?;
+        let embeddings = self
+            .embedder
+            .embed(&chunks)
+            .await
+            .map_err(|e| AppError::External {
+                service: "embeddings",
+                source: anyhow::anyhow!("{e}"),
+            })?;
 
         let mut tx = self.pool.begin().await?;
         repositories::knowledge::delete_embeddings_for_item(
@@ -319,16 +324,16 @@ impl SearchService {
 
     /// Scans unindexed items and enqueues low-priority background embedding jobs.
     pub async fn backfill_embeddings(&self, batch_size: i64) -> Result<usize, AppError> {
-        let unindexed = repositories::knowledge::list_unindexed_items(&self.pool, batch_size).await?;
+        let unindexed =
+            repositories::knowledge::list_unindexed_items(&self.pool, batch_size).await?;
         let mut enqueued = 0;
         for item in unindexed {
-            let job = NewJob::knowledge_embed_item(
-                item.owner_id,
-                item.item_type,
-                item.item_id,
-            )
-            .with_priority(-1);
-            if repositories::jobs::enqueue(&self.pool, &job).await?.is_some() {
+            let job = NewJob::knowledge_embed_item(item.owner_id, item.item_type, item.item_id)
+                .with_priority(-1);
+            if repositories::jobs::enqueue(&self.pool, &job)
+                .await?
+                .is_some()
+            {
                 enqueued += 1;
             }
         }
@@ -377,7 +382,10 @@ mod tests {
         assert_eq!(note.tags, vec!["habits", "productivity"]);
 
         // Read
-        let fetched = note_svc.get_note(&alice, note.id.0).await.expect("get note");
+        let fetched = note_svc
+            .get_note(&alice, note.id.0)
+            .await
+            .expect("get note");
         assert_eq!(fetched.id, note.id);
 
         // Update

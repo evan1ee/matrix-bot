@@ -102,6 +102,31 @@ Migrations `0006`–`0008` (sub-project 2) replace the Matrix-only link tables w
 - **`0007_platform_identities_backfill`** starts with a guard that raises, naming the offending `mxid`s, if any `matrix_links` row references a missing account (a hand-edited database); otherwise it copies every `matrix_links` row into `platform_identities` as `matrix` (using `linked_at` for both timestamps) and drops `matrix_links`. It rewrites data, so it is rehearsed on a production copy ([runbook](superpowers/runbooks/postgres-foundation-cutover.md)).
 - **`0008_drop_matrix_link_challenges`** drops the web-minted challenge table; pending challenges are not carried over (the `!link <code>` flow no longer exists).
 
+## Knowledge Base and Vector Embeddings (`0011_knowledge_base.sql`)
+
+Migration `0011_knowledge_base` introduces the personal knowledge base and vector search subsystem:
+
+- **pgvector extension:** `CREATE EXTENSION IF NOT EXISTS vector;` enabled on PostgreSQL 18.
+- **`notes` table:**
+  - `id BIGSERIAL PRIMARY KEY`
+  - `owner_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE`
+  - `title TEXT NOT NULL`, `content TEXT NOT NULL`, `format TEXT NOT NULL DEFAULT 'markdown'`
+  - `source_channel TEXT NOT NULL DEFAULT 'web'`, `source_ref TEXT`
+  - `tags TEXT[] NOT NULL DEFAULT '{}'`
+  - `is_archived BOOLEAN NOT NULL DEFAULT FALSE`
+  - `created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`, `updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
+  - Indexes: `idx_notes_owner_updated (owner_id, updated_at DESC)`, `idx_notes_tags USING GIN (tags)`, `idx_notes_search USING GIN (to_tsvector('english', title || ' ' || content))`.
+- **`knowledge_embeddings` table:**
+  - `id BIGSERIAL PRIMARY KEY`
+  - `owner_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE`
+  - `item_type TEXT NOT NULL`, `item_id BIGINT NOT NULL`, `chunk_index INTEGER NOT NULL DEFAULT 0`
+  - `content_chunk TEXT NOT NULL`
+  - `embedding vector(384) NOT NULL` (sized for `bge-small-en-v1.5` / `all-MiniLM-L6-v2`)
+  - `created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
+  - Unique constraint: `UNIQUE (owner_id, item_type, item_id, chunk_index)`
+  - Vector Index: `idx_knowledge_embeddings_vector USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64)`.
+- **Ownership & Account Merge:** Both `notes` and `knowledge_embeddings` are listed in `OWNED_TABLES` (`domain/accounts/mod.rs`), so an account merge safely cascades and reassigns all notes and vector embeddings to the surviving account.
+
 ## Migrations
 
 `db/migrate.rs::run_migrations` is the only migration mechanism: `sqlx::migrate!("./migrations")` applies every file in `backend/migrations/` in order, tracked in `_sqlx_migrations`, serialised across concurrent boots by sqlx's own advisory lock. Migrations are forward-only — a committed migration is never edited; a mistake is fixed by a new migration, not a rewritten old one.

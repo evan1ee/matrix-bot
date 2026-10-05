@@ -120,7 +120,8 @@ pub async fn search_hybrid(
     Ok(rows
         .into_iter()
         .map(|r| SearchResultItem {
-            item_type: KnowledgeItemType::from_str_opt(&r.item_type).unwrap_or(KnowledgeItemType::Note),
+            item_type: KnowledgeItemType::from_str_opt(&r.item_type)
+                .unwrap_or(KnowledgeItemType::Note),
             item_id: r.item_id,
             title: r.title.unwrap_or_else(|| r.item_type.clone()),
             content_snippet: r.content_snippet,
@@ -220,9 +221,21 @@ pub async fn get_item_content_for_embedding(
             .await?;
             Ok(row.map(|r| {
                 let mut loc = Vec::new();
-                if let Some(a) = r.address { if !a.is_empty() { loc.push(a); } }
-                if let Some(c) = r.city { if !c.is_empty() { loc.push(c); } }
-                if let Some(co) = r.country { if !co.is_empty() { loc.push(co); } }
+                if let Some(a) = r.address {
+                    if !a.is_empty() {
+                        loc.push(a);
+                    }
+                }
+                if let Some(c) = r.city {
+                    if !c.is_empty() {
+                        loc.push(c);
+                    }
+                }
+                if let Some(co) = r.country {
+                    if !co.is_empty() {
+                        loc.push(co);
+                    }
+                }
                 if loc.is_empty() {
                     r.title
                 } else {
@@ -368,7 +381,11 @@ mod tests {
         assert_eq!(results[0].item_id, note.id.0);
         assert_eq!(results[0].title, "Rust Async Guide");
         assert_eq!(results[0].item_type, KnowledgeItemType::Note);
-        assert!(results[0].similarity_score > 0.6, "expected > 0.6, got {}", results[0].similarity_score);
+        assert!(
+            results[0].similarity_score > 0.6,
+            "expected > 0.6, got {}",
+            results[0].similarity_score
+        );
 
         // Clean up embeddings
         let affected = delete_embeddings_for_item(&pool, &alice, "note", note.id.0)
@@ -399,13 +416,21 @@ mod tests {
         .expect("insert note");
 
         // Content fetch
-        let content = get_item_content_for_embedding(&pool, &alice, KnowledgeItemType::Note, note.id.0)
-            .await
-            .expect("fetch content");
-        assert_eq!(content, Some("Unindexed Note\n\nContent waiting for embedding".to_string()));
+        let content =
+            get_item_content_for_embedding(&pool, &alice, KnowledgeItemType::Note, note.id.0)
+                .await
+                .expect("fetch content");
+        assert_eq!(
+            content,
+            Some("Unindexed Note\n\nContent waiting for embedding".to_string())
+        );
 
         // Scan unindexed
-        let unindexed = list_unindexed_items(&pool, 10).await.expect("list unindexed");
-        assert!(unindexed.iter().any(|u| u.item_id == note.id.0 && u.item_type == KnowledgeItemType::Note));
+        let unindexed = list_unindexed_items(&pool, 10)
+            .await
+            .expect("list unindexed");
+        assert!(unindexed
+            .iter()
+            .any(|u| u.item_id == note.id.0 && u.item_type == KnowledgeItemType::Note));
     }
 }

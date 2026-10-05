@@ -87,7 +87,10 @@ impl EmbeddingProvider for LocalOnnxEmbeddingClient {
         if texts.is_empty() {
             return Err(EmbeddingError::EmptyInput);
         }
-        let base = self.base_url.as_ref().ok_or(EmbeddingError::NotConfigured)?;
+        let base = self
+            .base_url
+            .as_ref()
+            .ok_or(EmbeddingError::NotConfigured)?;
         let url = format!("{base}/v1/embeddings");
 
         let res = self
@@ -153,7 +156,10 @@ impl EmbeddingProvider for CloudEmbeddingClient {
         if texts.is_empty() {
             return Err(EmbeddingError::EmptyInput);
         }
-        let endpoint = self.endpoint.as_ref().ok_or(EmbeddingError::NotConfigured)?;
+        let endpoint = self
+            .endpoint
+            .as_ref()
+            .ok_or(EmbeddingError::NotConfigured)?;
         let url = if endpoint.ends_with("/embeddings") {
             endpoint.clone()
         } else {
@@ -208,7 +214,11 @@ impl EmbeddingProvider for MockEmbeddingProvider {
         if texts.is_empty() {
             return Err(EmbeddingError::EmptyInput);
         }
-        let dim = if self.dimension == 0 { 384 } else { self.dimension };
+        let dim = if self.dimension == 0 {
+            384
+        } else {
+            self.dimension
+        };
         let mut results = Vec::with_capacity(texts.len());
 
         for text in texts {
@@ -231,7 +241,11 @@ impl EmbeddingProvider for MockEmbeddingProvider {
     }
 
     fn dimension(&self) -> usize {
-        if self.dimension == 0 { 384 } else { self.dimension }
+        if self.dimension == 0 {
+            384
+        } else {
+            self.dimension
+        }
     }
 }
 
@@ -302,10 +316,7 @@ mod tests {
         let client = LocalOnnxEmbeddingClient::new(None, None);
         assert!(!client.is_configured());
 
-        let err = client
-            .embed(&["test".to_string()])
-            .await
-            .unwrap_err();
+        let err = client.embed(&["test".to_string()]).await.unwrap_err();
         assert!(matches!(err, EmbeddingError::NotConfigured));
     }
 }

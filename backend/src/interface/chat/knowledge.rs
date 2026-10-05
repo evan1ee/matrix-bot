@@ -89,7 +89,8 @@ impl BotModule for KnowledgeModule {
             CommandHelp {
                 name: "search".to_string(),
                 usage: "!search <query>".to_string(),
-                description: "Hybrid search across notes, bookmarks, journal, and footprints".to_string(),
+                description: "Hybrid search across notes, bookmarks, journal, and footprints"
+                    .to_string(),
             },
         ]
     }
@@ -156,7 +157,8 @@ async fn handle_add(
     ctx: &CommandContext,
 ) -> String {
     if args.is_empty() {
-        return "❌ <b>Usage:</b> <code>!note add &lt;title&gt; | &lt;content&gt;</code>".to_string();
+        return "❌ <b>Usage:</b> <code>!note add &lt;title&gt; | &lt;content&gt;</code>"
+            .to_string();
     }
     let (title, content) = split_title_content(args);
     let tags = extract_tags(args);
@@ -294,7 +296,11 @@ async fn handle_search(services: &AppServices, owner: &AccountId, query: &str) -
     if query.is_empty() {
         return "🔍 <b>Usage:</b> <code>!search &lt;query&gt;</code>".to_string();
     }
-    match services.knowledge_search.search(owner, query, None, 3).await {
+    match services
+        .knowledge_search
+        .search(owner, query, None, 3)
+        .await
+    {
         Ok(results) if results.is_empty() => {
             format!(
                 "<p>🔍 <i>No knowledge items found matching &quot;{}&quot;.</i></p>",
@@ -340,10 +346,14 @@ pub async fn capture_photo_note(
 ) -> String {
     let text = match ocr.scan(media_bytes.to_vec()).await {
         Ok(s) if !s.text.trim().is_empty() => s.text.trim().to_string(),
-        Ok(_) => return "⚠️ <b>图片识别失败</b><br/>• <b>原因:</b> 未能从图片中识别出有效文字。".to_string(),
+        Ok(_) => {
+            return "⚠️ <b>图片识别失败</b><br/>• <b>原因:</b> 未能从图片中识别出有效文字。"
+                .to_string()
+        }
         Err(e) => {
             error!("OCR extraction failed for photo note: {e:?}");
-            return "⚠️ <b>图片识别不可用</b><br/>• <b>原因:</b> OCR 识别服务暂时不可用。".to_string();
+            return "⚠️ <b>图片识别不可用</b><br/>• <b>原因:</b> OCR 识别服务暂时不可用。"
+                .to_string();
         }
     };
 
@@ -388,6 +398,7 @@ pub async fn capture_photo_note(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn capture_voice_note(
     services: &AppServices,
     room_id: &str,
@@ -500,46 +511,79 @@ mod tests {
         let alice = AccountId::generate();
         seed_account(&pool, &alice).await;
 
-        let mock_embedder = Arc::new(crate::infrastructure::inference::embedding::MockEmbeddingProvider::new(384));
+        let mock_embedder =
+            Arc::new(crate::infrastructure::inference::embedding::MockEmbeddingProvider::new(384));
         let services = AppServices::new(&pool).with_embedder(mock_embedder);
         let db = Database { pool };
         let module = KnowledgeModule::new();
 
         // 1. Add note
-        let ctx = mock_context("note", "add Clean Architecture | Separation of concerns #architecture", alice);
-        let reply = module.handle_command(&ctx, &services, &db).await.expect("reply");
+        let ctx = mock_context(
+            "note",
+            "add Clean Architecture | Separation of concerns #architecture",
+            alice,
+        );
+        let reply = module
+            .handle_command(&ctx, &services, &db)
+            .await
+            .expect("reply");
         assert!(reply.html_body().contains("Note #"));
         assert!(reply.html_body().contains("Clean Architecture"));
 
         // 2. Quick note
         let ctx_quick = mock_context("note", "Just a quick thought about Rust #rust", alice);
-        let reply_quick = module.handle_command(&ctx_quick, &services, &db).await.expect("reply");
+        let reply_quick = module
+            .handle_command(&ctx_quick, &services, &db)
+            .await
+            .expect("reply");
         assert!(reply_quick.html_body().contains("captured"));
 
         // 3. List notes
         let ctx_list = mock_context("notes", "", alice);
-        let reply_list = module.handle_command(&ctx_list, &services, &db).await.expect("reply");
+        let reply_list = module
+            .handle_command(&ctx_list, &services, &db)
+            .await
+            .expect("reply");
         assert!(reply_list.html_body().contains("Clean Architecture"));
         assert!(reply_list.html_body().contains("Just a quick thought"));
 
         // 4. List notes by tag
         let ctx_tag = mock_context("notes", "architecture", alice);
-        let reply_tag = module.handle_command(&ctx_tag, &services, &db).await.expect("reply");
+        let reply_tag = module
+            .handle_command(&ctx_tag, &services, &db)
+            .await
+            .expect("reply");
         assert!(reply_tag.html_body().contains("Clean Architecture"));
 
         // 5. Search before embedding returns no match message
         let ctx_search = mock_context("search", "Separation", alice);
-        let reply_search = module.handle_command(&ctx_search, &services, &db).await.expect("reply");
-        assert!(reply_search.html_body().contains("No knowledge items found"));
+        let reply_search = module
+            .handle_command(&ctx_search, &services, &db)
+            .await
+            .expect("reply");
+        assert!(reply_search
+            .html_body()
+            .contains("No knowledge items found"));
 
         // After embedding the note, search returns results
-        let notes = services.notes.list_notes(&alice, None, false, 10).await.unwrap();
+        let notes = services
+            .notes
+            .list_notes(&alice, None, false, 10)
+            .await
+            .unwrap();
         services
             .knowledge_search
-            .embed_item(&alice, crate::domain::knowledge::search::KnowledgeItemType::Note, notes[0].id.0)
+            .embed_item(
+                &alice,
+                crate::domain::knowledge::search::KnowledgeItemType::Note,
+                notes[0].id.0,
+            )
             .await
             .expect("embed note");
-        let reply_search_2 = module.handle_command(&ctx_search, &services, &db).await.expect("reply");
+        let reply_search_2 = module
+            .handle_command(&ctx_search, &services, &db)
+            .await
+            .expect("reply");
         assert!(reply_search_2.html_body().contains("Search Results"));
     }
 
@@ -551,7 +595,8 @@ mod tests {
         let alice = AccountId::generate();
         seed_account(&pool, &alice).await;
 
-        let mock_embedder = Arc::new(crate::infrastructure::inference::embedding::MockEmbeddingProvider::new(384));
+        let mock_embedder =
+            Arc::new(crate::infrastructure::inference::embedding::MockEmbeddingProvider::new(384));
         let services = AppServices::new(&pool).with_embedder(mock_embedder);
         let db = Database { pool };
         let module = KnowledgeModule::new();
@@ -563,8 +608,13 @@ mod tests {
             event_id: None,
         });
 
-        let reply = module.handle_command(&ctx, &services, &db).await.expect("reply");
+        let reply = module
+            .handle_command(&ctx, &services, &db)
+            .await
+            .expect("reply");
         assert!(reply.html_body().contains("saved from quote"));
-        assert!(reply.html_body().contains("Make invalid states unrepresentable."));
+        assert!(reply
+            .html_body()
+            .contains("Make invalid states unrepresentable."));
     }
 }
