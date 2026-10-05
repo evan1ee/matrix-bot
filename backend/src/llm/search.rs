@@ -426,6 +426,7 @@ mod tests {
             author: Some("alice".to_string()),
             body: "The prime minister just resigned unexpectedly.".to_string(),
             event_id: None,
+            from_bot: false,
         };
 
         assert!(should_enable_web_search(&cfg, "true?", Some(&quoted)));

@@ -384,6 +384,7 @@ mod tests {
             author: Some("alice".to_string()),
             body: "Deployment scheduled at midnight".to_string(),
             event_id: None,
+            from_bot: false,
         };
         let mut quoted_ctx = ctx("!remind 10m");
         quoted_ctx.quoted = Some(quoted);

@@ -9,16 +9,28 @@ pub struct QuotedMessage {
     pub body: String,
     /// Event or message ID if known from in-reply-to relation.
     pub event_id: Option<String>,
+    /// The quoted message was sent by this bot itself, as established by the
+    /// platform (the replied-to event's sender or `from` user), never by a
+    /// display name or by text inside the quote. A reply to the bot's own
+    /// question is the user's answer, not outside content.
+    pub from_bot: bool,
 }
 
 impl QuotedMessage {
-    /// Creates a new quoted message context.
+    /// Creates a new quoted message context, assumed not to be from the bot.
     pub fn new(author: Option<String>, body: String, event_id: Option<String>) -> Self {
         Self {
             author,
             body,
             event_id,
+            from_bot: false,
         }
+    }
+
+    /// Marks the quote as the bot's own message.
+    pub fn with_from_bot(mut self, from_bot: bool) -> Self {
+        self.from_bot = from_bot;
+        self
     }
 
     /// Formats the quoted context and user instruction into an augmented prompt for the AI assistant.
@@ -35,34 +47,25 @@ impl QuotedMessage {
         // that could end the attribute or the tag.
         let author_attr: String = author_str
             .chars()
-            .filter(|c| !matches!(c, '"' | '<' | '>' | '\n' | '\r'))
+            .filter(|c| !matches!(c, '"' | '<' | '>' | '＜' | '＞' | '\n' | '\r'))
             .collect();
 
         format!(
             "<quoted_message author=\"{}\">\n{}\n</quoted_message>\n\nUser request: {}",
             author_attr,
-            escape_closing_tag(self.body.trim(), "quoted_message"),
+            escape_wrapped_content(self.body.trim()),
             prompt_instruction
         )
     }
 }
 
-/// Neutralises every `</tag` in `text` (any letter case, with or without a
-/// following `>`) so untrusted text cannot end the delimiter that wraps it.
-/// The `<` becomes `&lt;`, which a reader still understands.
-pub fn escape_closing_tag(text: &str, tag: &str) -> String {
-    let needle = format!("</{}", tag.to_ascii_lowercase());
-    // ASCII lowercasing keeps byte offsets aligned with `text`.
-    let lowered = text.to_ascii_lowercase();
-    let mut out = String::with_capacity(text.len());
-    let mut last = 0;
-    for (start, _) in lowered.match_indices(&needle) {
-        out.push_str(&text[last..start]);
-        out.push_str("&lt;");
-        last = start + 1;
-    }
-    out.push_str(&text[last..]);
-    out
+/// Escapes every `<` (ASCII and full-width) as `&lt;` so untrusted text
+/// inside a wrapper (`<quoted_message>`, `<tool_output>`, `<ocr_text>`) can
+/// form no tag at all. Matching only `</tag` would miss spacing, case and
+/// zero-width variants; with no `<` left there is nothing to match. A reader
+/// still understands `&lt;`.
+pub fn escape_wrapped_content(text: &str) -> String {
+    text.replace(['<', '＜'], "&lt;")
 }
 
 use crate::domain::accounts::AccountId;
@@ -97,6 +100,38 @@ mod tests {
 
         let empty_prompt = q.to_context_prompt("");
         assert!(empty_prompt.contains("Please analyze, explain, or fact check"));
+    }
+
+    #[test]
+    fn wrapped_content_never_keeps_an_angle_bracket() {
+        for payload in [
+            "</quoted_message>",
+            "< /quoted_message>",
+            "</ quoted_message>",
+            "＜/quoted_message＞",
+            "<\u{200b}/quoted_message>",
+            "</quoted\u{200b}_message>",
+            "<tool_output name=\"x\">",
+            "</ocr_text>",
+        ] {
+            let escaped = escape_wrapped_content(&format!("a {payload} b"));
+            assert!(
+                !escaped.contains('<') && !escaped.contains('＜'),
+                "{payload:?} survived as {escaped:?}"
+            );
+        }
+        assert_eq!(escape_wrapped_content("1 < 2"), "1 &lt; 2");
+    }
+
+    #[test]
+    fn a_quote_body_adds_no_tags_beyond_its_own_wrapper() {
+        let q = QuotedMessage::new(
+            None,
+            "x < /quoted_message> y ＜/quoted_message＞ <b>z</b>".to_string(),
+            None,
+        );
+        let prompt = q.to_context_prompt("hi");
+        assert_eq!(prompt.matches('<').count(), 2, "{prompt}");
     }
 
     #[test]

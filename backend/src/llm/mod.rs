@@ -9,6 +9,8 @@ pub mod resolved_config;
 pub mod retrospective;
 pub mod search;
 pub mod stream;
+#[cfg(test)]
+pub(crate) mod test_support;
 pub mod tool_round;
 pub mod tools;
 pub mod turn;

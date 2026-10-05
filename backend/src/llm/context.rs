@@ -13,16 +13,17 @@ pub struct LlmTurnContext<'a> {
     pub owner_id: &'a AccountId,
     pub room_id: &'a str,
     pub progress: Option<&'a dyn ProgressSink>,
-    /// The prompt embeds someone else's quoted text, so the turn is tainted
-    /// from the start: see `llm::guard`.
-    pub quoted_context: bool,
+    /// The prompt embeds text an outsider wrote (a quote from someone other
+    /// than the bot, OCR text), so the turn is tainted from the start: see
+    /// `llm::guard`.
+    pub untrusted_input: bool,
 }
 
 impl<'a> LlmTurnContext<'a> {
-    /// Marks the turn as carrying quoted content; only the front door that
-    /// actually embedded a quote calls this.
-    pub fn with_quoted_context(mut self) -> Self {
-        self.quoted_context = true;
+    /// Marks the turn as carrying outside content; only a front door that
+    /// actually embedded some calls this.
+    pub fn with_untrusted_input(mut self) -> Self {
+        self.untrusted_input = true;
         self
     }
 
@@ -41,7 +42,7 @@ impl<'a> LlmTurnContext<'a> {
             owner_id,
             room_id,
             progress,
-            quoted_context: false,
+            untrusted_input: false,
         }
     }
 }

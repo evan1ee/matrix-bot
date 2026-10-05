@@ -78,8 +78,12 @@ pub async fn process_image(
 
     let ai_prompt = prompt::build_ocr_prompt(caption, &ocr_result.combined_text);
 
+    // The recognised text is whatever the photo shows (a receipt, a sign, a
+    // page someone handed over), so it can carry instructions: the turn is
+    // tainted and sensitive tools wait for the user's confirmation.
     let turn_ctx =
-        crate::llm::LlmTurnContext::new(services, &db.pool, ai, owner_id, conversation, progress);
+        crate::llm::LlmTurnContext::new(services, &db.pool, ai, owner_id, conversation, progress)
+            .with_untrusted_input();
     match crate::llm::run_turn(&turn_ctx, &ai_prompt, None).await {
         Ok(ai_turn) => MediaReply {
             html: format_ocr_turn_response(&ai_turn, &ocr_result),

@@ -7,21 +7,29 @@
 //! claims success without a successful tool call is corrected.
 
 use super::agent::sandbox::is_sensitive_tool;
-use crate::domain::chat::escape_closing_tag;
+use crate::domain::chat::escape_wrapped_content;
 
-/// Marks the start of a reply that claims an action was done. Checked
-/// instead of any English phrase, so it works in every language.
+/// Marks the start of a reply that claims an action was done (the D2
+/// confirmation format). Checked instead of any English phrase, so it works
+/// in every language.
 const SUCCESS_MARK: char = '✅';
 
-/// Tools whose output is text an outsider wrote.
-const OUTSIDE_CONTENT_TOOLS: &[&str] = &["web_search", "get_webhook_logs", "knowledge_search"];
+/// Tools whose output is text an outsider wrote. Matching is by name, not
+/// by result, so a failed call still taints.
+const OUTSIDE_CONTENT_TOOLS: &[&str] = &[
+    "web_search",
+    "get_webhook_logs",
+    "knowledge_search",
+    // Bookmark titles and descriptions are fetched from the web.
+    "get_my_bookmarks",
+];
 
 /// Asks the model to retry honestly. It names no language, so the model
 /// answers in the user's.
 pub const CORRECTION_MESSAGE: &str = "No tool call succeeded in this turn, yet your reply claims an action was done with a checkmark. Nothing was saved. Call the required tool through the function calling API, or tell the user plainly that nothing was done.";
 
 /// Replaces a reply that still claims success after the correction.
-pub const UNRECORDED_NOTICE: &str = "⚠️ No action was recorded.";
+pub const UNRECORDED_NOTICE: &str = "⚠️ 未记录任何操作 / No action was recorded.";
 
 pub fn returns_outside_content(tool_name: &str) -> bool {
     OUTSIDE_CONTENT_TOOLS.contains(&tool_name)
@@ -53,13 +61,16 @@ pub fn wrap_tool_output(tool_name: &str, output: &str) -> String {
         .collect();
     format!(
         "<tool_output name=\"{name}\">\n{}\n</tool_output>",
-        escape_closing_tag(output, "tool_output")
+        escape_wrapped_content(output)
     )
 }
 
 /// No tool succeeded this turn but the reply claims an action was done.
+/// Only a reply that *starts* with the checkmark is a claim: that is the
+/// confirmation format the static prompt prescribes, while a checkmark in
+/// the middle of a fact-check or a list is just text.
 pub fn claims_unrecorded_success(reply: &str, any_tool_succeeded: bool) -> bool {
-    !any_tool_succeeded && reply.contains(SUCCESS_MARK)
+    !any_tool_succeeded && reply.trim_start().starts_with(SUCCESS_MARK)
 }
 
 #[cfg(test)]
@@ -67,8 +78,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn outside_content_tools_are_the_three_that_return_foreign_text() {
-        for tool in ["web_search", "get_webhook_logs", "knowledge_search"] {
+    fn outside_content_tools_are_the_ones_that_return_foreign_text() {
+        for tool in [
+            "web_search",
+            "get_webhook_logs",
+            "knowledge_search",
+            "get_my_bookmarks",
+        ] {
             assert!(returns_outside_content(tool), "{tool}");
         }
         assert!(!returns_outside_content("get_my_tasks"));
@@ -107,5 +123,20 @@ mod tests {
         assert!(claims_unrecorded_success("✅ Task added", false));
         assert!(!claims_unrecorded_success("✅ Task added", true));
         assert!(!claims_unrecorded_success("I could not save it.", false));
+    }
+
+    #[test]
+    fn only_a_reply_that_starts_with_the_checkmark_is_a_claim() {
+        assert!(claims_unrecorded_success("\n  ✅ **Task added**", false));
+        assert!(!claims_unrecorded_success(
+            "Claim 1 is accurate ✅, claim 2 is not",
+            false
+        ));
+    }
+
+    #[test]
+    fn the_fallback_notice_is_bilingual() {
+        assert!(UNRECORDED_NOTICE.contains("No action was recorded"));
+        assert!(UNRECORDED_NOTICE.contains("未记录任何操作"));
     }
 }

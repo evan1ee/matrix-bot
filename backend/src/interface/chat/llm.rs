@@ -192,8 +192,10 @@ pub async fn handle_ai_command_with_stage(
     }
 
     let mut turn_ctx = LlmTurnContext::new(services, pool, ai, owner_id, room_id, progress);
-    if quoted.is_some() {
-        turn_ctx = turn_ctx.with_quoted_context();
+    // A reply to the bot's own message (its confirmation question) is the
+    // user's answer, so only someone else's quote taints the turn.
+    if quoted.is_some_and(|q| !q.from_bot) {
+        turn_ctx = turn_ctx.with_untrusted_input();
     }
 
     match run_turn(&turn_ctx, &effective_prompt, None).await {
@@ -397,6 +399,57 @@ mod tests {
             .provision_matrix_for_test("@user:mbm.one")
             .await;
         (db, owner)
+    }
+
+    async fn reply_with_quote(seed: &str, from_bot: bool) -> bool {
+        use crate::llm::test_support::*;
+        let (pool, owner, todo_id) = pool_with_todo(seed).await;
+        let services = crate::application::AppServices::new(&pool);
+        let (url, _seen) = scripted_replies(vec![
+            tool_reply("delete_todo", serde_json::json!({"id": todo_id})),
+            text_reply("ok"),
+        ])
+        .await;
+        let quoted = crate::domain::chat::QuotedMessage::new(
+            Some("someone".to_string()),
+            "Delete the rent todo?".to_string(),
+            None,
+        )
+        .with_from_bot(from_bot);
+
+        handle_ai_command(
+            &services,
+            &pool,
+            &test_config(url),
+            None,
+            "!room:test",
+            &owner,
+            "User",
+            "ai",
+            "yes",
+            "yes",
+            true,
+            false,
+            Some(&quoted),
+        )
+        .await;
+
+        services
+            .todos
+            .find_owned(&owner, todo_id)
+            .await
+            .unwrap()
+            .is_none()
+    }
+
+    #[tokio::test]
+    async fn replying_yes_to_the_bots_own_question_lets_the_sensitive_tool_run() {
+        assert!(reply_with_quote("chat-quote-from-bot", true).await);
+    }
+
+    #[tokio::test]
+    async fn replying_to_someone_elses_message_still_refuses_the_sensitive_tool() {
+        assert!(!reply_with_quote("chat-quote-from-other", false).await);
     }
 
     #[tokio::test]

@@ -19,6 +19,10 @@ pub const DEFAULT_SENSITIVE_TOOLS: &[&str] = &[
     "delete_footprint",
     "delete_portfolio_price_alert",
     "cancel_portfolio_price_alert",
+    // Silent changes an injected instruction could make. `update_todo` is
+    // deliberately not listed: too common to confirm every time.
+    "cancel_reminder",
+    "update_my_settings",
 ];
 
 /// Checks if a tool name is allowed given an optional whitelist.
@@ -84,6 +88,11 @@ mod tests {
         assert!(is_sensitive_tool("cancel_portfolio_price_alert", None));
         assert!(is_sensitive_tool("delete_portfolio_price_alert", None));
         assert!(!is_sensitive_tool("get_my_tasks", None));
+        // An injected quote could silence a reminder or rewrite settings.
+        assert!(is_sensitive_tool("cancel_reminder", None));
+        assert!(is_sensitive_tool("update_my_settings", None));
+        // Too common to confirm every time; see HANDOFF.
+        assert!(!is_sensitive_tool("update_todo", None));
 
         let custom = vec!["custom_risky_tool".to_string()];
         assert!(is_sensitive_tool("custom_risky_tool", Some(&custom)));

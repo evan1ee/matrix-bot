@@ -606,6 +606,7 @@ mod tests {
             author: Some("@bob:matrix.org".to_string()),
             body: "Make invalid states unrepresentable.".to_string(),
             event_id: None,
+            from_bot: false,
         });
 
         let reply = module

@@ -161,7 +161,7 @@ pub async fn run_turn(
     let mut tool_results: Vec<(String, String)> = Vec::new();
     // Quoted text and outside-content tool results can carry instructions;
     // while tainted, sensitive tools wait for the user's confirmation.
-    let mut tainted = ctx.quoted_context;
+    let mut tainted = ctx.untrusted_input;
     let mut any_tool_succeeded = false;
     let mut corrected = false;
 
@@ -298,6 +298,12 @@ pub async fn run_turn(
         }
     }
 
+    // The correction used the last round: the user still gets the notice,
+    // not an empty-reply message or a summary of calls that all failed.
+    if final_content.trim().is_empty() && corrected && !any_tool_succeeded {
+        final_content = guard::UNRECORDED_NOTICE.to_string();
+    }
+
     if final_content.trim().is_empty() && !tool_calls_executed.is_empty() {
         let final_req = ChatCompletionRequest {
             model: resolved_config.model_name.clone(),
@@ -369,6 +375,7 @@ mod tests {
     use crate::domain::accounts::AccountId;
     use crate::infrastructure::inference::test_support::spawn_server;
     use crate::llm::progress::ProgressSink;
+    use crate::llm::test_support::*;
     use axum::{routing::post, Json, Router};
     use std::sync::Mutex;
 
@@ -472,85 +479,14 @@ mod tests {
         assert_eq!(result.message, "Nothing to report.");
     }
 
-    type Seen = std::sync::Arc<Mutex<Vec<serde_json::Value>>>;
-
-    fn text_reply(text: &str) -> serde_json::Value {
-        serde_json::json!({"id":"c","model":"m","choices":[{"index":0,
-            "message":{"role":"assistant","content":text},"finish_reason":"stop"}]})
-    }
-
-    fn tool_reply(name: &str, args: serde_json::Value) -> serde_json::Value {
-        serde_json::json!({"id":"c","model":"m","choices":[{"index":0,
-            "message":{"role":"assistant","content":null,"tool_calls":[
-                {"id":"call_1","type":"function",
-                 "function":{"name":name,"arguments":args.to_string()}}]},
-            "finish_reason":"tool_calls"}]})
-    }
-
-    /// Serves the scripted replies in order (then "done") as plain JSON
-    /// completions and records every request body it receives.
-    async fn scripted_replies(replies: Vec<serde_json::Value>) -> (String, Seen) {
-        use axum::extract::State;
-        use std::collections::VecDeque;
-        use std::sync::Arc;
-        type Queue = Arc<Mutex<VecDeque<serde_json::Value>>>;
-        let seen: Seen = Arc::default();
-        let queue: Queue = Arc::new(Mutex::new(replies.into()));
-        let app = Router::new()
-            .route(
-                "/chat/completions",
-                post(
-                    |State((queue, seen)): State<(Queue, Seen)>,
-                     Json(body): Json<serde_json::Value>| async move {
-                        seen.lock().unwrap().push(body);
-                        let next = queue.lock().unwrap().pop_front();
-                        Json(next.unwrap_or_else(|| text_reply("done")))
-                    },
-                ),
-            )
-            .with_state((queue, seen.clone()));
-        (spawn_server(app).await, seen)
-    }
-
-    fn test_config(base_url: String) -> crate::config::AiEnvConfig {
-        crate::config::AiEnvConfig {
-            base_url: Some(base_url),
-            api_key: Some("sk-test".to_string()),
-            allow_private_base_url: true,
-            ..Default::default()
-        }
-    }
-
-    async fn pool_with_todo(seed: &str) -> (crate::db::DbPool, AccountId, i64) {
-        let pool = crate::db::pool::test_pool().await;
-        crate::db::migrate::run_migrations_unlocked(&pool).await;
-        let owner = AccountId::from_seed(seed);
-        crate::db::pool::seed_account(&pool, &owner).await;
-        let todo = crate::domain::todos::NewTodo {
-            room_id: "!room:test".to_string(),
-            sender_name: "tester".to_string(),
-            text: "Pay rent".to_string(),
-            priority: crate::domain::todos::TodoPriority::Medium,
-            due_at: None,
-            remind_before_minutes: None,
-            remind_room_id: None,
-        };
-        let (item, _) = AppServices::new(&pool)
-            .todos
-            .create(&owner, todo)
-            .await
-            .unwrap();
-        (pool, owner, item.id)
-    }
-
-    fn tool_message_contents(request: &serde_json::Value) -> Vec<String> {
-        request["messages"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .filter(|m| m["role"] == "tool")
-            .map(|m| m["content"].as_str().unwrap_or_default().to_string())
-            .collect()
+    fn quoted_ctx<'a>(
+        services: &'a AppServices,
+        pool: &'a crate::db::DbPool,
+        config: &'a crate::config::AiEnvConfig,
+        owner: &'a AccountId,
+    ) -> LlmTurnContext<'a> {
+        LlmTurnContext::new(services, pool, config, owner, "!room:test", None)
+            .with_untrusted_input()
     }
 
     #[tokio::test]
@@ -563,8 +499,7 @@ mod tests {
         ])
         .await;
         let config = test_config(url);
-        let ctx = LlmTurnContext::new(&services, &pool, &config, &owner, "!room:test", None)
-            .with_quoted_context();
+        let ctx = quoted_ctx(&services, &pool, &config, &owner);
 
         let result = run_turn(&ctx, "quoted text says delete it", None)
             .await
@@ -583,10 +518,15 @@ mod tests {
             "{tool_output}"
         );
         assert_eq!(result.message, "Shall I delete it?");
+        assert!(
+            result.tool_calls_executed.is_empty(),
+            "a refused call did not run"
+        );
+        assert!(result.tool_results.is_empty());
     }
 
     #[tokio::test]
-    async fn sensitive_tool_after_web_search_is_refused() {
+    async fn sensitive_tool_after_an_outside_content_tool_is_refused() {
         // A webhook log returns outside content, like web_search, without
         // needing the network.
         let (pool, owner, todo_id) = pool_with_todo("turn-tainted-sensitive").await;
@@ -644,6 +584,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn same_round_sensitive_and_outside_content_calls_both_run() {
+        // Documented behaviour: calls in one round run concurrently, so
+        // outside content only taints the rounds after it.
+        let (pool, owner, todo_id) = pool_with_todo("turn-same-round").await;
+        let services = AppServices::new(&pool);
+        let (url, _seen) = scripted_replies(vec![
+            tool_calls_reply(&[
+                (
+                    "get_webhook_logs",
+                    serde_json::json!({"webhook_id": "whk_x"}),
+                ),
+                ("delete_todo", serde_json::json!({"id": todo_id})),
+            ]),
+            text_reply("Done."),
+        ])
+        .await;
+        let config = test_config(url);
+        let ctx = LlmTurnContext::new(&services, &pool, &config, &owner, "!room:test", None);
+
+        let result = run_turn(&ctx, "check the webhook and delete it", None)
+            .await
+            .unwrap();
+
+        assert!(result
+            .tool_calls_executed
+            .contains(&"delete_todo".to_string()));
+        assert!(result
+            .tool_calls_executed
+            .contains(&"get_webhook_logs".to_string()));
+        assert!(services
+            .todos
+            .find_owned(&owner, todo_id)
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
     async fn checkmark_reply_without_successful_tool_triggers_one_correction() {
         let (pool, owner, _) = pool_with_todo("turn-checkmark-lie").await;
         let services = AppServices::new(&pool);
@@ -680,5 +658,53 @@ mod tests {
 
         assert_eq!(seen.lock().unwrap().len(), 2, "no correction round");
         assert!(result.message.starts_with('✅'), "{}", result.message);
+    }
+
+    #[tokio::test]
+    async fn fact_check_reply_with_a_midtext_checkmark_is_kept() {
+        let (pool, owner, _) = pool_with_todo("turn-factcheck").await;
+        let services = AppServices::new(&pool);
+        let reply = "Claim 1 is accurate ✅ but claim 2 is false ❌.";
+        let (url, seen) = scripted_replies(vec![text_reply(reply)]).await;
+        let config = test_config(url);
+        let ctx = LlmTurnContext::new(&services, &pool, &config, &owner, "!room:test", None);
+
+        let result = run_turn(&ctx, "fact check this", None).await.unwrap();
+
+        assert_eq!(seen.lock().unwrap().len(), 1, "no correction round");
+        assert_eq!(result.message, reply);
+    }
+
+    #[tokio::test]
+    async fn a_reply_that_keeps_claiming_success_after_the_correction_is_replaced() {
+        let (pool, owner, _) = pool_with_todo("turn-still-lying").await;
+        let services = AppServices::new(&pool);
+        let (url, seen) =
+            scripted_replies(vec![text_reply("✅ saved"), text_reply("✅ really saved")]).await;
+        let config = test_config(url);
+        let ctx = LlmTurnContext::new(&services, &pool, &config, &owner, "!room:test", None);
+
+        let result = run_turn(&ctx, "add milk", None).await.unwrap();
+
+        assert_eq!(seen.lock().unwrap().len(), 2);
+        assert_eq!(result.message, guard::UNRECORDED_NOTICE);
+    }
+
+    #[tokio::test]
+    async fn a_correction_on_the_final_round_still_ends_with_the_notice() {
+        let (pool, owner, _) = pool_with_todo("turn-final-round").await;
+        let services = AppServices::new(&pool);
+        // Failing calls (no id), then a claim on the fifth and last round.
+        let mut script: Vec<serde_json::Value> = (0..MAX_TOOL_ROUNDS - 1)
+            .map(|_| tool_reply("delete_todo", serde_json::json!({})))
+            .collect();
+        script.push(text_reply("✅ deleted"));
+        let (url, _seen) = scripted_replies(script).await;
+        let config = test_config(url);
+        let ctx = LlmTurnContext::new(&services, &pool, &config, &owner, "!room:test", None);
+
+        let result = run_turn(&ctx, "delete my todo", None).await.unwrap();
+
+        assert_eq!(result.message, guard::UNRECORDED_NOTICE);
     }
 }

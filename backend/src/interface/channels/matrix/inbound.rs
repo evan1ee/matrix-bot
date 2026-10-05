@@ -135,6 +135,14 @@ pub async fn handle_text(
                 q.event_id = Some(eid.clone());
             }
         }
+        // Whether the quote is the bot's own message (its confirmation
+        // question) comes from the replied-to event's sender, never from the
+        // quote text.
+        if let Some(ref mut q) = parsed.quoted {
+            q.from_bot =
+                crate::interface::channels::matrix::quote::replied_event_is_from(room, eid, own_id)
+                    .await;
+        }
     }
 
     info!(
