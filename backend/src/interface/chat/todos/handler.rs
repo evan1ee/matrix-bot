@@ -192,7 +192,6 @@ mod tests {
             author: Some("alice".to_string()),
             body: "Remember to review PR #42".to_string(),
             event_id: None,
-            from_bot: false,
         };
         let mut quoted_ctx = ctx("!todo add");
         quoted_ctx.quoted = Some(quoted);

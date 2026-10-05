@@ -42,27 +42,6 @@ pub fn extract_replied_event_id(
     }
 }
 
-/// Whether the replied-to event was sent by `user_id`, as the homeserver
-/// records it. The quote text and its author line come from the replying
-/// client and can say anything, so this reads the event itself. Any failure
-/// to fetch or parse it counts as "not ours": the safe answer.
-pub async fn replied_event_is_from(
-    room: &Room,
-    event_id_str: &str,
-    user_id: &matrix_sdk::ruma::UserId,
-) -> bool {
-    let Ok(eid) = EventId::parse(event_id_str) else {
-        return false;
-    };
-    let Ok(timeline_event) = room.event(&eid, None).await else {
-        return false;
-    };
-    timeline_event
-        .raw()
-        .deserialize()
-        .is_ok_and(|ev| ev.sender() == user_id)
-}
-
 /// Attempts to resolve a quoted event directly from the room if the body lacked quote text.
 pub async fn resolve_quoted_event_from_room(
     room: &Room,
@@ -96,7 +75,6 @@ pub async fn resolve_quoted_event_from_room(
                 author: Some(author),
                 body: body.trim().to_string(),
                 event_id: Some(event_id_str.to_string()),
-                from_bot: false,
             })
         }
         _ => None,
@@ -143,7 +121,6 @@ fn extract_from_html(html: &str) -> Option<(QuotedMessage, String)> {
             author,
             body: quote_text,
             event_id: None,
-            from_bot: false,
         },
         unquoted,
     ))
@@ -214,7 +191,6 @@ fn extract_from_plain_text(body: &str) -> Option<(QuotedMessage, String)> {
             author,
             body: quote_body,
             event_id: None,
-            from_bot: false,
         },
         prompt,
     ))
@@ -299,7 +275,6 @@ mod tests {
             author: Some("@alice:matrix.org".to_string()),
             body: "The earth is flat.".to_string(),
             event_id: None,
-            from_bot: false,
         };
         let ctx_prompt = q.to_context_prompt("fact check this");
         assert!(ctx_prompt.starts_with("<quoted_message author=\"@alice:matrix.org\">"));

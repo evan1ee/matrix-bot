@@ -95,7 +95,7 @@ fn from_message(
         message_id: message_ref(message.chat.id.0, message.id.0),
         text: body_of(&text),
         reply_to: reply.map(|r| message_ref(message.chat.id.0, r.id.0)),
-        quoted: reply.and_then(|r| quoted(r, our_username)),
+        quoted: reply.and_then(quoted),
         is_direct: direct,
         is_mentioned: mentioned,
     };
@@ -172,20 +172,16 @@ fn body_of(text: &InboundText) -> String {
 }
 
 /// T5: the replied-to text, so `/todo add` and `/remind` can use it as a body.
-fn quoted(reply: &Message, our_username: &str) -> Option<QuotedMessage> {
+fn quoted(reply: &Message) -> Option<QuotedMessage> {
     let body = reply.text()?.trim();
     if body.is_empty() {
         return None;
     }
-    Some(
-        QuotedMessage::new(
-            reply.from.as_ref().and_then(display_name),
-            body.to_owned(),
-            Some(reply.id.0.to_string()),
-        )
-        // Telegram's own `from` user, not the display name, says who wrote it.
-        .with_from_bot(is_ours(reply, our_username)),
-    )
+    Some(QuotedMessage::new(
+        reply.from.as_ref().and_then(display_name),
+        body.to_owned(),
+        Some(reply.id.0.to_string()),
+    ))
 }
 
 /// A reply to one of the bot's own messages counts as addressing it.
@@ -425,7 +421,6 @@ mod tests {
         let quoted = n.message.quoted.expect("T5: the replied-to text is quoted");
         assert_eq!(quoted.body, "Two items due today.");
         assert_eq!(quoted.event_id.as_deref(), Some("200"));
-        assert!(quoted.from_bot, "the replied-to message is the bot's own");
         assert_eq!(
             n.message.reply_to,
             Some(MessageRef("message:-1004100000009:200".into()))
@@ -452,7 +447,6 @@ mod tests {
         let quoted = n.message.quoted.expect("quoted");
         assert_eq!(quoted.author.as_deref(), Some("Sam"));
         assert_eq!(quoted.body, "buy oat milk");
-        assert!(!quoted.from_bot);
     }
 
     #[test]
