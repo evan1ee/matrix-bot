@@ -1,14 +1,9 @@
-//! PostgreSQL repository for Second Brain knowledge base & notes.
-//!
-//! Provides compile-checked `sqlx::query!` / `query_as!` access to `notes`
-//! and `knowledge_embeddings` tables, including HNSW vector hybrid search.
+//! PostgreSQL repository for notes CRUD operations.
 
-use pgvector::Vector;
 use sqlx::PgExecutor;
 
 use crate::domain::accounts::AccountId;
 use crate::domain::knowledge::note::{Note, NoteFormat, NoteId};
-use crate::domain::knowledge::search::{KnowledgeItemType, SearchResultItem};
 
 #[derive(Debug, sqlx::FromRow)]
 pub(crate) struct NoteRow {
@@ -210,126 +205,6 @@ pub async fn delete_note(
     Ok(res.rows_affected() > 0)
 }
 
-pub async fn upsert_embedding_chunk(
-    executor: impl PgExecutor<'_>,
-    owner: &AccountId,
-    item_type: &str,
-    item_id: i64,
-    chunk_index: i32,
-    content_snippet: &str,
-    embedding: &[f32],
-) -> Result<(), sqlx::Error> {
-    let vec = Vector::from(embedding.to_vec());
-    sqlx::query!(
-        r#"
-        INSERT INTO knowledge_embeddings (
-            owner_id, item_type, item_id, chunk_index, content_snippet, embedding, updated_at
-        )
-        VALUES ($1, $2, $3, $4, $5, $6, NOW())
-        ON CONFLICT (owner_id, item_type, item_id, chunk_index)
-        DO UPDATE SET
-            content_snippet = EXCLUDED.content_snippet,
-            embedding = EXCLUDED.embedding,
-            updated_at = NOW()
-        "#,
-        owner.as_uuid(),
-        item_type,
-        item_id,
-        chunk_index,
-        content_snippet,
-        vec as Vector
-    )
-    .execute(executor)
-    .await?;
-
-    Ok(())
-}
-
-pub async fn delete_embeddings_for_item(
-    executor: impl PgExecutor<'_>,
-    owner: &AccountId,
-    item_type: &str,
-    item_id: i64,
-) -> Result<u64, sqlx::Error> {
-    let res = sqlx::query!(
-        r#"
-        DELETE FROM knowledge_embeddings
-        WHERE owner_id = $1 AND item_type = $2 AND item_id = $3
-        "#,
-        owner.as_uuid(),
-        item_type,
-        item_id
-    )
-    .execute(executor)
-    .await?;
-
-    Ok(res.rows_affected())
-}
-
-#[derive(Debug, sqlx::FromRow)]
-struct SearchResultRow {
-    item_type: String,
-    item_id: i64,
-    content_snippet: String,
-    title: Option<String>,
-    source_ref: Option<String>,
-    combined_score: Option<f32>,
-}
-
-pub async fn search_hybrid(
-    executor: impl PgExecutor<'_>,
-    owner: &AccountId,
-    query_embedding: &[f32],
-    query_text: &str,
-    filter_types: Option<&[String]>,
-    limit: i64,
-) -> Result<Vec<SearchResultItem>, sqlx::Error> {
-    let vec = Vector::from(query_embedding.to_vec());
-    let rows = sqlx::query_as!(
-        SearchResultRow,
-        r#"
-        SELECT
-            ke.item_type,
-            ke.item_id,
-            ke.content_snippet,
-            COALESCE(n.title, b.title, ke.item_type) AS title,
-            COALESCE(n.source_ref, b.url) AS source_ref,
-            (
-                0.7 * (1.0 - (ke.embedding <=> $2) / 2.0) +
-                0.3 * LEAST(1.0::FLOAT8, ts_rank_cd(to_tsvector('english', ke.content_snippet), plainto_tsquery('english', $3)))
-            )::FLOAT4 AS combined_score
-        FROM knowledge_embeddings ke
-        LEFT JOIN notes n
-            ON ke.item_type = 'note' AND ke.item_id = n.id AND ke.owner_id = n.owner_id
-        LEFT JOIN bookmarks b
-            ON ke.item_type = 'bookmark' AND ke.item_id = b.id AND ke.owner_id = b.owner_id
-        WHERE ke.owner_id = $1
-          AND ($4::TEXT[] IS NULL OR ke.item_type = ANY($4))
-        ORDER BY combined_score DESC
-        LIMIT $5
-        "#,
-        owner.as_uuid(),
-        vec as Vector,
-        query_text,
-        filter_types,
-        limit
-    )
-    .fetch_all(executor)
-    .await?;
-
-    Ok(rows
-        .into_iter()
-        .map(|r| SearchResultItem {
-            item_type: KnowledgeItemType::from_str_opt(&r.item_type).unwrap_or(KnowledgeItemType::Note),
-            item_id: r.item_id,
-            title: r.title.unwrap_or_else(|| r.item_type.clone()),
-            content_snippet: r.content_snippet,
-            similarity_score: r.combined_score.unwrap_or(0.0),
-            source_ref: r.source_ref,
-        })
-        .collect())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -429,66 +304,5 @@ mod tests {
             .await
             .expect("query note");
         assert!(read_deleted.is_none());
-    }
-
-    #[tokio::test]
-    async fn test_knowledge_embeddings_and_hybrid_search() {
-        let pool = test_pool().await;
-        run_migrations_unlocked(&pool).await;
-
-        let alice = AccountId::generate();
-        seed_account(&pool, &alice).await;
-
-        let note = insert_note(
-            &pool,
-            &alice,
-            "Rust Async Guide",
-            "Tokio runtimes and cooperative scheduling in Rust",
-            "markdown",
-            "matrix",
-            Some("!event123"),
-            &["rust".to_string(), "async".to_string()],
-        )
-        .await
-        .expect("insert note");
-
-        // Upsert dummy 384-dimensional embedding chunk
-        let mut embedding = vec![0.0f32; 384];
-        embedding[0] = 1.0;
-        upsert_embedding_chunk(
-            &pool,
-            &alice,
-            "note",
-            note.id.0,
-            0,
-            "Tokio runtimes and cooperative scheduling in Rust",
-            &embedding,
-        )
-        .await
-        .expect("upsert embedding");
-
-        // Hybrid search with matching embedding and matching text
-        let results = search_hybrid(
-            &pool,
-            &alice,
-            &embedding,
-            "Tokio cooperative",
-            Some(&["note".to_string()]),
-            5,
-        )
-        .await
-        .expect("hybrid search");
-
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].item_id, note.id.0);
-        assert_eq!(results[0].title, "Rust Async Guide");
-        assert_eq!(results[0].item_type, KnowledgeItemType::Note);
-        assert!(results[0].similarity_score > 0.6, "expected > 0.6, got {}", results[0].similarity_score);
-
-        // Clean up embeddings
-        let affected = delete_embeddings_for_item(&pool, &alice, "note", note.id.0)
-            .await
-            .expect("delete embeddings");
-        assert_eq!(affected, 1);
     }
 }

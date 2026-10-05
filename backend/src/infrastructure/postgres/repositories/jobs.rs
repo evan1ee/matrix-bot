@@ -55,6 +55,7 @@ fn payload_json(payload: &JobPayload) -> sqlx::Result<serde_json::Value> {
         JobPayload::BriefingSend(p) => serde_json::to_value(p),
         JobPayload::MediaProcessReceipt(p) => serde_json::to_value(p),
         JobPayload::AgentExecute(p) => serde_json::to_value(p),
+        JobPayload::KnowledgeEmbed(p) => serde_json::to_value(p),
         JobPayload::Empty => Ok(serde_json::json!({})),
     };
     value.map_err(|e| sqlx::Error::Encode(Box::new(e)))

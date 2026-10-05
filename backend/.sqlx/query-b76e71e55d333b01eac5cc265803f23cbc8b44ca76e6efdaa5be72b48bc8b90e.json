@@ -1,0 +1,37 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH unindexed_notes AS (\n            SELECT n.owner_id, 'note' AS item_type, n.id\n            FROM notes n\n            LEFT JOIN knowledge_embeddings ke\n                ON ke.owner_id = n.owner_id AND ke.item_type = 'note' AND ke.item_id = n.id\n            WHERE ke.item_id IS NULL AND NOT n.is_archived\n            LIMIT $1\n        ),\n        unindexed_bookmarks AS (\n            SELECT b.owner_id, 'bookmark' AS item_type, b.id\n            FROM bookmarks b\n            LEFT JOIN knowledge_embeddings ke\n                ON ke.owner_id = b.owner_id AND ke.item_type = 'bookmark' AND ke.item_id = b.id\n            WHERE ke.item_id IS NULL AND NOT b.is_archived\n            LIMIT $1\n        ),\n        unindexed_journal AS (\n            SELECT l.owner_id, 'journal' AS item_type, l.id\n            FROM life_day_logs l\n            LEFT JOIN knowledge_embeddings ke\n                ON ke.owner_id = l.owner_id AND ke.item_type = 'journal' AND ke.item_id = l.id\n            WHERE ke.item_id IS NULL\n            LIMIT $1\n        ),\n        unindexed_footprints AS (\n            SELECT f.owner_id, 'footprint' AS item_type, f.id\n            FROM footprints f\n            LEFT JOIN knowledge_embeddings ke\n                ON ke.owner_id = f.owner_id AND ke.item_type = 'footprint' AND ke.item_id = f.id\n            WHERE ke.item_id IS NULL\n            LIMIT $1\n        )\n        SELECT owner_id, item_type, id FROM unindexed_notes\n        UNION ALL\n        SELECT owner_id, item_type, id FROM unindexed_bookmarks\n        UNION ALL\n        SELECT owner_id, item_type, id FROM unindexed_journal\n        UNION ALL\n        SELECT owner_id, item_type, id FROM unindexed_footprints\n        LIMIT $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "owner_id",
+        "type_info": "Uuid",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "item_type",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "b76e71e55d333b01eac5cc265803f23cbc8b44ca76e6efdaa5be72b48bc8b90e"
+}

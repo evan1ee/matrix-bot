@@ -18,6 +18,7 @@ use crate::jobs::{JobError, JobHandler};
 
 pub mod agent;
 pub mod briefing;
+pub mod knowledge;
 pub mod media;
 pub mod portfolio;
 pub mod reminders;
@@ -82,6 +83,8 @@ pub fn handlers(
             agent_engine,
             ai_env_config,
         )),
+        Arc::new(knowledge::KnowledgeEmbedHandler::new(services.clone())),
+        Arc::new(knowledge::KnowledgeBackfillHandler::new(services.clone())),
     ]
 }
 

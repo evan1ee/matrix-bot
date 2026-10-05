@@ -9,12 +9,13 @@ use sqlx::PgPool;
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
 use crate::domain::events::SystemEvent;
+use crate::domain::jobs::NewJob;
 use crate::domain::knowledge::error::KnowledgeError;
 use crate::domain::knowledge::note::{
     normalize_tags, validate_content, validate_title, Note, NoteFormat,
 };
-use crate::domain::knowledge::search::SearchResultItem;
-use crate::infrastructure::inference::embedding::{EmbeddingProvider, MockEmbeddingProvider};
+use crate::domain::knowledge::search::{chunk_text, KnowledgeItemType, SearchResultItem};
+use crate::infrastructure::inference::embedding::EmbeddingProvider;
 use crate::infrastructure::postgres::repositories::{self, outbox};
 
 impl From<KnowledgeError> for AppError {
@@ -68,6 +69,8 @@ impl NoteService {
         .await?;
 
         outbox::publish(&mut tx, &SystemEvent::NoteCreated(note.clone())).await?;
+        let job = NewJob::knowledge_embed_item(*owner, KnowledgeItemType::Note, note.id.0);
+        repositories::jobs::enqueue(&mut *tx, &job).await?;
         tx.commit().await?;
 
         Ok(note)
@@ -102,6 +105,8 @@ impl NoteService {
         .ok_or_else(|| AppError::NotFound("Note not found".to_string()))?;
 
         outbox::publish(&mut tx, &SystemEvent::NoteUpdated(note.clone())).await?;
+        let job = NewJob::knowledge_embed_item(*owner, KnowledgeItemType::Note, note.id.0);
+        repositories::jobs::enqueue(&mut *tx, &job).await?;
         tx.commit().await?;
 
         Ok(note)
@@ -235,6 +240,94 @@ impl SearchService {
 
         Ok(results)
     }
+
+    /// Chunks, computes embeddings, and persists knowledge chunks for an item.
+    pub async fn embed_item(
+        &self,
+        owner: &AccountId,
+        item_type: KnowledgeItemType,
+        item_id: i64,
+    ) -> Result<(), AppError> {
+        let content = repositories::knowledge::get_item_content_for_embedding(
+            &self.pool,
+            owner,
+            item_type,
+            item_id,
+        )
+        .await?;
+
+        let Some(text) = content else {
+            // Item removed or empty; purge any existing embeddings
+            repositories::knowledge::delete_embeddings_for_item(
+                &self.pool,
+                owner,
+                item_type.as_str(),
+                item_id,
+            )
+            .await?;
+            return Ok(());
+        };
+
+        let chunks = chunk_text(&text, 500, 100);
+        if chunks.is_empty() {
+            repositories::knowledge::delete_embeddings_for_item(
+                &self.pool,
+                owner,
+                item_type.as_str(),
+                item_id,
+            )
+            .await?;
+            return Ok(());
+        }
+
+        let embeddings = self.embedder.embed(&chunks).await.map_err(|e| AppError::External {
+            service: "embeddings",
+            source: anyhow::anyhow!("{e}"),
+        })?;
+
+        let mut tx = self.pool.begin().await?;
+        repositories::knowledge::delete_embeddings_for_item(
+            &mut *tx,
+            owner,
+            item_type.as_str(),
+            item_id,
+        )
+        .await?;
+
+        for (idx, (chunk, emb)) in chunks.iter().zip(embeddings.iter()).enumerate() {
+            repositories::knowledge::upsert_embedding_chunk(
+                &mut *tx,
+                owner,
+                item_type.as_str(),
+                item_id,
+                idx as i32,
+                chunk,
+                emb,
+            )
+            .await?;
+        }
+        tx.commit().await?;
+
+        Ok(())
+    }
+
+    /// Scans unindexed items and enqueues low-priority background embedding jobs.
+    pub async fn backfill_embeddings(&self, batch_size: i64) -> Result<usize, AppError> {
+        let unindexed = repositories::knowledge::list_unindexed_items(&self.pool, batch_size).await?;
+        let mut enqueued = 0;
+        for item in unindexed {
+            let job = NewJob::knowledge_embed_item(
+                item.owner_id,
+                item.item_type,
+                item.item_id,
+            )
+            .with_priority(-1);
+            if repositories::jobs::enqueue(&self.pool, &job).await?.is_some() {
+                enqueued += 1;
+            }
+        }
+        Ok(enqueued)
+    }
 }
 
 impl Default for SearchService {
@@ -248,6 +341,7 @@ mod tests {
     use super::*;
     use crate::db::migrate::run_migrations_unlocked;
     use crate::db::pool::{seed_account, test_pool};
+    use crate::infrastructure::inference::embedding::MockEmbeddingProvider;
 
     #[tokio::test]
     async fn test_note_service_crud_and_outbox_events() {

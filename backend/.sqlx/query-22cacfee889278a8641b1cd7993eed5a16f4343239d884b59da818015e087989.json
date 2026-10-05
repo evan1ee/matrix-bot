@@ -1,0 +1,65 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT log_date, mood, activities, note\n                FROM life_day_logs\n                WHERE id = $1 AND owner_id = $2\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "log_date",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "life_day_logs",
+            "name": "log_date"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "mood",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "life_day_logs",
+            "name": "mood"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "activities",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "life_day_logs",
+            "name": "activities"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "note",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "life_day_logs",
+            "name": "note"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true
+    ]
+  },
+  "hash": "22cacfee889278a8641b1cd7993eed5a16f4343239d884b59da818015e087989"
+}

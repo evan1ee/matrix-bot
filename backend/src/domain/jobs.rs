@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::accounts::AccountId;
 use crate::domain::channels::ConversationAddress;
+use crate::domain::knowledge::search::KnowledgeItemType;
 use crate::domain::reminders::MAX_DELIVERY_ATTEMPTS;
 use crate::domain::storage::StorageKey;
 
@@ -36,16 +37,20 @@ pub enum JobType {
     PortfolioRefreshPrices,
     MediaProcessReceipt,
     AgentExecuteRun,
+    KnowledgeEmbedItem,
+    KnowledgeBackfillEmbeddings,
 }
 
 impl JobType {
-    pub const ALL: [JobType; 6] = [
+    pub const ALL: [JobType; 8] = [
         JobType::ReminderFire,
         JobType::BriefingSend,
         JobType::PortfolioCheckAlerts,
         JobType::PortfolioRefreshPrices,
         JobType::MediaProcessReceipt,
         JobType::AgentExecuteRun,
+        JobType::KnowledgeEmbedItem,
+        JobType::KnowledgeBackfillEmbeddings,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -56,6 +61,8 @@ impl JobType {
             JobType::PortfolioRefreshPrices => "portfolio.refresh_prices",
             JobType::MediaProcessReceipt => "media.process_receipt",
             JobType::AgentExecuteRun => "agent.execute_run",
+            JobType::KnowledgeEmbedItem => "knowledge.embed_item",
+            JobType::KnowledgeBackfillEmbeddings => "knowledge.backfill_embeddings",
         }
     }
 
@@ -128,12 +135,20 @@ pub struct AgentExecutePayload {
     pub origin_conversation: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KnowledgeEmbedPayload {
+    pub account_id: AccountId,
+    pub item_type: KnowledgeItemType,
+    pub item_id: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JobPayload {
     ReminderFire(ReminderFirePayload),
     BriefingSend(BriefingSendPayload),
     MediaProcessReceipt(ProcessReceiptPayload),
     AgentExecute(AgentExecutePayload),
+    KnowledgeEmbed(KnowledgeEmbedPayload),
     /// `{}` — the job's type and account say everything.
     Empty,
 }
@@ -266,6 +281,44 @@ impl NewJob {
         )
     }
 
+    pub fn knowledge_embed_item(
+        owner: AccountId,
+        item_type: KnowledgeItemType,
+        item_id: i64,
+    ) -> Self {
+        let dedupe_key = format!("{}:{item_id}", item_type.as_str());
+        let payload = JobPayload::KnowledgeEmbed(KnowledgeEmbedPayload {
+            account_id: owner,
+            item_type,
+            item_id,
+        });
+        Self::new(
+            JobType::KnowledgeEmbedItem,
+            Some(owner),
+            payload,
+            3,
+            30,
+            dedupe_key,
+        )
+    }
+
+    pub fn knowledge_backfill_embeddings() -> Self {
+        let dedupe_key = "knowledge:backfill".to_string();
+        Self::new(
+            JobType::KnowledgeBackfillEmbeddings,
+            None,
+            JobPayload::Empty,
+            1,
+            0,
+            dedupe_key,
+        )
+    }
+
+    pub fn with_priority(mut self, p: i16) -> Self {
+        self.priority = p;
+        self
+    }
+
     pub fn job_type(&self) -> JobType {
         self.job_type
     }
@@ -305,10 +358,6 @@ impl NewJob {
             available_at: None,
             dedupe_key: dedupe_key.map(str::to_owned),
         }
-    }
-    pub fn with_priority(mut self, p: i16) -> Self {
-        self.priority = p;
-        self
     }
     pub fn with_available_at(mut self, at: DateTime<Utc>) -> Self {
         self.available_at = Some(at);
@@ -494,5 +543,32 @@ mod tests {
         let val = serde_json::to_value(payload).unwrap();
         let back: ProcessReceiptPayload = serde_json::from_value(val).unwrap();
         assert_eq!(&back, payload);
+    }
+
+    #[test]
+    fn knowledge_embed_item_builds_and_dedupes_by_item_type_and_id() {
+        let o = owner();
+        let job = NewJob::knowledge_embed_item(o, KnowledgeItemType::Note, 101);
+        assert_eq!(job.job_type(), JobType::KnowledgeEmbedItem);
+        assert_eq!(job.account_id(), Some(&o));
+        assert_eq!(job.dedupe_key(), Some("note:101"));
+        assert_eq!((job.max_attempts(), job.backoff_seconds()), (3, 30));
+
+        let payload = match job.payload() {
+            JobPayload::KnowledgeEmbed(p) => p,
+            _ => panic!("wrong payload variant"),
+        };
+        assert_eq!(payload.account_id, o);
+        assert_eq!(payload.item_type, KnowledgeItemType::Note);
+        assert_eq!(payload.item_id, 101);
+
+        let val = serde_json::to_value(payload).unwrap();
+        let back: KnowledgeEmbedPayload = serde_json::from_value(val).unwrap();
+        assert_eq!(&back, payload);
+
+        let backfill = NewJob::knowledge_backfill_embeddings();
+        assert_eq!(backfill.job_type(), JobType::KnowledgeBackfillEmbeddings);
+        assert_eq!(backfill.account_id(), None);
+        assert_eq!(backfill.dedupe_key(), Some("knowledge:backfill"));
     }
 }

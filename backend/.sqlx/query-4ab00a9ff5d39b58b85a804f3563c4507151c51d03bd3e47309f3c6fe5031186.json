@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            ke.item_type,\n            ke.item_id,\n            ke.content_snippet,\n            COALESCE(n.title, b.title, ke.item_type) AS title,\n            COALESCE(n.source_ref, b.url) AS source_ref,\n            (\n                0.7 * (1.0 - (ke.embedding <=> $2) / 2.0) +\n                0.3 * LEAST(1.0::FLOAT8, ts_rank_cd(to_tsvector('english', ke.content_snippet), plainto_tsquery('english', $3)))\n            )::FLOAT4 AS combined_score\n        FROM knowledge_embeddings ke\n        LEFT JOIN notes n\n            ON ke.item_type = 'note' AND ke.item_id = n.id AND ke.owner_id = n.owner_id\n        LEFT JOIN bookmarks b\n            ON ke.item_type = 'bookmark' AND ke.item_id = b.id AND ke.owner_id = b.owner_id\n        WHERE ke.owner_id = $1\n          AND ($4::TEXT[] IS NULL OR ke.item_type = ANY($4))\n        ORDER BY combined_score DESC\n        LIMIT $5\n        ",
+  "query": "\n        SELECT\n            ke.item_type,\n            ke.item_id,\n            ke.content_snippet,\n            COALESCE(n.title, b.title, f.title, l.log_date, ke.item_type) AS title,\n            COALESCE(n.source_ref, b.url) AS source_ref,\n            (\n                0.7 * (1.0 - (ke.embedding <=> $2) / 2.0) +\n                0.3 * LEAST(1.0::FLOAT8, ts_rank_cd(to_tsvector('english', ke.content_snippet), plainto_tsquery('english', $3)))\n            )::FLOAT4 AS combined_score\n        FROM knowledge_embeddings ke\n        LEFT JOIN notes n\n            ON ke.item_type = 'note' AND ke.item_id = n.id AND ke.owner_id = n.owner_id\n        LEFT JOIN bookmarks b\n            ON ke.item_type = 'bookmark' AND ke.item_id = b.id AND ke.owner_id = b.owner_id\n        LEFT JOIN footprints f\n            ON ke.item_type = 'footprint' AND ke.item_id = f.id AND ke.owner_id = f.owner_id\n        LEFT JOIN life_day_logs l\n            ON ke.item_type = 'journal' AND ke.item_id = l.id AND ke.owner_id = l.owner_id\n        WHERE ke.owner_id = $1\n          AND ($4::TEXT[] IS NULL OR ke.item_type = ANY($4))\n        ORDER BY combined_score DESC\n        LIMIT $5\n        ",
   "describe": {
     "columns": [
       {
@@ -78,5 +78,5 @@
       null
     ]
   },
-  "hash": "05f3ce82322394075deb53434a940df0d24dad4bb86208f22851e7c43d1ec0a1"
+  "hash": "4ab00a9ff5d39b58b85a804f3563c4507151c51d03bd3e47309f3c6fe5031186"
 }

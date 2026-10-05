@@ -55,6 +55,34 @@ pub fn distance_to_similarity(distance: f32) -> f32 {
     1.0 - (clamped / 2.0)
 }
 
+/// Chunks text into segments of at most `chunk_size` characters with `overlap` characters
+/// of overlap between successive chunks. Character boundaries (Unicode scalar values)
+/// are preserved. Empty or blank inputs yield an empty vector.
+pub fn chunk_text(text: &str, chunk_size: usize, overlap: usize) -> Vec<String> {
+    let trimmed = text.trim();
+    if trimmed.is_empty() || chunk_size == 0 {
+        return Vec::new();
+    }
+    let chars: Vec<char> = trimmed.chars().collect();
+    if chars.len() <= chunk_size {
+        return vec![trimmed.to_string()];
+    }
+
+    let step = chunk_size.saturating_sub(overlap).max(1);
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    while start < chars.len() {
+        let end = (start + chunk_size).min(chars.len());
+        let snippet: String = chars[start..end].iter().collect();
+        chunks.push(snippet);
+        if end == chars.len() {
+            break;
+        }
+        start += step;
+    }
+    chunks
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -84,5 +112,28 @@ mod tests {
         assert!((distance_to_similarity(2.0) - 0.0).abs() < f32::EPSILON);
         assert!((distance_to_similarity(-0.5) - 1.0).abs() < f32::EPSILON);
         assert!((distance_to_similarity(3.0) - 0.0).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn chunk_text_splits_with_overlap_and_handles_utf8() {
+        assert!(chunk_text("", 500, 100).is_empty());
+        assert!(chunk_text("   ", 500, 100).is_empty());
+
+        let short = "Hello world";
+        assert_eq!(chunk_text(short, 500, 100), vec!["Hello world"]);
+
+        // 10 chars: "0123456789", chunk_size 6, overlap 2 -> step 4
+        // chunk 0: 0..6 ("012345")
+        // chunk 1: 4..10 ("456789")
+        let digits = "0123456789";
+        let chunks = chunk_text(digits, 6, 2);
+        assert_eq!(chunks, vec!["012345", "456789"]);
+
+        // Unicode multibyte characters
+        let unicode = "🦀 Rust 编程 🚀 Antigravity";
+        let u_chunks = chunk_text(unicode, 8, 2);
+        assert!(!u_chunks.is_empty());
+        // verify concatenation preserves characters
+        assert_eq!(u_chunks[0], "🦀 Rust 编");
     }
 }

@@ -12,6 +12,8 @@ use crate::domain::bookmarks::{
     UpdateBookmark,
 };
 use crate::domain::events::SystemEvent;
+use crate::domain::jobs::NewJob;
+use crate::domain::knowledge::search::KnowledgeItemType;
 use crate::infrastructure::postgres::repositories::{self, outbox};
 
 impl From<BookmarkError> for AppError {
@@ -46,6 +48,8 @@ impl BookmarkService {
         let mut tx = self.pool.begin().await?;
         let bookmark = repositories::bookmarks::create(&mut *tx, owner, &input).await?;
         outbox::publish(&mut tx, &SystemEvent::BookmarkCreated(bookmark.clone())).await?;
+        let job = NewJob::knowledge_embed_item(*owner, KnowledgeItemType::Bookmark, bookmark.id);
+        repositories::jobs::enqueue(&mut *tx, &job).await?;
         tx.commit().await?;
 
         Ok(bookmark)
