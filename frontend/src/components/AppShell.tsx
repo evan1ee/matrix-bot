@@ -24,6 +24,7 @@ interface AppShellProps {
 /** Module labels shown in the mobile top bar and content header. */
 const MODULE_LABELS: Record<string, string> = {
   dashboard: 'Dashboard',
+  knowledge: 'Second Brain',
   todo: 'Tasks',
   reminder: 'Reminders',
   bookmarks: 'Bookmarks',

@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { fetchApi } from '../core/apiClient';
 import { Theme } from '../core/theme';
 import {
-  Bot, ChevronLeft, LayoutDashboard, CheckSquare, Clock, Bookmark,
+  Bot, Brain, ChevronLeft, LayoutDashboard, CheckSquare, Clock, Bookmark,
   Wallet, TrendingUp, Receipt, Webhook, Sparkles, Compass, Zap, Hourglass, Smile, Settings, LogIn, Sun, Moon, LucideIcon
 } from 'lucide-react';
 
@@ -37,6 +37,7 @@ const NAV_GROUPS: NavGroup[] = [
     title: 'Productivity',
     items: [
       { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+      { id: 'knowledge', label: 'Second Brain', icon: Brain },
       { id: 'todo', label: 'Tasks', icon: CheckSquare },
       { id: 'reminder', label: 'Reminders', icon: Clock },
       { id: 'bookmarks', label: 'Bookmarks', icon: Bookmark },

@@ -231,6 +231,20 @@ export interface FakeBookmark {
   updated_at: string;
 }
 
+export interface FakeNote {
+  id: number;
+  owner_id: string;
+  title: string;
+  content: string;
+  format: string;
+  source_channel: string;
+  source_ref: string | null;
+  tags: string[];
+  is_archived: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface FakeAgentRun {
   id: string;
   scheduled_task_id: string | null;
@@ -344,6 +358,8 @@ export class FakeApi {
   nextLogId = 1;
   nextAiConvId = 1;
   nextAiMsgId = 1;
+  notes: FakeNote[] = [];
+  nextNoteId = 1;
   rooms: FakeRoom[] = [
     { room_id: '!general:mbm.one', name: 'General' },
     { room_id: '!ops:mbm.one', name: 'Ops' },
@@ -629,6 +645,26 @@ export class FakeApi {
     };
     this.bookmarks.push(bookmark);
     return bookmark;
+  }
+
+  seedNote(partial: Partial<FakeNote> = {}): FakeNote {
+    const id = partial.id ?? this.nextNoteId++;
+    const now = new Date().toISOString();
+    const note: FakeNote = {
+      id,
+      owner_id: partial.owner_id ?? OWNER,
+      title: partial.title ?? 'Test Note',
+      content: partial.content ?? 'Note content',
+      format: partial.format ?? 'markdown',
+      source_channel: partial.source_channel ?? 'web',
+      source_ref: partial.source_ref ?? null,
+      tags: partial.tags ?? [],
+      is_archived: partial.is_archived ?? false,
+      created_at: partial.created_at ?? now,
+      updated_at: partial.updated_at ?? now,
+    };
+    this.notes.push(note);
+    return note;
   }
 
   seedLifeProfile(partial: Partial<FakeLifeProfile> = {}): FakeLifeProfile {
@@ -3012,6 +3048,97 @@ export class FakeApi {
       if (idx === -1) return json(route, 404, { error: 'Bookmark not found', code: 404 });
       this.bookmarks.splice(idx, 1);
       return json(route, 200, { success: true, id });
+    }
+
+    // --- notes & knowledge ---
+    if (path === '/notes/tags' && method === 'GET') {
+      const allTags = Array.from(new Set(this.notes.flatMap((n) => n.tags))).sort();
+      return json(route, 200, allTags);
+    }
+
+    if (path === '/notes' && method === 'GET') {
+      const u = url || new URL(route.request().url());
+      const archivedParam = u.searchParams.get('archived');
+      const tagParam = u.searchParams.get('tag');
+      const searchParam = u.searchParams.get('search')?.toLowerCase();
+
+      let list = [...this.notes];
+      if (archivedParam !== null) {
+        const isArch = archivedParam === 'true';
+        list = list.filter((n) => n.is_archived === isArch);
+      }
+      if (tagParam) {
+        list = list.filter((n) => n.tags.includes(tagParam));
+      }
+      if (searchParam) {
+        list = list.filter(
+          (n) =>
+            n.title.toLowerCase().includes(searchParam) ||
+            n.content.toLowerCase().includes(searchParam)
+        );
+      }
+      return json(route, 200, list);
+    }
+
+    if (path === '/notes' && method === 'POST') {
+      if (!body?.title?.trim() || !body?.content?.trim()) {
+        return json(route, 400, { error: 'title and content are required', code: 400 });
+      }
+      const note = this.seedNote({
+        title: body.title.trim(),
+        content: body.content.trim(),
+        format: body.format || 'markdown',
+        tags: Array.isArray(body.tags) ? body.tags : [],
+      });
+      return json(route, 201, note);
+    }
+
+    const noteIdMatch = path.match(/^\/notes\/(\d+)$/);
+    if (noteIdMatch && method === 'GET') {
+      const id = Number(noteIdMatch[1]);
+      const note = this.notes.find((n) => n.id === id);
+      if (!note) return json(route, 404, { error: 'Note not found', code: 404 });
+      return json(route, 200, note);
+    }
+
+    if (noteIdMatch && method === 'PUT') {
+      const id = Number(noteIdMatch[1]);
+      const note = this.notes.find((n) => n.id === id);
+      if (!note) return json(route, 404, { error: 'Note not found', code: 404 });
+      if (body?.title !== undefined) note.title = body.title;
+      if (body?.content !== undefined) note.content = body.content;
+      if (body?.format !== undefined) note.format = body.format;
+      if (body?.tags !== undefined) note.tags = body.tags;
+      if (body?.is_archived !== undefined) note.is_archived = body.is_archived;
+      note.updated_at = new Date().toISOString();
+      return json(route, 200, note);
+    }
+
+    if (noteIdMatch && method === 'DELETE') {
+      const id = Number(noteIdMatch[1]);
+      const idx = this.notes.findIndex((n) => n.id === id);
+      if (idx === -1) return json(route, 404, { error: 'Note not found', code: 404 });
+      this.notes.splice(idx, 1);
+      return route.fulfill({ status: 204 });
+    }
+
+    if (path === '/knowledge/search' && method === 'POST') {
+      const q = (body?.query || '').toLowerCase().trim();
+      const results = this.notes
+        .filter(
+          (n) =>
+            !n.is_archived &&
+            (n.title.toLowerCase().includes(q) || n.content.toLowerCase().includes(q))
+        )
+        .map((n) => ({
+          item_type: 'note',
+          item_id: n.id,
+          title: n.title,
+          content_snippet: n.content.slice(0, 150),
+          similarity_score: 0.92,
+          source_ref: n.source_ref,
+        }));
+      return json(route, 200, results);
     }
 
     // --- ocr scan ---
