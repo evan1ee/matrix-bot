@@ -139,6 +139,12 @@ impl NoteService {
         Ok(notes)
     }
 
+    /// Lists all unique tags used across an account's notes.
+    pub async fn list_tags(&self, owner: &AccountId) -> Result<Vec<String>, AppError> {
+        let tags = repositories::knowledge::list_all_tags(&self.pool, owner).await?;
+        Ok(tags)
+    }
+
     /// Toggles archived status for a note, emitting `SystemEvent::NoteUpdated`.
     pub async fn archive_note(
         &self,

@@ -205,6 +205,25 @@ pub async fn delete_note(
     Ok(res.rows_affected() > 0)
 }
 
+pub async fn list_all_tags(
+    executor: impl PgExecutor<'_>,
+    owner: &AccountId,
+) -> Result<Vec<String>, sqlx::Error> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT DISTINCT unnest(tags) AS "tag!"
+        FROM notes
+        WHERE owner_id = $1 AND is_archived = FALSE
+        ORDER BY "tag!" ASC
+        "#,
+        owner.as_uuid()
+    )
+    .fetch_all(executor)
+    .await?;
+
+    Ok(rows.into_iter().map(|r| r.tag).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

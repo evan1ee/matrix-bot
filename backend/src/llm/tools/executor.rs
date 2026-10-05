@@ -7,6 +7,7 @@ use super::bills;
 use super::bookmarks;
 use super::finance;
 use super::habits;
+use super::knowledge;
 use super::life;
 use super::portfolio;
 use super::reminder;
@@ -95,12 +96,17 @@ pub async fn execute(
         return res;
     }
 
-    // 9. Try webhook tools
+    // 9. Try knowledge tools
+    if let Some(res) = knowledge::execute_tool(services, owner_id, name, &parsed_args).await {
+        return res;
+    }
+
+    // 10. Try webhook tools
     if let Some(res) = webhooks::execute_tool(services, owner_id, name, &parsed_args).await {
         return res;
     }
 
-    // 10. Try settings tools
+    // 11. Try settings tools
     if let Some(res) = settings::execute_tool(services, owner_id, name, &parsed_args).await {
         return res;
     }

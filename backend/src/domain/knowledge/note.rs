@@ -52,6 +52,13 @@ impl NoteFormat {
     }
 }
 
+impl std::fmt::Display for NoteFormat {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Note {
     pub id: NoteId,

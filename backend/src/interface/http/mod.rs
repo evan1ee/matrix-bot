@@ -35,6 +35,7 @@ pub mod health;
 pub mod identities;
 #[cfg(test)]
 mod identity_api_tests;
+pub mod knowledge;
 pub mod life;
 pub mod life_activity;
 pub mod link;

@@ -1081,6 +1081,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/knowledge/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["search_knowledge"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/life/days": {
         parameters: {
             query?: never;
@@ -1291,6 +1307,54 @@ export interface paths {
         post?: never;
         /** DELETE /api/v1/mcp/tokens/:id — Revokes an MCP personal access token. */
         delete: operations["delete_mcp_token"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_notes"];
+        put?: never;
+        post: operations["create_note"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notes/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_tags"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_note"];
+        put: operations["update_note"];
+        post?: never;
+        delete: operations["delete_note"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2313,6 +2377,12 @@ export interface components {
             prefix: string;
             token: string;
         };
+        CreateNoteInput: {
+            content: string;
+            format?: string | null;
+            tags?: string[] | null;
+            title: string;
+        };
         CreateReminderRequest: {
             message: string;
             recurrence?: string | null;
@@ -2620,6 +2690,12 @@ export interface components {
             room_id: string;
             updated_at?: string | null;
         };
+        KnowledgeSearchRequest: {
+            filter_types?: string[] | null;
+            /** Format: int64 */
+            limit?: number | null;
+            query: string;
+        };
         LedgerQuery: {
             /** @description `expense` or `income`. Omit for both. */
             direction?: string | null;
@@ -2790,6 +2866,20 @@ export interface components {
             /** Format: int64 */
             total_net_worth_minor: number;
             /** Format: date-time */
+            updated_at: string;
+        };
+        Note: {
+            content: string;
+            created_at: string;
+            format: string;
+            /** Format: int64 */
+            id: number;
+            is_archived: boolean;
+            owner_id: string;
+            source_channel: string;
+            source_ref?: string | null;
+            tags: string[];
+            title: string;
             updated_at: string;
         };
         OcrBlockDto: {
@@ -3104,6 +3194,16 @@ export interface components {
             next_run_at: string;
             task_id: string;
             updated_at: string;
+        };
+        SearchResultItem: {
+            content_snippet: string;
+            /** Format: int64 */
+            item_id: number;
+            item_type: string;
+            /** Format: float */
+            similarity_score: number;
+            source_ref?: string | null;
+            title: string;
         };
         SecurityEvent: {
             /** Format: date-time */
@@ -3423,6 +3523,13 @@ export interface components {
             name: string;
             /** Format: int64 */
             target_days_per_week?: number | null;
+        };
+        UpdateNoteInput: {
+            content?: string | null;
+            format?: string | null;
+            is_archived?: boolean | null;
+            tags?: string[] | null;
+            title?: string | null;
         };
         /**
          * @description Mirrors `CreateReminderRequest` rather than patching individual fields: the
@@ -6149,6 +6256,29 @@ export interface operations {
             };
         };
     };
+    search_knowledge: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KnowledgeSearchRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResultItem"][];
+                };
+            };
+        };
+    };
     upsert_day: {
         parameters: {
             query?: never;
@@ -6784,6 +6914,150 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ApiErrorResponse"];
                 };
+            };
+        };
+    };
+    list_notes: {
+        parameters: {
+            query?: {
+                /** @description Filter by tag */
+                tag?: string | null;
+                /** @description Filter by archived state */
+                archived?: boolean | null;
+                /** @description Max results (1-100) */
+                limit?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Note"][];
+                };
+            };
+        };
+    };
+    create_note: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateNoteInput"];
+            };
+        };
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Note"];
+                };
+            };
+        };
+    };
+    list_tags: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": string[];
+                };
+            };
+        };
+    };
+    get_note: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Note ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Note"];
+                };
+            };
+            /** @description Note not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_note: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Note ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateNoteInput"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Note"];
+                };
+            };
+        };
+    };
+    delete_note: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Note ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Note deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

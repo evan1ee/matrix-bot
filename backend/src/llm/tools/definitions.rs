@@ -1,9 +1,10 @@
 use super::{
-    bills, bookmarks, finance, habits, life, portfolio, reminder, settings, todo, webhooks,
+    bills, bookmarks, finance, habits, knowledge, life, portfolio, reminder, settings, todo,
+    webhooks,
 };
 use crate::infrastructure::inference::llm::ToolDefinition;
 
-/// Aggregates all 47 domain-grouped AI function calling tool definitions.
+/// Aggregates all domain-grouped AI function calling tool definitions.
 pub fn all_tool_definitions() -> Vec<ToolDefinition> {
     [
         todo::tool_definitions(),
@@ -14,6 +15,7 @@ pub fn all_tool_definitions() -> Vec<ToolDefinition> {
         habits::tool_definitions(),
         life::tool_definitions(),
         bookmarks::tool_definitions(),
+        knowledge::tool_definitions(),
         webhooks::tool_definitions(),
         settings::tool_definitions(),
     ]

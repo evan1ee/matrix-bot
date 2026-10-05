@@ -5,7 +5,8 @@ use axum::{
 
 use super::{
     account, agent, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_categories,
-    finance_net_worth, footprints, habits, identities, life, life_activity, link, mcp, ocr,
+    finance_net_worth, footprints, habits, identities, knowledge, life, life_activity, link, mcp,
+    ocr,
     openapi, portfolio, portfolio_alerts, portfolio_cash, portfolio_history, portfolio_prices,
     recurring_bills, reminders, rooms, settings, sse, storage, todos, voice, webhooks,
 };
@@ -168,6 +169,18 @@ fn routes_productivity() -> Router<auth::ApiState> {
             put(habits::update_habit).delete(habits::delete_habit),
         )
         .route("/habits/:id/toggle", post(habits::toggle_habit_log))
+        .route(
+            "/notes",
+            get(knowledge::list_notes).post(knowledge::create_note),
+        )
+        .route("/notes/tags", get(knowledge::list_tags))
+        .route(
+            "/notes/:id",
+            get(knowledge::get_note)
+                .put(knowledge::update_note)
+                .delete(knowledge::delete_note),
+        )
+        .route("/knowledge/search", post(knowledge::search_knowledge))
 }
 
 fn routes_finance() -> Router<auth::ApiState> {
