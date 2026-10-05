@@ -1,6 +1,6 @@
 //! `agent.execute_run`: executes an autonomous agent run step-by-step.
 //!
-//! Evaluates ReAct iterations, validates sandboxing, halts on sensitive tools
+//! Evaluates agent steps (native tool calling), validates sandboxing, halts on sensitive tools
 //! for human approval, and notifies origin conversations via `Outbound`.
 
 use std::sync::Arc;
@@ -135,6 +135,7 @@ impl JobHandler for AgentExecuteRunHandler {
                 steps: &steps,
                 allowed_tools: None,
                 custom_sensitive_tools: None,
+                max_steps: run.max_steps,
                 config: &resolved_config,
             };
 
@@ -163,6 +164,34 @@ impl JobHandler for AgentExecuteRunHandler {
                         Some(tool_input),
                         Some(tool_output),
                         StepStatus::Success,
+                        tokens_used,
+                        now,
+                    );
+                    self.services
+                        .agent
+                        .record_step(run.id, &step)
+                        .await
+                        .map_err(JobError::from)?;
+                }
+                StepOutcome::InvalidCall {
+                    thought,
+                    tool_name,
+                    error,
+                    tokens_used,
+                    ..
+                } => {
+                    // Never executed. Recorded as a failed step so the next
+                    // evaluation shows the model its mistake; the run goes on
+                    // and the step budget bounds repeated mistakes.
+                    total_tokens = total_tokens.saturating_add(tokens_used);
+                    let step = AgentStep::new(
+                        run.id,
+                        current_step_num,
+                        thought,
+                        Some(tool_name),
+                        None,
+                        Some(serde_json::json!({ "error": error })),
+                        StepStatus::Failed,
                         tokens_used,
                         now,
                     );
@@ -357,5 +386,69 @@ mod tests {
 
         let res = handler.run(&ctx, payload).await;
         assert!(res.is_ok());
+    }
+
+    #[tokio::test]
+    async fn run_continues_after_invalid_call() {
+        use crate::llm::test_support::*;
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let services = AppServices::new(&pool);
+        let owner = AccountId::from_seed("test_agent_job_invalid_call");
+        crate::db::pool::seed_account(&pool, &owner).await;
+        let broken = serde_json::json!({"id":"c","model":"m","choices":[{"index":0,
+            "message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_1",
+            "type":"function","function":{"name":"add_todo","arguments":"{\"text\": "}}]},
+            "finish_reason":"tool_calls"}]});
+        let (url, seen) = scripted_replies(vec![broken, text_reply("Could not add it.")]).await;
+
+        let handler = AgentExecuteRunHandler::new(
+            services.clone(),
+            pool.clone(),
+            FakeOutbound::connected(),
+            ReActEngine::from_proxy(None),
+            test_config(url),
+        );
+        let run = services
+            .agent
+            .start_user_goal(owner, None, "Add milk to my todos", None)
+            .await
+            .unwrap();
+        let ctx = JobContext {
+            job_id: JobId(101),
+            account_id: Some(owner),
+            attempt: 1,
+            max_attempts: 3,
+            cancel: CancellationToken::new(),
+        };
+        let payload = serde_json::json!({
+            "run_id": run.id.as_uuid(),
+            "origin_conversation": None::<String>,
+        });
+
+        handler.run(&ctx, payload).await.unwrap();
+
+        let steps = services.agent.get_run_steps(&owner, run.id).await.unwrap();
+        assert_eq!(steps.len(), 2, "the failed call, then the final answer");
+        assert_eq!(steps[0].status, StepStatus::Failed);
+        assert!(steps[0].tool_output.as_ref().unwrap()["error"]
+            .as_str()
+            .unwrap()
+            .contains("add_todo"));
+        assert_eq!(steps[1].status, StepStatus::Success);
+        let finished = services.agent.get_run_internal(run.id).await.unwrap();
+        assert_eq!(finished.status, RunStatus::Completed);
+        let todos = services
+            .todos
+            .list(&owner, None, None, 10, 0)
+            .await
+            .unwrap();
+        assert!(todos.is_empty(), "the broken call never ran");
+        let requests = seen.lock().unwrap();
+        let second = requests[1]["messages"].as_array().unwrap();
+        assert!(
+            second.iter().any(|m| m["role"] == "tool"),
+            "the failure is shown as a tool result"
+        );
     }
 }

@@ -1,4 +1,4 @@
-//! ReAct reasoning and execution engine for autonomous agent runs.
+//! Step evaluation for autonomous agent runs: native tool calling, sandboxing and approval interception.
 
 use crate::application::AppServices;
 use crate::db::DbPool;
@@ -8,11 +8,11 @@ use crate::infrastructure::inference::llm::{ChatCompletionRequest, LlmClient};
 use crate::llm::resolved_config::ResolvedAiConfig;
 use crate::llm::tools::ToolRegistry;
 
+use super::prompts;
 pub use super::prompts::MAX_TOOL_OUTPUT_PROMPT_CHARS;
-use super::prompts::{self, ParsedReact};
 use super::sandbox;
 
-/// The outcome of evaluating a single ReAct step.
+/// The outcome of evaluating a single agent step.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StepOutcome {
     /// Safe tool was executed and produced an observation.
@@ -36,6 +36,16 @@ pub enum StepOutcome {
         final_answer: String,
         tokens_used: i32,
     },
+    /// The model asked for a tool but its arguments are not a valid JSON
+    /// object. The call is never executed; the run records the failure and
+    /// continues so the model can correct itself.
+    InvalidCall {
+        thought: Option<String>,
+        tool_name: String,
+        raw_arguments: String,
+        error: String,
+        tokens_used: i32,
+    },
     /// Step evaluation failed or proposed an illegal/unknown tool.
     Failed {
         thought: Option<String>,
@@ -44,7 +54,7 @@ pub enum StepOutcome {
     },
 }
 
-/// Execution context for evaluating a single ReAct step.
+/// Execution context for evaluating a single agent step.
 pub struct StepContext<'a> {
     pub account_id: &'a AccountId,
     pub room_id: &'a str,
@@ -52,6 +62,8 @@ pub struct StepContext<'a> {
     pub steps: &'a [AgentStep],
     pub allowed_tools: Option<&'a [String]>,
     pub custom_sensitive_tools: Option<&'a [String]>,
+    /// The run's step budget, stated in the system prompt.
+    pub max_steps: i32,
     pub config: &'a ResolvedAiConfig,
 }
 
@@ -63,7 +75,22 @@ pub enum AgentEngineError {
     Execution(String),
 }
 
-/// The ReAct engine evaluating iterative Think -> Act -> Observe steps.
+/// Parses a native call's arguments: empty means "no arguments", anything
+/// else must be a JSON object.
+fn parse_arguments(raw: &str) -> Result<serde_json::Value, String> {
+    if raw.trim().is_empty() {
+        return Ok(serde_json::json!({}));
+    }
+    match serde_json::from_str::<serde_json::Value>(raw) {
+        Ok(value) if value.is_object() => Ok(value),
+        Ok(_) => Err("arguments must be a JSON object".to_string()),
+        Err(err) => Err(err.to_string()),
+    }
+}
+
+/// The agent engine: one model call per step, native tool calling, with
+/// sandboxing and approval interception around each call. (Named after the
+/// ReAct loop it grew from; it no longer parses a text protocol.)
 #[derive(Clone)]
 pub struct ReActEngine {
     llm_client: LlmClient,
@@ -78,7 +105,7 @@ impl ReActEngine {
         Self::new(LlmClient::new(proxy))
     }
 
-    /// Evaluates a single ReAct step for the given goal and history.
+    /// Evaluates one step for the given goal and history.
     pub async fn evaluate_step(
         &self,
         services: &AppServices,
@@ -88,7 +115,13 @@ impl ReActEngine {
         let all_tool_defs = ToolRegistry::get_tool_definitions();
         let tool_defs = sandbox::filter_tool_definitions(&all_tool_defs, ctx.allowed_tools);
 
-        let messages = prompts::build_messages(ctx.goal, ctx.steps, &tool_defs);
+        let messages = prompts::build_messages(
+            ctx.goal,
+            ctx.steps,
+            &tool_defs,
+            ctx.steps.len() as i32 + 1,
+            ctx.max_steps,
+        );
 
         let tools_json = if tool_defs.is_empty() {
             None
@@ -124,21 +157,20 @@ impl ReActEngine {
             .first()
             .ok_or_else(|| AgentEngineError::Llm("Empty LLM response choices".to_string()))?;
 
-        // 1. Check for native tool calls
-        if let Some(tool_calls) = &choice.message.tool_calls {
-            if let Some(first) = tool_calls.first() {
-                let tool_name = first.function.name.clone();
-                let tool_input = serde_json::from_str(&first.function.arguments).unwrap_or_else(
-                    |_| serde_json::json!({ "arguments": first.function.arguments }),
-                );
-                let thought = choice
-                    .message
-                    .content
-                    .clone()
-                    .filter(|c| !c.trim().is_empty());
+        let content = choice.message.content.as_deref().unwrap_or("").trim();
 
-                return Ok(self
-                    .process_tool_call(
+        // Native tool calls are the only way to act; the first one is taken.
+        if let Some(first) = choice
+            .message
+            .tool_calls
+            .as_ref()
+            .and_then(|calls| calls.first())
+        {
+            let thought = Some(content.to_string()).filter(|c| !c.is_empty());
+            let tool_name = first.function.name.clone();
+            return Ok(match parse_arguments(&first.function.arguments) {
+                Ok(tool_input) => {
+                    self.process_tool_call(
                         services,
                         pool,
                         ctx,
@@ -147,39 +179,32 @@ impl ReActEngine {
                         tool_input,
                         tokens_used,
                     )
-                    .await);
-            }
-        }
-
-        // 2. Parse text content for ReAct tags (Thought: / Action: / Final Answer:)
-        let content = choice.message.content.as_deref().unwrap_or("").trim();
-        let parsed = prompts::parse_react_response(content);
-
-        match parsed {
-            ParsedReact::Action {
-                thought,
-                tool_name,
-                tool_input,
-            } => Ok(self
-                .process_tool_call(
-                    services,
-                    pool,
-                    ctx,
+                    .await
+                }
+                // Arguments that do not parse are never coerced into a call.
+                Err(error) => StepOutcome::InvalidCall {
                     thought,
+                    error: format!("Invalid arguments for tool '{tool_name}': {error}"),
                     tool_name,
-                    tool_input,
+                    raw_arguments: first.function.arguments.clone(),
                     tokens_used,
-                )
-                .await),
-            ParsedReact::FinalAnswer {
-                thought,
-                final_answer,
-            } => Ok(StepOutcome::Completed {
-                thought,
-                final_answer,
-                tokens_used,
-            }),
+                },
+            });
         }
+
+        // Plain text is the final answer; there is no text protocol to parse.
+        if content.is_empty() {
+            return Ok(StepOutcome::Failed {
+                thought: None,
+                error: "The model returned neither a tool call nor an answer".to_string(),
+                tokens_used,
+            });
+        }
+        Ok(StepOutcome::Completed {
+            thought: None,
+            final_answer: content.to_string(),
+            tokens_used,
+        })
     }
 
     /// Validates sandboxing, intercepts sensitive tools, or executes safe tools.
@@ -245,6 +270,113 @@ impl ReActEngine {
 mod tests {
     use super::*;
 
+    use crate::llm::test_support::*;
+
+    async fn evaluate_against(
+        seed: &str,
+        replies: Vec<serde_json::Value>,
+    ) -> (StepOutcome, crate::db::DbPool, AccountId, Seen) {
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let services = AppServices::new(&pool);
+        let account = AccountId::from_seed(seed);
+        crate::db::pool::seed_account(&pool, &account).await;
+        let (url, seen) = scripted_replies(replies).await;
+        let config = ResolvedAiConfig::from_user_config(&test_config(url), None);
+        let ctx = StepContext {
+            account_id: &account,
+            room_id: "agent:internal",
+            goal: "Add milk to my todos",
+            steps: &[],
+            allowed_tools: None,
+            custom_sensitive_tools: None,
+            max_steps: 10,
+            config: &config,
+        };
+        let outcome = ReActEngine::from_proxy(None)
+            .evaluate_step(&services, &pool, &ctx)
+            .await
+            .expect("the scripted step should evaluate");
+        (outcome, pool, account, seen)
+    }
+
+    #[tokio::test]
+    async fn malformed_native_arguments_never_execute_tool() {
+        let (outcome, pool, account, _) = evaluate_against(
+            "agent-invalid-args",
+            vec![
+                serde_json::json!({"id":"c","model":"m","choices":[{"index":0,
+                "message":{"role":"assistant","content":null,"tool_calls":[{"id":"call_1",
+                "type":"function","function":{"name":"add_todo",
+                "arguments":"{\"text\": \"Buy milk\""}}]},"finish_reason":"tool_calls"}]}),
+            ],
+        )
+        .await;
+
+        match outcome {
+            StepOutcome::InvalidCall {
+                tool_name,
+                raw_arguments,
+                ..
+            } => {
+                assert_eq!(tool_name, "add_todo");
+                assert!(raw_arguments.contains("Buy milk"));
+            }
+            other => panic!("Expected InvalidCall, got {other:?}"),
+        }
+        let todos = AppServices::new(&pool)
+            .todos
+            .list(&account, None, None, 10, 0)
+            .await
+            .unwrap();
+        assert!(todos.is_empty(), "nothing may run on unparseable arguments");
+    }
+
+    #[tokio::test]
+    async fn text_reply_is_final_answer() {
+        let (outcome, _, _, _) = evaluate_against(
+            "agent-text-final",
+            vec![text_reply("Thought: nothing to do\nFinal Answer: x")],
+        )
+        .await;
+
+        match outcome {
+            StepOutcome::Completed { final_answer, .. } => {
+                assert_eq!(final_answer, "Thought: nothing to do\nFinal Answer: x");
+            }
+            other => panic!("Expected Completed, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn an_empty_reply_fails_the_step() {
+        let (outcome, _, _, _) = evaluate_against("agent-empty", vec![text_reply("   ")]).await;
+        assert!(matches!(outcome, StepOutcome::Failed { .. }), "{outcome:?}");
+    }
+
+    #[tokio::test]
+    async fn a_native_call_with_valid_arguments_still_executes() {
+        let (outcome, pool, account, _) = evaluate_against(
+            "agent-valid-call",
+            vec![tool_reply(
+                "add_todo",
+                serde_json::json!({"text": "Buy milk"}),
+            )],
+        )
+        .await;
+
+        assert!(
+            matches!(outcome, StepOutcome::Executed { .. }),
+            "{outcome:?}"
+        );
+        let todos = AppServices::new(&pool)
+            .todos
+            .list(&account, None, None, 10, 0)
+            .await
+            .unwrap();
+        assert_eq!(todos.len(), 1);
+    }
+
     #[tokio::test]
     async fn process_tool_call_intercepts_sensitive_tool() {
         let pool = crate::db::pool::test_pool().await;
@@ -264,6 +396,7 @@ mod tests {
             steps: &[],
             allowed_tools: None,
             custom_sensitive_tools: None,
+            max_steps: 10,
             config: &config,
         };
 
@@ -315,6 +448,7 @@ mod tests {
             steps: &[],
             allowed_tools: Some(&allowed),
             custom_sensitive_tools: None,
+            max_steps: 10,
             config: &config,
         };
 

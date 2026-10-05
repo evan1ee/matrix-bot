@@ -32,7 +32,7 @@ interface/mcp/               MCP protocol adapters (stdio & HTTP/SSE)
 interface/jobs/              Durable job handlers (reminder.fire, briefing.send, agent.execute_run, etc.)
 jobs/                        Job runtime: workers (SKIP LOCKED), heartbeat reaper, advisory scheduler
 events/                      Events runtime: LISTEN outbox loop, SSE hub, delivery dispatcher, purge
-llm/                         Prompts, tool loop, tool registry, ReAct engine (llm/agent/)
+llm/                         Prompts, tool loop, tool registry, agent engine with native tool calling (llm/agent/)
 infrastructure/postgres/     repositories/<f>.rs (sqlx::query! only), read_models/, merge.rs
 infrastructure/storage/      StorageService: Local filesystem (HMAC presigning) and S3/R2
 infrastructure/inference/    HTTP clients: OCR, STT, TTS, LLM transport
@@ -87,13 +87,14 @@ Plan: `docs/superpowers/plans/2026-10-05-llm-prompt-hardening.md` (approved 2026
 |---|---|---|
 | 1 | Static prompt prefix plus short context; no owner id; room cap | Done (`fix(llm): split system prompt into stable prefix and short context`) |
 | 2 | Quoted and tool content as data; confirm tainted sensitive calls; language-independent success guard | Done (`fix(llm): treat quoted and tool content as data; confirm tainted sensitive calls`) |
-| 3 | Agent native tool calling, ReAct removed | Not started |
+| 3 | Agent native tool calling, ReAct removed | Done (`refactor(agent)!: native tool calling for agent runs`) |
 | 4 | Execute the approved action on resume | Not started |
 | 5 | Docs sweep | Not started |
 
 Rulings:
 
 - Ruling: the agent moves to native tool calling and ReAct text parsing is removed (D1) — `AgentStep` already stores structured calls, so steps map onto `tool_calls` and `tool` messages with no migration or API change — a model without function calling cannot run agents, but plain text becomes the final answer so it fails safe.
+- Ruling: an agent tool call whose arguments are not a JSON object is recorded as a failed step and the run continues; empty arguments mean `{}` (phase 3) — silently coercing garbage into a call is how a wrong tool input could execute, while ending the run on one typo wastes the whole goal, and `max_steps` bounds repeats — a model that never produces valid arguments burns its budget and the run fails at the step limit. The agent's tool results are wrapped in `<tool_output>` like chat's, so its prompt rule is true; the agent has no taint tracking because every sensitive tool already needs human approval.
 - Ruling: one language-independent confirmation rule replaces the zh/en reply templates (D2): after a success, start with ✅ and a short bold title, then bullets of the tool's key fields, in the user's language — rendering replies in code would couple formatting to every tool — formatting may drift between models; easy to revert.
 - Ruling: a single success-claim guard (no tool succeeded this turn but the reply contains ✅) replaces the English substring lists (D3) — it works in every language — a reply that claims success without the ✅ is not caught.
 - Ruling: chat confirms only tainted sensitive calls (D4): the turn carries quoted context, or an earlier round ran a tool that returns outside content (`web_search`, `get_webhook_logs`, `knowledge_search`); the tool is refused with `confirmation_required` and the model asks the user — confirming every sensitive call adds friction to plain requests — an untainted but mistaken call still runs without asking.
@@ -144,7 +145,7 @@ Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in exact seque
 ### Track 2: Post-Cutover Enhancements & Technical Debt
 
 1. **Deep Procedural Pipelines for Built-in Agent Tasks (`backend/src/domain/agent/task.rs`):**
-   - The 5 standard task plugins (`WeeklyBookmarkDigestTask`, `MonthlyFinancialAuditTask`, `PortfolioRebalanceAlertTask`, `BillDueDigestTask`, `HabitConsistencyReviewTask`) currently formulate ReAct goals executed via tool calling.
+   - The 5 standard task plugins (`WeeklyBookmarkDigestTask`, `MonthlyFinancialAuditTask`, `PortfolioRebalanceAlertTask`, `BillDueDigestTask`, `HabitConsistencyReviewTask`) currently formulate goals executed through the agent's native tool calling.
    - Expand specialized procedural workflows where appropriate:
      - Direct Kokoro TTS audio compilation for weekly bookmark digests.
      - Deterministic mathematical portfolio drift calculation before invoking LLM synthesis.
@@ -170,7 +171,7 @@ Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in exact seque
 
 - **PostgreSQL 18 Exclusivity:** The application database is PostgreSQL only. `BIGINT` for row IDs, native `UUID` for `accounts.id` and `owner_id`. No SQL in `domain/`, `application/`, `jobs/`, or `interface/`.
 - **Transactional Outbox:** State mutations and their corresponding `SystemEvent` must be committed in the same database transaction. Outbox deliveries handle external fan-out with independent retries.
-- **Unified Tool Registry:** Interactive user chat uses direct LLM + tool calling bounded by `MAX_TOOL_ROUNDS = 5`. The autonomous agent ReAct loop is strictly reserved for scheduled background workflows.
+- **Unified Tool Registry:** Interactive user chat uses direct LLM + tool calling bounded by `MAX_TOOL_ROUNDS = 5`. The autonomous agent loop (native tool calling, one tool call per step) is strictly reserved for scheduled background workflows.
 - **pgvector Hybrid Search:** Multi-chunk embeddings (`vector(384)`) indexed via HNSW (`vector_cosine_ops`), populated asynchronously via transactional outbox + background durable jobs (`knowledge.embed`), combining vector cosine distance with full-text search without external vector DBs.
 - **Account Identity Model:** One human account (`accounts.id`) links multiple chat identities across Matrix, Discord, Telegram, and Email via `platform_identities`.
 - **File Length & Code Quality:** No file in `backend/src/` or `inference/src/` may exceed 500 lines of production code (target < 300 lines). Every feature follows:
