@@ -512,6 +512,7 @@ mod tests {
             tts_model: "kokoro".to_string(),
             tts_voice: "0".to_string(),
             tts_dialect: crate::infrastructure::inference::tts::TtsDialect::OpenAi,
+            embedding_base_url: None,
             trust_forwarded_for: true,
             ai: crate::config::AiEnvConfig::default(),
             storage: crate::config::StorageConfig::default(),

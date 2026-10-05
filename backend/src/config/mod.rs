@@ -195,6 +195,8 @@ pub struct Config {
     pub tts_voice: String,
     /// How requests are shaped for the provider at `tts_base_url`.
     pub tts_dialect: crate::infrastructure::inference::tts::TtsDialect,
+    /// Base URL of an OpenAI-compatible embedding API.
+    pub embedding_base_url: Option<String>,
     /// Whether to believe `X-Forwarded-For`/`X-Real-IP` from a trusted peer.
     ///
     /// Forwarded headers are believed only when this is on *and* the connecting
@@ -345,6 +347,12 @@ impl Config {
         )
         .map_err(|e| anyhow::anyhow!(e))?;
 
+        let embedding_base_url = env::var("EMBEDDING_BASE_URL")
+            .ok()
+            .or_else(|| env::var("INFERENCE_BASE_URL").ok())
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty());
+
         let trust_forwarded_for = env::var("TRUST_FORWARDED_FOR")
             .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
             .unwrap_or(false);
@@ -387,6 +395,7 @@ impl Config {
             tts_model,
             tts_voice,
             tts_dialect,
+            embedding_base_url,
             trust_forwarded_for,
             ai,
             storage,
@@ -401,6 +410,24 @@ impl Config {
             self.tts_model.clone(),
             self.tts_dialect,
         )
+    }
+
+    /// The embedding provider for this deployment.
+    pub fn embedding_provider(
+        &self,
+    ) -> std::sync::Arc<dyn crate::infrastructure::inference::embedding::EmbeddingProvider> {
+        if let Some(ref base_url) = self.embedding_base_url {
+            std::sync::Arc::new(
+                crate::infrastructure::inference::embedding::LocalOnnxEmbeddingClient::new(
+                    Some(base_url.clone()),
+                    None,
+                ),
+            )
+        } else {
+            std::sync::Arc::new(
+                crate::infrastructure::inference::embedding::MockEmbeddingProvider::default(),
+            )
+        }
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -518,6 +545,7 @@ impl Config {
             tts_model: "kokoro".to_string(),
             tts_voice: "0".to_string(),
             tts_dialect: crate::infrastructure::inference::tts::TtsDialect::OpenAi,
+            embedding_base_url: None,
             trust_forwarded_for: false,
             ai: AiEnvConfig::default(),
             storage: StorageConfig::default(),
@@ -691,6 +719,7 @@ mod tests {
             tts_model: "kokoro".to_string(),
             tts_voice: "0".to_string(),
             tts_dialect: crate::infrastructure::inference::tts::TtsDialect::OpenAi,
+            embedding_base_url: None,
             trust_forwarded_for: false,
             ai: AiEnvConfig::default(),
             storage: StorageConfig::default(),

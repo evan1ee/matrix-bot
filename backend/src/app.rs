@@ -192,7 +192,8 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
 
     let services = AppServices::new(&db.pool)
         .with_link_config(config.web_url.clone(), config.link_signup_allowlist.clone())
-        .with_storage(storage);
+        .with_storage(storage)
+        .with_embedder(config.embedding_provider());
     // Built once and cloned into every reconnect generation, so `SyncHealth`
     // survives a Matrix reconnect.
     let handles = BotHandles::default();

@@ -12,6 +12,7 @@ pub mod finance;
 pub mod footprints;
 pub mod habits;
 pub mod identity;
+pub mod knowledge;
 pub mod life;
 pub mod llm;
 pub mod mcp;
@@ -38,6 +39,7 @@ use self::finance::FinanceService;
 use self::footprints::FootprintService;
 use self::habits::HabitService;
 use self::identity::{IdentityService, LinkService};
+use self::knowledge::{NoteService, SearchService};
 use self::life::LifeService;
 use self::llm::LlmService;
 use self::mcp::McpService;
@@ -118,6 +120,8 @@ pub struct AppServices {
     pub storage: Arc<dyn StorageService>,
     pub todos: TodoService,
     pub webhooks: WebhookService,
+    pub notes: NoteService,
+    pub knowledge_search: SearchService,
 }
 
 impl AppServices {
@@ -187,6 +191,11 @@ impl AppServices {
             storage,
             todos,
             webhooks,
+            notes: NoteService::new(pool.clone()),
+            knowledge_search: SearchService::new(
+                pool.clone(),
+                Arc::new(crate::infrastructure::inference::embedding::MockEmbeddingProvider::default()),
+            ),
         }
     }
 
@@ -205,6 +214,15 @@ impl AppServices {
     /// Gives the services tree the configured object storage service.
     pub fn with_storage(mut self, storage: Arc<dyn StorageService>) -> Self {
         self.storage = storage;
+        self
+    }
+
+    /// Configures the embedding provider used for semantic and hybrid knowledge searches.
+    pub fn with_embedder(
+        mut self,
+        embedder: Arc<dyn crate::infrastructure::inference::embedding::EmbeddingProvider>,
+    ) -> Self {
+        self.knowledge_search = self.knowledge_search.with_embedder(embedder);
         self
     }
 }
