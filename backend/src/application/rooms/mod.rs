@@ -196,6 +196,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn a_room_beyond_the_prompt_cap_still_resolves_by_name() {
+        let acct = AccountId::from_seed("acct_a");
+        let service = service_with_account(&acct).await;
+        let rooms: Vec<JoinedRoom> = (0..25)
+            .map(|i| room(&format!("!r{i}:x"), &format!("Room {i}"), false))
+            .collect();
+        service.replace_cached(&acct, &rooms).await.unwrap();
+
+        let resolved = service.resolve_target_room(&acct, Some("Room 24")).await;
+
+        assert_eq!(resolved, "!r24:x");
+    }
+
+    #[tokio::test]
     async fn replacing_the_cache_drops_rooms_no_longer_discovered() {
         let acct = AccountId::from_seed("acct_a");
         let service = service_with_account(&acct).await;

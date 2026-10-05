@@ -79,6 +79,28 @@ All milestones are verified green:
 
 ---
 
+## 3a. LLM prompt hardening (branch `fix/llm-prompt-hardening`)
+
+Plan: `docs/superpowers/plans/2026-10-05-llm-prompt-hardening.md` (approved 2026-10-05). One commit per phase.
+
+| Phase | Scope | Status |
+|---|---|---|
+| 1 | Static prompt prefix plus short context; no owner id; room cap | Done (`fix(llm): split system prompt into stable prefix and short context`) |
+| 2 | Quoted and tool content as data; confirm tainted sensitive calls; language-independent success guard | In progress |
+| 3 | Agent native tool calling, ReAct removed | Not started |
+| 4 | Execute the approved action on resume | Not started |
+| 5 | Docs sweep | Not started |
+
+Rulings:
+
+- Ruling: the agent moves to native tool calling and ReAct text parsing is removed (D1) — `AgentStep` already stores structured calls, so steps map onto `tool_calls` and `tool` messages with no migration or API change — a model without function calling cannot run agents, but plain text becomes the final answer so it fails safe.
+- Ruling: one language-independent confirmation rule replaces the zh/en reply templates (D2): after a success, start with ✅ and a short bold title, then bullets of the tool's key fields, in the user's language — rendering replies in code would couple formatting to every tool — formatting may drift between models; easy to revert.
+- Ruling: a single success-claim guard (no tool succeeded this turn but the reply contains ✅) replaces the English substring lists (D3) — it works in every language — a reply that claims success without the ✅ is not caught.
+- Ruling: chat confirms only tainted sensitive calls (D4): the turn carries quoted context, or an earlier round ran a tool that returns outside content (`web_search`, `get_webhook_logs`, `knowledge_search`); the tool is refused with `confirmation_required` and the model asks the user — confirming every sensitive call adds friction to plain requests — an untainted but mistaken call still runs without asking.
+- Ruling: dynamic context goes at the end of the single system message and a custom `system_prompt` still replaces everything (D5) — the static prefix stays byte-stable for provider caching — the prefix alone is only about 600 tokens, so the cache hit relies on the tools array being stable too; the conditional `web_search` tool breaks it.
+
+---
+
 ## 4. Remaining Tasks & Action Plan
 
 ### Track 1: Production Cutover & Deployment (Human Operator / User-Gated)

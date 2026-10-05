@@ -23,7 +23,7 @@ Reply in the user's language: match the language of the message, or of the text 
 
 # Tools and truthfulness
 
-- Perform every action by calling the real tool through the function calling API. Nothing is saved unless a tool call succeeds in this turn.
+- Perform every action by calling the real tool through the function calling API. Nothing is saved unless a tool call succeeds in this turn. Never write text such as \"Tool called: ...\" to claim a tool ran.
 - Never say or imply that an action succeeded unless its tool returned success. When a tool fails, say so and report the reason.
 - When one message asks for several actions, such as an expense, a habit check-in and a reminder, call every tool it needs.
 - Calls issued in the same round run concurrently. A call that depends on an earlier result, such as an id or a record that another call creates, must wait for that result and be issued in a later round.
@@ -32,7 +32,7 @@ Reply in the user's language: match the language of the message, or of the text 
 
 # Dates and times
 
-- Anchor relative dates and times (today, tomorrow at 8:00, tonight) to the local date and time zone in the context section below.
+- Anchor every relative date and time (today, yesterday, tomorrow at 8:00, tonight) to the local date and time zone in the context section below. This covers due dates, reflection dates, footprint dates and transaction dates.
 - Pass reminder times in local time like 2026-10-05 14:30 with no zone suffix, or use in_minutes. Show times to the user in the same local format.
 
 # Money
@@ -73,9 +73,11 @@ pub fn format_now_local(now: &chrono::DateTime<Tz>) -> String {
 }
 
 /// Describes at most [`MAX_PROMPT_ROOMS`] rooms and returns how many exist.
-pub fn room_lines(rooms: &[JoinedRoom]) -> (Vec<String>, usize) {
+pub fn room_lines<'a>(
+    rooms: impl ExactSizeIterator<Item = &'a JoinedRoom>,
+) -> (Vec<String>, usize) {
+    let total = rooms.len();
     let lines = rooms
-        .iter()
         .take(MAX_PROMPT_ROOMS)
         .map(|room| {
             if room.is_direct() {
@@ -85,7 +87,7 @@ pub fn room_lines(rooms: &[JoinedRoom]) -> (Vec<String>, usize) {
             }
         })
         .collect();
-    (lines, rooms.len())
+    (lines, total)
 }
 
 pub fn render_system_prompt(ctx: &PromptContext) -> String {
@@ -130,8 +132,7 @@ pub async fn build_system_prompt(
             tracing::warn!(%owner_id, error = %err, "Prompting without the room list");
             Vec::new()
         });
-    let joined: Vec<JoinedRoom> = cached.iter().map(|c| c.room().clone()).collect();
-    let (rooms, room_total) = room_lines(&joined);
+    let (rooms, room_total) = room_lines(cached.iter().map(|c| c.room()));
 
     render_system_prompt(&PromptContext {
         timezone: settings.timezone,
@@ -234,7 +235,7 @@ mod tests {
 
     #[test]
     fn room_list_caps_at_twenty_and_counts_rest() {
-        let (lines, total) = room_lines(&joined(25));
+        let (lines, total) = room_lines(joined(25).iter());
         assert_eq!(lines.len(), 20);
         assert_eq!(total, 25);
         let prompt = render_system_prompt(&context("Asia/Shanghai", lines, total));
@@ -246,7 +247,16 @@ mod tests {
             "extra rooms still resolve by name"
         );
 
-        let (few, total) = room_lines(&joined(3));
+        let (exact, total) = room_lines(joined(20).iter());
+        assert_eq!((exact.len(), total), (20, 20));
+        let prompt = render_system_prompt(&context("Asia/Shanghai", exact, total));
+        assert!(prompt.contains("Room 19"));
+        assert!(
+            !prompt.contains("more"),
+            "exactly 20 rooms has no overflow line"
+        );
+
+        let (few, total) = room_lines(joined(3).iter());
         let prompt = render_system_prompt(&context("Asia/Shanghai", few, total));
         assert!(!prompt.contains("more"));
     }
@@ -275,6 +285,8 @@ mod tests {
             "dependent calls wait"
         );
         assert!(!SYSTEM_PROMPT_STATIC.contains("web_chat"));
+        assert!(SYSTEM_PROMPT_STATIC.contains("Tool called"));
+        assert!(SYSTEM_PROMPT_STATIC.contains("yesterday"));
     }
 
     async fn pool_and_owner(seed: &str) -> (crate::db::DbPool, AccountId) {
