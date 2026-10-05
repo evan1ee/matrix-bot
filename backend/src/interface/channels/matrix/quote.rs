@@ -277,9 +277,8 @@ mod tests {
             event_id: None,
         };
         let ctx_prompt = q.to_context_prompt("fact check this");
-        assert!(
-            ctx_prompt.contains("[Context: Replying to quoted message from @alice:matrix.org]:")
-        );
+        assert!(ctx_prompt.starts_with("<quoted_message author=\"@alice:matrix.org\">"));
+        assert!(ctx_prompt.contains("</quoted_message>"));
         assert!(ctx_prompt.contains("The earth is flat."));
         assert!(ctx_prompt.contains("User request: fact check this"));
     }

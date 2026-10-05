@@ -13,9 +13,19 @@ pub struct LlmTurnContext<'a> {
     pub owner_id: &'a AccountId,
     pub room_id: &'a str,
     pub progress: Option<&'a dyn ProgressSink>,
+    /// The prompt embeds someone else's quoted text, so the turn is tainted
+    /// from the start: see `llm::guard`.
+    pub quoted_context: bool,
 }
 
 impl<'a> LlmTurnContext<'a> {
+    /// Marks the turn as carrying quoted content; only the front door that
+    /// actually embedded a quote calls this.
+    pub fn with_quoted_context(mut self) -> Self {
+        self.quoted_context = true;
+        self
+    }
+
     pub fn new(
         services: &'a crate::application::AppServices,
         pool: &'a DbPool,
@@ -31,6 +41,7 @@ impl<'a> LlmTurnContext<'a> {
             owner_id,
             room_id,
             progress,
+            quoted_context: false,
         }
     }
 }

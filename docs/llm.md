@@ -18,6 +18,7 @@ MCP client ──────────┴────────────
 | Concern | Path (under `backend/src/`) |
 |---|---|
 | Turn loop, limits, streaming, prompts, context, retrospective, price alerts | `llm/{turn,stream,prompt,context,retrospective,alert}.rs` |
+| Tool round, taint and confirmation, success-claim check | `llm/{tool_round,guard}.rs` |
 | Tool definitions and executors, one file per domain | `llm/tools/<domain>.rs`; `definitions.rs` aggregates, `executor.rs` dispatches |
 | Web search (Tavily, DuckDuckGo fallback) and the search-intent gate | `llm/search.rs` |
 | Effective per-user configuration (env defaults merged with saved settings) | `llm/resolved_config.rs` |
@@ -42,16 +43,26 @@ MCP client ──────────┴────────────
 
 `llm::run_turn` runs one user turn for an `LlmTurnContext` (services, pool, env config, account, conversation key and an optional `&dyn ProgressSink`) and a prompt:
 
-1. **Trigger.** In a DM, any message no command module claims goes to the AI (`LlmModule` registers after the TTS module for that reason). In a shared room it triggers on `!ai <prompt>` or a mention. A quoted reply carries its text into the prompt through `QuotedMessage::to_context_prompt()`.
+1. **Trigger.** In a DM, any message no command module claims goes to the AI (`LlmModule` registers after the TTS module for that reason). In a shared room it triggers on `!ai <prompt>` or a mention. A quoted reply carries its text into the prompt through `QuotedMessage::to_context_prompt()`, inside a `<quoted_message>` block (see *Untrusted content and confirmation*).
 2. **Context.** The active conversation for `(owner, room)` is loaded; one idle longer than `SESSION_TTL_SECONDS` (1 h) is replaced by a fresh one, and `!ai reset` clears it. Immediate retries are deduped by checking the conversation's tail message before inserting.
 3. **Tool loop.** The model may request tools; each round executes them, appends `tool` messages and calls the model again. Concurrent calls in a round run through `futures_util::future::join_all`. The loop stops after `MAX_TOOL_ROUNDS` (5); the Matrix front door rejects prompts over `MAX_PROMPT_LENGTH` (16384 bytes).
 4. **Reply.** The turn returns text; the front door wraps it in a `Reply` and the adapter renders it (Matrix: `text_html(&plain, &html)`). When a `ProgressSink` is present the turn reports stages, tool calls and streamed deltas to it and falls back to a plain completion on any transport error; each adapter decides how to show them (Matrix edits one message in place, a channel that cannot edit ignores most of it). Every sink method is best-effort and infallible, so a sink can never fail a turn. The turn does not record which message a tool created: the Matrix callers do that after the turn from the sink's `message_ref()` (R77). The web endpoint is `POST /ai/chat`. Failures reach the user through `interface::chat::error_reply` and never show a provider or database error.
+
+### Untrusted content and confirmation
+
+Text the model reads can carry instructions: a quoted message, a web page, a webhook payload, a knowledge note. The chat turn treats it as data in three ways (`llm/guard.rs`, `llm/tool_round.rs`):
+
+- **Delimiters.** `QuotedMessage::to_context_prompt` emits `<quoted_message author="…">…</quoted_message>` followed by `User request: …`. Every tool result sent to the model is wrapped as `<tool_output name="…">…</tool_output>`. Both escape an embedded closing tag (`escape_closing_tag`: `</quoted_message` becomes `&lt;/quoted_message`, any letter case), so content cannot end its own wrapper. The wrapping is applied to the model-facing message only: the stored tool message and `AiTurnResult::tool_results` keep the raw result, because adapters parse it. The static prompt's *Untrusted content* section states exactly this rule and names only these two tags. The autonomous agent (`llm/agent/`) has its own prompt and does not wrap tool results yet.
+- **Taint.** A turn is tainted when its prompt embeds a quote (`LlmTurnContext::with_quoted_context()`, set only by `interface/chat/llm.rs` when a quote is present) or when an earlier round ran a tool that returns outside content (`web_search`, `get_webhook_logs`, `knowledge_search`; `guard::returns_outside_content`). Calls in the same round do not taint each other.
+- **Confirmation.** While tainted, a sensitive tool (`agent::sandbox::is_sensitive_tool`: trades, payments, deletions) is not run. The model receives `{"error":"confirmation_required", …}` as the tool result and is told to ask the user; the user's next message starts an untainted turn and may perform it. A refused call is not counted in `tool_calls_executed` or `tool_results`. A plain turn runs sensitive tools as before.
+
+**Success claims.** If no tool succeeded this turn (`any_tool_succeeded`: a tool returned `Ok`) and the reply contains `✅`, the turn sends one language-neutral correction message and asks again. A reply that still claims success is replaced by a short notice. The check looks for the checkmark only, so it works in every language.
 
 ### The system prompt
 
 `llm/prompt.rs` renders one system message in two parts, so providers can cache the prefix:
 
-1. **Static prefix** (`SYSTEM_PROMPT_STATIC`): a `const` with no interpolation, written in sections (role, language, tools and truthfulness, dates and times, money, rooms, quoted replies). Each rule appears once. It carries no hard-coded zh/en reply templates: after a successful action the model starts with ✅ and a short bold title, then bullets of the tool's key fields, in the user's language. It states that calls in one round run concurrently, so a call that needs an earlier result must wait for a later round. It never contains the owner id, a timestamp or the word UTC. A test proves the prefix is byte-identical across contexts.
+1. **Static prefix** (`SYSTEM_PROMPT_STATIC`): a `const` with no interpolation, written in sections (role, language, tools and truthfulness, dates and times, money, rooms, quoted replies, untrusted content). Each rule appears once. It carries no hard-coded zh/en reply templates: after a successful action the model starts with ✅ and a short bold title, then bullets of the tool's key fields, in the user's language. It states that calls in one round run concurrently, so a call that needs an earlier result must wait for a later round. It never contains the owner id, a timestamp or the word UTC. A test proves the prefix is byte-identical across contexts.
 2. **Context section** (`PromptContext`, appended after the prefix): time zone, local time at minute precision (`YYYY-MM-DD HH:MM (Weekday)`, no seconds, no zone suffix), default currency, default room and at most 20 rooms followed by "…and N more". Rooms beyond the cap still resolve by name through `RoomService::resolve_target_room`; the prompt is not their source of truth. The owner id is never put in the prompt: tools take the owner from the turn's authenticated account.
 
 `build_system_prompt` only gathers data and calls the pure `render_system_prompt`. A user-supplied `system_prompt` (`ai_user_configs`) replaces both parts and is returned unchanged.

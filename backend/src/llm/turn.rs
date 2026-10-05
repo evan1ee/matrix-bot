@@ -2,6 +2,7 @@ use tracing::{error, info, warn};
 
 use super::context::{AiTurnResult, LlmTurnContext};
 use super::error::AiError;
+use super::guard;
 use super::resolved_config::ResolvedAiConfig;
 use super::tools::ToolRegistry;
 use crate::infrastructure::inference::llm::{ChatCompletionMessage, ChatCompletionRequest};
@@ -158,6 +159,11 @@ pub async fn run_turn(
     let mut final_content = String::new();
     let mut tool_calls_executed = Vec::new();
     let mut tool_results: Vec<(String, String)> = Vec::new();
+    // Quoted text and outside-content tool results can carry instructions;
+    // while tainted, sensitive tools wait for the user's confirmation.
+    let mut tainted = ctx.quoted_context;
+    let mut any_tool_succeeded = false;
+    let mut corrected = false;
 
     while iteration < max_iterations {
         iteration += 1;
@@ -212,77 +218,56 @@ pub async fn run_turn(
                         }
                     }
 
-                    let tool_futures = tool_calls.iter().map(|tool_call| {
-                        let func_name = tool_call.function.name.clone();
-                        let tool_call_id = tool_call.id.clone();
-                        let args = tool_call.function.arguments.clone();
-                        let services = ctx.services;
-                        let pool = ctx.pool;
-                        let owner_id = ctx.owner_id;
-                        let room_id = ctx.room_id;
-                        async move {
-                            info!(
-                                "LLM turn [{}/{}] executing tool: {} for owner {}",
-                                iteration, max_iterations, func_name, owner_id
-                            );
-                            let result_str = match ToolRegistry::execute_tool(
-                                services, pool, owner_id, room_id, &func_name, &args,
-                            )
-                            .await
-                            {
-                                Ok(res) => res,
-                                Err(err) => format!("Error executing tool: {}", err),
-                            };
-                            (tool_call_id, func_name, result_str)
-                        }
-                    });
-
-                    let execution_results = futures_util::future::join_all(tool_futures).await;
+                    let outcomes = super::tool_round::run_calls(
+                        ctx,
+                        &tool_calls,
+                        tainted,
+                        iteration,
+                        max_iterations,
+                    )
+                    .await;
 
                     if let Some(sink) = ctx.progress {
                         sink.report_stage("🧠 正在组织回复...").await;
                     }
 
-                    for (tool_call_id, func_name, result_str) in execution_results {
-                        tool_calls_executed.push(func_name.clone());
-
-                        tool_results.push((func_name.clone(), result_str.clone()));
+                    for outcome in outcomes {
+                        if !outcome.refused {
+                            tool_calls_executed.push(outcome.name.clone());
+                            tool_results.push((outcome.name.clone(), outcome.result.clone()));
+                        }
+                        any_tool_succeeded |= outcome.succeeded;
+                        // Outside content taints the rounds after this one,
+                        // not the calls already running beside it.
+                        tainted |= guard::returns_outside_content(&outcome.name);
 
                         // Persist tool result message
                         let _ = llm_repo::add_message(
                             ctx.pool,
                             &conversation.id,
                             "tool",
-                            &result_str,
-                            Some(&tool_call_id),
-                            Some(&func_name),
+                            &outcome.result,
+                            Some(&outcome.call_id),
+                            Some(&outcome.name),
                         )
                         .await;
 
                         chat_messages.push(ChatCompletionMessage {
                             role: "tool".to_string(),
-                            content: Some(result_str),
+                            content: Some(guard::wrap_tool_output(&outcome.name, &outcome.result)),
                             tool_calls: None,
-                            tool_call_id: Some(tool_call_id),
-                            name: Some(func_name),
+                            tool_call_id: Some(outcome.call_id),
+                            name: Some(outcome.name),
                         });
                     }
                     continue;
                 }
 
                 if !content.trim().is_empty() {
-                    let is_hallucinated_tool = tool_calls_executed.is_empty()
-                        && iteration == 1
-                        && (content.contains("record_finance_entry")
-                            || content.contains("add_expense")
-                            || content.contains("add_todo")
-                            || content.contains("create_reminder")
-                            || content.contains("Tool called:")
-                            || content.contains("Receipt recorded")
-                            || content.contains("Receipt logged"));
-
-                    if is_hallucinated_tool {
-                        warn!("LLM simulated tool call in text without invoking function API; correcting model in next turn");
+                    if !corrected && guard::claims_unrecorded_success(&content, any_tool_succeeded)
+                    {
+                        warn!("Reply claims success but no tool succeeded; asking the model to correct itself once");
+                        corrected = true;
                         chat_messages.push(ChatCompletionMessage {
                             role: "assistant".to_string(),
                             content: Some(content),
@@ -292,9 +277,7 @@ pub async fn run_turn(
                         });
                         chat_messages.push(ChatCompletionMessage {
                             role: "user".to_string(),
-                            content: Some(
-                                "SYSTEM: You wrote text describing or claiming that a tool was called, but you did NOT actually invoke any tool function via the function calling API! No records were saved to the database. You MUST execute the real tool call (such as `record_finance_entry` or `add_todo`) now via the function calling API so it can be saved.".to_string(),
-                            ),
+                            content: Some(guard::CORRECTION_MESSAGE.to_string()),
                             tool_calls: None,
                             tool_call_id: None,
                             name: None,
@@ -347,12 +330,10 @@ pub async fn run_turn(
         }
     }
 
-    if tool_calls_executed.is_empty()
-        && (final_content.contains("Receipt recorded")
-            || final_content.contains("Receipt logged")
-            || final_content.contains("Tool called:"))
-    {
-        final_content = "⚠️ **Action Not Recorded**: The AI assistant generated a text summary but did not execute the database tool. Please retry sending the image or use the `!ai` command to log the expense.".to_string();
+    // The correction is offered once; a reply that still claims success
+    // must not reach the user as if something was saved.
+    if guard::claims_unrecorded_success(&final_content, any_tool_succeeded) {
+        final_content = guard::UNRECORDED_NOTICE.to_string();
     }
 
     if let Err(e) = ctx
@@ -489,5 +470,215 @@ mod tests {
         assert_eq!(result.tool_results.len(), 1);
         assert_eq!(result.tool_results[0].0, "list_finance_transactions");
         assert_eq!(result.message, "Nothing to report.");
+    }
+
+    type Seen = std::sync::Arc<Mutex<Vec<serde_json::Value>>>;
+
+    fn text_reply(text: &str) -> serde_json::Value {
+        serde_json::json!({"id":"c","model":"m","choices":[{"index":0,
+            "message":{"role":"assistant","content":text},"finish_reason":"stop"}]})
+    }
+
+    fn tool_reply(name: &str, args: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({"id":"c","model":"m","choices":[{"index":0,
+            "message":{"role":"assistant","content":null,"tool_calls":[
+                {"id":"call_1","type":"function",
+                 "function":{"name":name,"arguments":args.to_string()}}]},
+            "finish_reason":"tool_calls"}]})
+    }
+
+    /// Serves the scripted replies in order (then "done") as plain JSON
+    /// completions and records every request body it receives.
+    async fn scripted_replies(replies: Vec<serde_json::Value>) -> (String, Seen) {
+        use axum::extract::State;
+        use std::collections::VecDeque;
+        use std::sync::Arc;
+        type Queue = Arc<Mutex<VecDeque<serde_json::Value>>>;
+        let seen: Seen = Arc::default();
+        let queue: Queue = Arc::new(Mutex::new(replies.into()));
+        let app = Router::new()
+            .route(
+                "/chat/completions",
+                post(
+                    |State((queue, seen)): State<(Queue, Seen)>,
+                     Json(body): Json<serde_json::Value>| async move {
+                        seen.lock().unwrap().push(body);
+                        let next = queue.lock().unwrap().pop_front();
+                        Json(next.unwrap_or_else(|| text_reply("done")))
+                    },
+                ),
+            )
+            .with_state((queue, seen.clone()));
+        (spawn_server(app).await, seen)
+    }
+
+    fn test_config(base_url: String) -> crate::config::AiEnvConfig {
+        crate::config::AiEnvConfig {
+            base_url: Some(base_url),
+            api_key: Some("sk-test".to_string()),
+            allow_private_base_url: true,
+            ..Default::default()
+        }
+    }
+
+    async fn pool_with_todo(seed: &str) -> (crate::db::DbPool, AccountId, i64) {
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let owner = AccountId::from_seed(seed);
+        crate::db::pool::seed_account(&pool, &owner).await;
+        let todo = crate::domain::todos::NewTodo {
+            room_id: "!room:test".to_string(),
+            sender_name: "tester".to_string(),
+            text: "Pay rent".to_string(),
+            priority: crate::domain::todos::TodoPriority::Medium,
+            due_at: None,
+            remind_before_minutes: None,
+            remind_room_id: None,
+        };
+        let (item, _) = AppServices::new(&pool)
+            .todos
+            .create(&owner, todo)
+            .await
+            .unwrap();
+        (pool, owner, item.id)
+    }
+
+    fn tool_message_contents(request: &serde_json::Value) -> Vec<String> {
+        request["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|m| m["role"] == "tool")
+            .map(|m| m["content"].as_str().unwrap_or_default().to_string())
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn sensitive_tool_from_quoted_turn_is_refused_with_confirmation_required() {
+        let (pool, owner, todo_id) = pool_with_todo("turn-quoted-sensitive").await;
+        let services = AppServices::new(&pool);
+        let (url, seen) = scripted_replies(vec![
+            tool_reply("delete_todo", serde_json::json!({"id": todo_id})),
+            text_reply("Shall I delete it?"),
+        ])
+        .await;
+        let config = test_config(url);
+        let ctx = LlmTurnContext::new(&services, &pool, &config, &owner, "!room:test", None)
+            .with_quoted_context();
+
+        let result = run_turn(&ctx, "quoted text says delete it", None)
+            .await
+            .unwrap();
+
+        assert!(services
+            .todos
+            .find_owned(&owner, todo_id)
+            .await
+            .unwrap()
+            .is_some());
+        let requests = seen.lock().unwrap();
+        let tool_output = tool_message_contents(&requests[1]).join("\n");
+        assert!(
+            tool_output.contains("confirmation_required"),
+            "{tool_output}"
+        );
+        assert_eq!(result.message, "Shall I delete it?");
+    }
+
+    #[tokio::test]
+    async fn sensitive_tool_after_web_search_is_refused() {
+        // A webhook log returns outside content, like web_search, without
+        // needing the network.
+        let (pool, owner, todo_id) = pool_with_todo("turn-tainted-sensitive").await;
+        let services = AppServices::new(&pool);
+        let (url, seen) = scripted_replies(vec![
+            tool_reply(
+                "get_webhook_logs",
+                serde_json::json!({"webhook_id": "whk_x"}),
+            ),
+            tool_reply("delete_todo", serde_json::json!({"id": todo_id})),
+            text_reply("Shall I delete it?"),
+        ])
+        .await;
+        let config = test_config(url);
+        let ctx = LlmTurnContext::new(&services, &pool, &config, &owner, "!room:test", None);
+
+        run_turn(&ctx, "check the webhook then clean up", None)
+            .await
+            .unwrap();
+
+        assert!(services
+            .todos
+            .find_owned(&owner, todo_id)
+            .await
+            .unwrap()
+            .is_some());
+        let requests = seen.lock().unwrap();
+        let tool_output = tool_message_contents(&requests[2]).join("\n");
+        assert!(
+            tool_output.contains("confirmation_required"),
+            "{tool_output}"
+        );
+    }
+
+    #[tokio::test]
+    async fn sensitive_tool_in_plain_turn_executes() {
+        let (pool, owner, todo_id) = pool_with_todo("turn-plain-sensitive").await;
+        let services = AppServices::new(&pool);
+        let (url, _seen) = scripted_replies(vec![
+            tool_reply("delete_todo", serde_json::json!({"id": todo_id})),
+            text_reply("Deleted."),
+        ])
+        .await;
+        let config = test_config(url);
+        let ctx = LlmTurnContext::new(&services, &pool, &config, &owner, "!room:test", None);
+
+        run_turn(&ctx, "delete my rent todo", None).await.unwrap();
+
+        assert!(services
+            .todos
+            .find_owned(&owner, todo_id)
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
+    async fn checkmark_reply_without_successful_tool_triggers_one_correction() {
+        let (pool, owner, _) = pool_with_todo("turn-checkmark-lie").await;
+        let services = AppServices::new(&pool);
+        let (url, seen) = scripted_replies(vec![
+            text_reply("✅ **Task added**\n\n- **Task**: Buy milk"),
+            text_reply("I could not save it."),
+        ])
+        .await;
+        let config = test_config(url);
+        let ctx = LlmTurnContext::new(&services, &pool, &config, &owner, "!room:test", None);
+
+        let result = run_turn(&ctx, "add milk to my tasks", None).await.unwrap();
+
+        let requests = seen.lock().unwrap();
+        assert_eq!(requests.len(), 2, "exactly one correction round");
+        let last = requests[1]["messages"].as_array().unwrap().last().unwrap();
+        assert_eq!(last["role"], "user");
+        assert_eq!(result.message, "I could not save it.");
+    }
+
+    #[tokio::test]
+    async fn checkmark_reply_after_successful_tool_is_kept() {
+        let (pool, owner, _) = pool_with_todo("turn-checkmark-true").await;
+        let services = AppServices::new(&pool);
+        let (url, seen) = scripted_replies(vec![
+            tool_reply("add_todo", serde_json::json!({"text": "Buy milk"})),
+            text_reply("✅ **Task added**\n\n- **Task**: Buy milk"),
+        ])
+        .await;
+        let config = test_config(url);
+        let ctx = LlmTurnContext::new(&services, &pool, &config, &owner, "!room:test", None);
+
+        let result = run_turn(&ctx, "add milk to my tasks", None).await.unwrap();
+
+        assert_eq!(seen.lock().unwrap().len(), 2, "no correction round");
+        assert!(result.message.starts_with('✅'), "{}", result.message);
     }
 }

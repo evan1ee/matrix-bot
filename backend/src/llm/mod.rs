@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod context;
 pub mod error;
+pub mod guard;
 pub mod models;
 pub mod progress;
 pub mod prompt;
@@ -8,6 +9,7 @@ pub mod resolved_config;
 pub mod retrospective;
 pub mod search;
 pub mod stream;
+pub mod tool_round;
 pub mod tools;
 pub mod turn;
 

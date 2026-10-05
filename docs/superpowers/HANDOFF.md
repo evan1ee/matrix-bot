@@ -86,7 +86,7 @@ Plan: `docs/superpowers/plans/2026-10-05-llm-prompt-hardening.md` (approved 2026
 | Phase | Scope | Status |
 |---|---|---|
 | 1 | Static prompt prefix plus short context; no owner id; room cap | Done (`fix(llm): split system prompt into stable prefix and short context`) |
-| 2 | Quoted and tool content as data; confirm tainted sensitive calls; language-independent success guard | In progress |
+| 2 | Quoted and tool content as data; confirm tainted sensitive calls; language-independent success guard | Done (`fix(llm): treat quoted and tool content as data; confirm tainted sensitive calls`) |
 | 3 | Agent native tool calling, ReAct removed | Not started |
 | 4 | Execute the approved action on resume | Not started |
 | 5 | Docs sweep | Not started |

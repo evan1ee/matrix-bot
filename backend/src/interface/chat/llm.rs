@@ -191,7 +191,10 @@ pub async fn handle_ai_command_with_stage(
         )));
     }
 
-    let turn_ctx = LlmTurnContext::new(services, pool, ai, owner_id, room_id, progress);
+    let mut turn_ctx = LlmTurnContext::new(services, pool, ai, owner_id, room_id, progress);
+    if quoted.is_some() {
+        turn_ctx = turn_ctx.with_quoted_context();
+    }
 
     match run_turn(&turn_ctx, &effective_prompt, None).await {
         Ok(result) => {
