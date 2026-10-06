@@ -22,6 +22,41 @@ fn ensure_waiting_for_approval(run: &crate::domain::agent::AgentRun) -> Result<(
     }
 }
 
+/// Resolves a pending approval, and fails if it was no longer pending: with
+/// the run locked this means another decision won, so this one must not go on.
+async fn resolve_once(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    approval_id: ApprovalId,
+    status: ApprovalStatus,
+    now: chrono::DateTime<chrono::Utc>,
+) -> Result<(), AppError> {
+    if repositories::agent::resolve_approval(&mut **tx, approval_id, status, now).await? {
+        Ok(())
+    } else {
+        Err(AppError::Conflict(
+            "the approval request was already resolved".to_string(),
+        ))
+    }
+}
+
+/// Announces a step recorded in this transaction, as `record_step` does.
+async fn publish_step(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    owner_id: AccountId,
+    step: &AgentStep,
+) -> Result<(), AppError> {
+    let event = SystemEvent::AgentStepCompleted {
+        owner_id,
+        run_id: step.run_id.to_string(),
+        step_number: step.step_number,
+        thought: step.thought.clone(),
+        tool_name: step.tool_name.clone(),
+        status: step.status.to_string(),
+    };
+    repositories::outbox::publish(tx, &event).await?;
+    Ok(())
+}
+
 /// The number for the next step of a run: the job handler numbers its steps
 /// by how many exist, and `run.current_step` is not advanced as steps are
 /// recorded, so it cannot be used here.
@@ -106,16 +141,17 @@ impl AgentService {
             "pending approval request not found".to_string(),
         ))?;
 
-        approval.approve(now)?;
-        repositories::agent::resolve_approval(&mut *tx, approval_id, ApprovalStatus::Approved, now)
-            .await?;
-
-        let mut run = repositories::agent::find_run_by_id(&mut *tx, approval.run_id)
+        // Lock the run first: approve, reject and cancel take turns on it, so
+        // the status checked below is the status that gets written.
+        let mut run = repositories::agent::lock_run(&mut *tx, approval.run_id)
             .await?
             .ok_or(AppError::NotFound("agent run not found".to_string()))?;
         // A cancelled or finished run must not come back to life, and its
         // held action must not run: refuse (the transaction rolls back).
         ensure_waiting_for_approval(&run)?;
+
+        approval.approve(now)?;
+        resolve_once(&mut tx, approval_id, ApprovalStatus::Approved, now).await?;
 
         run.status = RunStatus::Executing;
         repositories::agent::update_run_status(
@@ -133,8 +169,16 @@ impl AgentService {
         // The marker, committed with the approval, is what tells the job to
         // run the held call: the model is not asked to decide it again.
         let step_number = next_step_number(&mut tx, run.id).await?;
-        let marker = AgentStep::approval_marker(run.id, step_number, now);
+        let marker = AgentStep::approval_marker(
+            run.id,
+            step_number,
+            &approval_id.to_string(),
+            &approval.tool_name,
+            &approval.tool_input,
+            now,
+        );
         repositories::agent::record_step(&mut *tx, &marker).await?;
+        publish_step(&mut tx, run.account_id, &marker).await?;
 
         // Re-enqueue job to resume execution immediately
         let job = crate::domain::jobs::NewJob::agent_execute(
@@ -170,14 +214,13 @@ impl AgentService {
             "pending approval request not found".to_string(),
         ))?;
 
-        approval.reject(now)?;
-        repositories::agent::resolve_approval(&mut *tx, approval_id, ApprovalStatus::Rejected, now)
-            .await?;
-
-        let mut run = repositories::agent::find_run_by_id(&mut *tx, approval.run_id)
+        let mut run = repositories::agent::lock_run(&mut *tx, approval.run_id)
             .await?
             .ok_or(AppError::NotFound("agent run not found".to_string()))?;
         ensure_waiting_for_approval(&run)?;
+
+        approval.reject(now)?;
+        resolve_once(&mut tx, approval_id, ApprovalStatus::Rejected, now).await?;
 
         run.status = RunStatus::Executing;
         repositories::agent::update_run_status(
@@ -207,6 +250,7 @@ impl AgentService {
             now,
         );
         repositories::agent::record_step(&mut *tx, &step).await?;
+        publish_step(&mut tx, run.account_id, &step).await?;
 
         let job = crate::domain::jobs::NewJob::agent_execute(
             *account_id,

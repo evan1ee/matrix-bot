@@ -119,7 +119,7 @@ impl ReActEngine {
             ctx.goal,
             ctx.steps,
             &tool_defs,
-            ctx.steps.len() as i32 + 1,
+            crate::domain::agent::model_steps(ctx.steps) as i32 + 1,
             ctx.max_steps,
         );
 
@@ -251,9 +251,12 @@ impl ReActEngine {
     }
 
     /// Runs a call the user approved: the held call from an earlier step, with
-    /// no model call and no sensitivity check (the user just decided). The
-    /// task whitelist still applies, and the owner comes from the run's
-    /// account, as for any call.
+    /// no model call and no sensitivity check (the user just decided). What
+    /// constrains it is the stored call itself (the job checks it against the
+    /// approval the user saw) and the owner, taken from the run's account as
+    /// for any call. The whitelist check below is a no-op today: the job
+    /// passes `allowed_tools: None` (a HANDOFF follow-up wires task
+    /// whitelists in).
     pub async fn execute_approved(
         &self,
         services: &AppServices,

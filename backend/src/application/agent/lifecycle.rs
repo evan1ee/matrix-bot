@@ -152,8 +152,11 @@ impl AgentService {
         let now = now_at_storage_precision();
         let mut tx = self.pool.begin().await?;
 
-        let mut run = repositories::agent::find_run_for_account(&mut *tx, account_id, run_id)
+        // Lock before reading the status, so a concurrent approve or reject
+        // finishes first and cancel sees (and overwrites) its result.
+        let mut run = repositories::agent::lock_run(&mut *tx, run_id)
             .await?
+            .filter(|run| run.account_id == *account_id)
             .ok_or(AppError::NotFound("agent run not found".to_string()))?;
 
         run.mark_cancelled(now)?;

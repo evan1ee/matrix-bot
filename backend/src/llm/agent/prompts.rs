@@ -18,7 +18,7 @@ You are an autonomous execution agent for matrix-bot. Accomplish the user's goal
 
 # How to work
 
-- In each step, either call one tool through the function calling API or give the final answer as plain text. Never describe a tool call in text.
+- In each step, either call one tool through the function calling API or give the final answer as plain text. Make one tool call per step; only the first call of a reply is run. Never describe a tool call in text.
 - Call only tools relevant to the goal. Never invent data; rely on tool results.
 - After a tool result, decide on the next tool call or on the final answer: a concise, structured summary of the findings and the actions taken.
 - Sensitive operations (trades, payments, deletions and similar) are held for the user's approval. After you request one, expect to wait for the decision.
@@ -39,7 +39,8 @@ pub const MAX_TOOL_OUTPUT_PROMPT_CHARS: usize = 2000;
 
 /// Formats a stored tool output for the model as **valid JSON**, capped near
 /// [`MAX_TOOL_OUTPUT_PROMPT_CHARS`] so one result cannot blow up the context
-/// window. An array drops tail items and ends with
+/// window (approximately: the preview form adds a few characters). An array
+/// drops tail items and ends with
 /// `{"_truncated":true,"omitted":k}`; any other oversized value becomes
 /// `{"_truncated":true,"preview":…,"original_chars":n}`. The full output
 /// stays in the step record.
@@ -50,18 +51,27 @@ pub fn format_tool_output(output: &serde_json::Value) -> String {
         return text;
     }
     match output {
-        serde_json::Value::Array(items) => truncate_array(items),
-        _ => serde_json::json!({
-            "_truncated": true,
-            "preview": text.chars().take(MAX_TOOL_OUTPUT_PROMPT_CHARS).collect::<String>(),
-            "original_chars": chars,
-        })
-        .to_string(),
+        // When not even the first item fits, keep a preview of it rather
+        // than only a count of what was dropped.
+        serde_json::Value::Array(items) => {
+            truncate_array(items).unwrap_or_else(|| preview(&text, chars))
+        }
+        _ => preview(&text, chars),
     }
 }
 
-/// Keeps the longest prefix of `items` that fits with its marker.
-fn truncate_array(items: &[serde_json::Value]) -> String {
+fn preview(text: &str, original_chars: usize) -> String {
+    serde_json::json!({
+        "_truncated": true,
+        "preview": text.chars().take(MAX_TOOL_OUTPUT_PROMPT_CHARS).collect::<String>(),
+        "original_chars": original_chars,
+    })
+    .to_string()
+}
+
+/// Keeps the longest prefix of `items` that fits with its marker, or `None`
+/// when not even the first item fits.
+fn truncate_array(items: &[serde_json::Value]) -> Option<String> {
     let marker =
         |omitted: usize| serde_json::json!({"_truncated": true, "omitted": omitted}).to_string();
     let sizes: Vec<usize> = items
@@ -80,9 +90,12 @@ fn truncate_array(items: &[serde_json::Value]) -> String {
         used += comma + size;
         kept = index + 1;
     }
+    if kept == 0 {
+        return None;
+    }
     let mut out: Vec<serde_json::Value> = items[..kept].to_vec();
     out.push(serde_json::json!({"_truncated": true, "omitted": items.len() - kept}));
-    serde_json::Value::Array(out).to_string()
+    Some(serde_json::Value::Array(out).to_string())
 }
 
 fn system_prompt(has_tools: bool, max_steps: i32) -> String {
@@ -275,7 +288,14 @@ mod tests {
             0,
             Utc::now(),
         );
-        let marker = AgentStep::approval_marker(run_id, 2, Utc::now());
+        let marker = AgentStep::approval_marker(
+            run_id,
+            2,
+            "appr_1",
+            "deposit_portfolio_cash",
+            &serde_json::json!({"amount": "100"}),
+            Utc::now(),
+        );
         let result = AgentStep::new(
             run_id,
             3,
@@ -364,6 +384,24 @@ mod tests {
         let omitted = marker["omitted"].as_u64().unwrap() as usize;
         assert!(omitted > 0);
         assert_eq!(array.len() - 1 + omitted, 100);
+    }
+
+    #[test]
+    fn a_single_oversized_array_item_falls_back_to_a_preview() {
+        let value = parsed(&serde_json::json!([{"page": "A".repeat(3000)}]));
+        assert_eq!(value["_truncated"], true);
+        assert!(value["preview"].as_str().unwrap().len() > 100, "{value}");
+        assert!(value.get("omitted").is_none());
+    }
+
+    #[test]
+    fn the_prompt_asks_for_one_tool_call_per_step() {
+        let messages = build_messages("g", &[], &[], 1, 5);
+        assert!(messages[0]
+            .content
+            .as_deref()
+            .unwrap()
+            .contains("one tool call per step"));
     }
 
     #[test]

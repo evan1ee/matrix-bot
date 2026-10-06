@@ -107,6 +107,33 @@ pub async fn find_run_by_id<'e>(
     Ok(row.map(Into::into))
 }
 
+/// Like [`find_run_by_id`], but takes the row lock for the rest of the
+/// transaction. Approve, reject and cancel read the run's status and then
+/// change it; locking first makes them take turns, so a decision made on a
+/// stale status cannot overwrite a newer one.
+pub async fn lock_run<'e>(
+    conn: impl PgExecutor<'e>,
+    run_id: AgentRunId,
+) -> Result<Option<AgentRun>, sqlx::Error> {
+    let row = sqlx::query_as!(
+        AgentRunRow,
+        r#"
+        SELECT
+            id, scheduled_task_id, account_id, task_name, goal,
+            origin_conversation, status, max_steps, current_step,
+            total_tokens, error, started_at, completed_at, updated_at
+        FROM agent_runs
+        WHERE id = $1
+        FOR UPDATE
+        "#,
+        run_id.as_uuid(),
+    )
+    .fetch_optional(conn)
+    .await?;
+
+    Ok(row.map(Into::into))
+}
+
 pub async fn find_run_for_account<'e>(
     conn: impl PgExecutor<'e>,
     account_id: &AccountId,

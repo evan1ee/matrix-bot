@@ -5,7 +5,10 @@ pub mod task;
 
 pub use approval::{ApprovalId, ApprovalRequest, ApprovalStatus, APPROVAL_TTL_HOURS};
 pub use run::{AgentRun, AgentRunId, RunStatus};
-pub use step::{pending_approved_call, AgentStep, AgentStepId, StepStatus};
+pub use step::{
+    interrupted_approved_execution, model_steps, pending_approved_call, step_budget, AgentStep,
+    AgentStepId, StepStatus,
+};
 pub use task::{ScheduledAgentTask, ScheduledTaskDefinition, ScheduledTaskRegistry, TaskId};
 
 /// Maximum allowable characters in an agent goal.
