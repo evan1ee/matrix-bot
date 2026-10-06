@@ -80,7 +80,7 @@ mod tests {
     use serde_json::json;
 
     use crate::domain::accounts::AccountId;
-    use crate::domain::agent::RunStatus;
+    use crate::domain::agent::{AgentRunId, RunStatus};
 
     async fn setup_test_db() -> crate::db::DbPool {
         let pool = crate::db::pool::test_pool().await;
@@ -157,5 +157,106 @@ mod tests {
 
         let resumed = service.get_run(&owner, run.id).await.unwrap();
         assert_eq!(resumed.status, RunStatus::Executing);
+    }
+
+    async fn started_run(seed: &str) -> (AgentService, AccountId, AgentRunId) {
+        let pool = setup_test_db().await;
+        let owner = AccountId::from_seed(seed);
+        crate::db::pool::seed_account(&pool, &owner).await;
+        let service = AgentService::new(pool);
+        let run = service
+            .start_user_goal(owner, None, "Race the writers", None)
+            .await
+            .unwrap();
+        (service, owner, run.id)
+    }
+
+    #[tokio::test]
+    async fn a_cancelled_run_stays_cancelled_for_every_status_writer() {
+        let (service, owner, run_id) = started_run("agent-cancel-first").await;
+        service.cancel_run(&owner, run_id).await.unwrap();
+
+        assert!(service.complete_run(run_id, 1).await.is_err());
+        assert!(service.fail_run(run_id, "late", 1).await.is_err());
+        assert!(service
+            .require_approval(run_id, "delete_todo", json!({"id": 1}))
+            .await
+            .is_err());
+
+        let run = service.get_run(&owner, run_id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Cancelled);
+    }
+
+    /// Whichever of the two commits first wins and the other is refused: both
+    /// succeeding would mean one overwrote the other's status.
+    fn exactly_one_won(a: &Result<(), AppError>, b: &Result<(), AppError>) -> bool {
+        a.is_ok() != b.is_ok()
+    }
+
+    #[tokio::test]
+    async fn overlapping_cancel_and_complete_have_one_winner() {
+        let (service, owner, run_id) = started_run("agent-race-complete").await;
+
+        let (cancelled, completed) = tokio::join!(
+            service.cancel_run(&owner, run_id),
+            service.complete_run(run_id, 1),
+        );
+
+        assert!(
+            exactly_one_won(&cancelled, &completed),
+            "{cancelled:?} {completed:?}"
+        );
+        let status = service.get_run(&owner, run_id).await.unwrap().status;
+        assert_eq!(
+            status,
+            if cancelled.is_ok() {
+                RunStatus::Cancelled
+            } else {
+                RunStatus::Completed
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn overlapping_cancel_and_fail_have_one_winner() {
+        let (service, owner, run_id) = started_run("agent-race-fail").await;
+
+        let (cancelled, failed) = tokio::join!(
+            service.cancel_run(&owner, run_id),
+            service.fail_run(run_id, "boom", 1),
+        );
+
+        assert!(
+            exactly_one_won(&cancelled, &failed),
+            "{cancelled:?} {failed:?}"
+        );
+        let status = service.get_run(&owner, run_id).await.unwrap().status;
+        assert_eq!(
+            status,
+            if cancelled.is_ok() {
+                RunStatus::Cancelled
+            } else {
+                RunStatus::Failed
+            }
+        );
+    }
+
+    #[tokio::test]
+    async fn overlapping_cancel_and_require_approval_have_one_winner() {
+        let (service, owner, run_id) = started_run("agent-race-approval").await;
+
+        let (cancelled, required) = tokio::join!(service.cancel_run(&owner, run_id), async {
+            service
+                .require_approval(run_id, "delete_todo", json!({"id": 1}))
+                .await
+                .map(|_| ())
+        },);
+
+        // Requiring approval first and cancelling after is a valid order, so
+        // both may succeed; what must never happen is a cancelled run coming
+        // back as waiting for approval.
+        assert!(cancelled.is_ok(), "{cancelled:?} {required:?}");
+        let status = service.get_run(&owner, run_id).await.unwrap().status;
+        assert_eq!(status, RunStatus::Cancelled, "{required:?}");
     }
 }

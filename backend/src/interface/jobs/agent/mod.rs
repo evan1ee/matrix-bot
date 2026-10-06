@@ -8,14 +8,14 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
+mod resume;
+
 use super::{deliverable, message, parse_payload, Outbound};
 use crate::application::AppServices;
 use crate::config::AiEnvConfig;
 use crate::db::DbPool;
-use crate::domain::accounts::AccountId;
 use crate::domain::agent::{
-    interrupted_approved_execution, model_steps, pending_approved_call, step_budget, AgentRun,
-    AgentRunId, AgentStep, RunStatus, StepStatus,
+    model_steps, step_budget, AgentRunId, AgentStep, RunStatus, StepStatus,
 };
 use crate::domain::jobs::{AgentExecutePayload, JobType};
 use crate::interface::channels::message::Target;
@@ -24,16 +24,7 @@ use crate::llm::agent::{ReActEngine, StepContext, StepOutcome};
 use crate::llm::resolved_config::ResolvedAiConfig;
 use crate::utils::html::html_escape;
 use crate::utils::time::now_at_storage_precision;
-
-/// What `resume_approved` did, so the run loop knows how to go on.
-enum Resume {
-    /// No approved call is waiting: evaluate the next model step.
-    NotApplicable,
-    /// An approved call ran and its result is recorded: read the steps again.
-    Continue,
-    /// The run was failed (or is already over): stop.
-    Stop,
-}
+use resume::Resume;
 
 pub struct AgentExecuteRunHandler {
     services: AppServices,
@@ -57,167 +48,6 @@ impl AgentExecuteRunHandler {
             outbound,
             engine,
             ai_env_config,
-        }
-    }
-
-    /// Fails the run with a recorded step and tells the origin conversation.
-    async fn stop_run(
-        &self,
-        run: &AgentRun,
-        payload: &AgentExecutePayload,
-        step_number: i32,
-        error: &str,
-        total_tokens: i32,
-    ) -> Result<(), JobError> {
-        let step = AgentStep::new(
-            run.id,
-            step_number,
-            None,
-            None,
-            None,
-            Some(serde_json::json!({ "error": error })),
-            StepStatus::Failed,
-            0,
-            now_at_storage_precision(),
-        );
-        self.services
-            .agent
-            .record_step(run.id, &step)
-            .await
-            .map_err(JobError::from)?;
-        self.services
-            .agent
-            .fail_run(run.id, error, total_tokens)
-            .await
-            .map_err(JobError::from)?;
-        self.deliver_message(
-            payload.origin_conversation.as_deref(),
-            &format!("❌ Agent Goal Failed:\n\n{error}"),
-            &format!(
-                "<p>❌ <b>Agent Goal Failed</b></p><p>{}</p>",
-                html_escape(error)
-            ),
-        )
-        .await;
-        Ok(())
-    }
-
-    /// Runs the call the user approved, at most once.
-    ///
-    /// Order matters: a "started" step is committed BEFORE the tool runs, and
-    /// the result step is recorded after. A retry that finds the started step
-    /// last cannot tell whether the tool ran, so it fails the run for the user
-    /// to check instead of running the tool again. The call comes from the
-    /// approval the user saw (carried by the marker) and must equal the held
-    /// step; the model is not asked and no sensitivity check applies.
-    async fn resume_approved(
-        &self,
-        owner: &AccountId,
-        run: &AgentRun,
-        payload: &AgentExecutePayload,
-        steps: &[AgentStep],
-        config: &ResolvedAiConfig,
-        total_tokens: i32,
-    ) -> Result<Resume, JobError> {
-        let next = steps.len() as i32 + 1;
-        if interrupted_approved_execution(steps) {
-            let error = "An approved action may have run, but its result was not recorded. \
-                         Please check manually whether it took effect before repeating it.";
-            self.stop_run(run, payload, next, error, total_tokens)
-                .await?;
-            return Ok(Resume::Stop);
-        }
-        let Some((held, marker)) = pending_approved_call(steps) else {
-            return Ok(Resume::NotApplicable);
-        };
-        let held_call = (
-            held.tool_name.clone().unwrap_or_default(),
-            held.tool_input
-                .clone()
-                .unwrap_or_else(|| serde_json::json!({})),
-        );
-        if marker.approved_call().as_ref() != Some(&held_call) {
-            let error = "The approved action does not match the held call; nothing was run.";
-            self.stop_run(run, payload, next, error, total_tokens)
-                .await?;
-            return Ok(Resume::Stop);
-        }
-        // Cancelled since this job was queued: the held action must not run.
-        let current = self
-            .services
-            .agent
-            .get_run_internal(run.id)
-            .await
-            .map_err(JobError::from)?;
-        if current.status.is_terminal() {
-            return Ok(Resume::Stop);
-        }
-
-        let started = AgentStep::execution_started(run.id, next, now_at_storage_precision());
-        self.services
-            .agent
-            .record_step(run.id, &started)
-            .await
-            .map_err(JobError::from)?;
-
-        let step_ctx = StepContext {
-            account_id: owner,
-            room_id: payload
-                .origin_conversation
-                .as_deref()
-                .unwrap_or("agent:internal"),
-            goal: &run.goal,
-            steps,
-            allowed_tools: None,
-            custom_sensitive_tools: None,
-            max_steps: run.max_steps,
-            config,
-        };
-        let outcome = self
-            .engine
-            .execute_approved(
-                &self.services,
-                &self.pool,
-                &step_ctx,
-                held_call.0,
-                held_call.1,
-            )
-            .await;
-        match outcome {
-            StepOutcome::Executed {
-                thought,
-                tool_name,
-                tool_input,
-                tool_output,
-                tokens_used,
-            } => {
-                let step = AgentStep::new(
-                    run.id,
-                    next + 1,
-                    thought,
-                    Some(tool_name),
-                    Some(tool_input),
-                    Some(tool_output),
-                    StepStatus::Success,
-                    tokens_used,
-                    now_at_storage_precision(),
-                );
-                self.services
-                    .agent
-                    .record_step(run.id, &step)
-                    .await
-                    .map_err(JobError::from)?;
-                Ok(Resume::Continue)
-            }
-            other => {
-                let error = match other {
-                    StepOutcome::Failed { error, .. } => error,
-                    _ => "The approved action could not be run".to_string(),
-                };
-                self.stop_run(run, payload, next + 1, &error, total_tokens)
-                    .await?;
-                Ok(Resume::Stop)
-            }
         }
     }
 
@@ -297,7 +127,12 @@ impl JobHandler for AgentExecuteRunHandler {
             // result of an approved call do not (see `step_budget`).
             let budget = step_budget(&steps, run.max_steps);
             if model_steps(&steps) as i32 + 1 > budget {
-                let error_msg = format!("Max steps limit ({budget}) reached without completion");
+                // `budget` is `max_steps` plus the steps earned by approved
+                // actions, capped at twice `max_steps`.
+                let error_msg = format!(
+                    "Max steps limit ({budget}, counting the steps granted after approved \
+                     actions) reached without completion"
+                );
                 self.services
                     .agent
                     .fail_run(run.id, &error_msg, total_tokens)
@@ -864,6 +699,51 @@ mod tests {
         assert_eq!(
             last.tool_output.as_ref().unwrap()["final_answer"],
             "Deposited 100 USD."
+        );
+    }
+
+    #[tokio::test]
+    async fn repeated_approved_cycles_end_at_the_step_cap() {
+        // One model step allowed: each approved execution earns one more step,
+        // but never beyond twice the configured steps in total.
+        let (handler, services, owner, run_id, _seen) = approval_fixture_with(
+            "agent-step-cap",
+            vec![deposit_call(), deposit_call(), deposit_call()],
+            Some(1),
+        )
+        .await;
+
+        run_job(&handler, owner, run_id).await;
+        for _ in 0..2 {
+            let pending = services.agent.list_pending_approvals(&owner).await.unwrap();
+            services
+                .agent
+                .approve_action(&owner, pending[0].id)
+                .await
+                .unwrap();
+            run_job(&handler, owner, run_id).await;
+        }
+
+        assert_eq!(
+            cash_minor(&services, &owner).await,
+            vec![20_000],
+            "two approved deposits"
+        );
+        assert!(services
+            .agent
+            .list_pending_approvals(&owner)
+            .await
+            .unwrap()
+            .is_empty());
+        let run = services.agent.get_run_internal(run_id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Failed);
+        assert!(
+            run.error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("Max steps"),
+            "{:?}",
+            run.error
         );
     }
 

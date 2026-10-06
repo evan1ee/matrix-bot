@@ -239,9 +239,14 @@ pub fn model_steps(steps: &[AgentStep]) -> usize {
 }
 
 /// The model-step budget: `max_steps`, plus one step after each approved
-/// execution so the model can always report what happened.
+/// execution so the model can always report what happened, but never more
+/// than twice `max_steps` in total. The cap bounds a model that keeps asking
+/// for approved sensitive calls while a human keeps approving them.
 pub fn step_budget(steps: &[AgentStep], max_steps: i32) -> i32 {
-    max_steps + steps.iter().filter(|s| s.is_execution_started()).count() as i32
+    let approved = steps.iter().filter(|s| s.is_execution_started()).count() as i32;
+    max_steps
+        .saturating_add(approved)
+        .min(max_steps.saturating_mul(2))
 }
 
 #[cfg(test)]
@@ -309,6 +314,13 @@ mod tests {
             "one more step to answer after the action"
         );
         assert_eq!(step_budget(&[held], 2), 2);
+
+        // The extra steps are capped: at most twice the configured steps in
+        // total, however many approved executions there are.
+        let many: Vec<AgentStep> = (0..10)
+            .map(|n| AgentStep::execution_started(run, n, now))
+            .collect();
+        assert_eq!(step_budget(&many, 3), 6);
     }
 
     #[test]

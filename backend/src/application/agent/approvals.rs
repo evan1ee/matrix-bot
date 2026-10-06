@@ -81,7 +81,7 @@ impl AgentService {
 
         let mut tx = self.pool.begin().await?;
 
-        let mut run = repositories::agent::find_run_by_id(&mut *tx, run_id)
+        let mut run = repositories::agent::lock_run(&mut *tx, run_id)
             .await?
             .ok_or(AppError::NotFound("agent run not found".to_string()))?;
 
@@ -262,6 +262,27 @@ impl AgentService {
         tx.commit().await?;
 
         Ok(())
+    }
+
+    /// Commits the execution-started step of an approved call, in one
+    /// transaction with a lock on the run. Returns `false`, recording nothing,
+    /// when the run is no longer active (cancelled since the job was queued).
+    pub async fn begin_approved_execution(
+        &self,
+        run_id: AgentRunId,
+        started: &AgentStep,
+    ) -> Result<bool, AppError> {
+        let mut tx = self.pool.begin().await?;
+        let run = repositories::agent::lock_run(&mut *tx, run_id)
+            .await?
+            .ok_or(AppError::NotFound("agent run not found".to_string()))?;
+        if run.status.is_terminal() {
+            return Ok(false);
+        }
+        repositories::agent::record_step(&mut *tx, started).await?;
+        publish_step(&mut tx, run.account_id, started).await?;
+        tx.commit().await?;
+        Ok(true)
     }
 
     /// Lists pending approvals for an account.
