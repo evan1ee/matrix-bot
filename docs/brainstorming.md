@@ -6,7 +6,7 @@ This document captures architectural ideation, potential feature enhancements, a
 
 ## 1. Proactive Autonomous Agent Superpowers
 
-With the ReAct engine (`backend/src/llm/agent/`), durable jobs queue, and passkey step-up approval flow in place, scheduled agent tasks can evolve from simple text notifications into proactive, multi-modal personal assistants.
+With the agent engine (`backend/src/llm/agent/`, native tool calling), durable jobs queue, and passkey step-up approval flow in place, scheduled agent tasks can evolve from simple text notifications into proactive, multi-modal personal assistants.
 
 ### 1.1 Sunday Night Audio Digest (Kokoro-82M TTS Pipeline)
 - **Concept:** Transform the `WeeklyBookmarkDigestTask` into a personalized weekly audio podcast.

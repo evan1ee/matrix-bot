@@ -125,7 +125,7 @@ Before starting the bot, verify all channel credentials in `.env`:
 | **Telegram** | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_MODE`, `TELEGRAM_ALLOWED_USERS` | Webhook mode requires `TELEGRAM_WEBHOOK_SECRET` and HTTPS `WEB_URL` |
 | **Email** | `EMAIL_IMAP_URL`, `EMAIL_SMTP_URL`, `EMAIL_USERNAME`, `EMAIL_PASSWORD`, `EMAIL_FROM`, `EMAIL_AUTHSERV_ID` | Requires DMARC pass validation against `EMAIL_AUTHSERV_ID` |
 | **Storage** | `STORAGE_BACKEND`, `STORAGE_LOCAL_ROOT`, `STORAGE_S3_BUCKET` | Directory must be writable by bot process |
-| **LLM** | `AI_ENDPOINT`, `AI_API_KEY`, `AI_MODEL` | Used for interactive turn tools and agent ReAct loop |
+| **LLM** | `AI_ENDPOINT`, `AI_API_KEY`, `AI_MODEL` | Used for interactive turn tools and agent tool-calling loop |
 
 ## 3. First boot on matrix-sdk 0.18 and PostgreSQL 18
 
