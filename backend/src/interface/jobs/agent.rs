@@ -12,7 +12,7 @@ use super::{deliverable, message, parse_payload, Outbound};
 use crate::application::AppServices;
 use crate::config::AiEnvConfig;
 use crate::db::DbPool;
-use crate::domain::agent::{AgentRunId, AgentStep, RunStatus, StepStatus};
+use crate::domain::agent::{pending_approved_call, AgentRunId, AgentStep, RunStatus, StepStatus};
 use crate::domain::jobs::{AgentExecutePayload, JobType};
 use crate::interface::channels::message::Target;
 use crate::jobs::{JobContext, JobError, JobHandler};
@@ -105,7 +105,10 @@ impl JobHandler for AgentExecuteRunHandler {
                 .map_err(JobError::from)?;
 
             let current_step_num = steps.len() as i32 + 1;
-            if current_step_num > run.max_steps {
+            // The user approved a held call: running it is not a model step,
+            // so the step budget does not stop it.
+            let approved_call = pending_approved_call(&steps);
+            if approved_call.is_none() && current_step_num > run.max_steps {
                 let error_msg = format!(
                     "Max steps limit ({}) reached without completion",
                     run.max_steps
@@ -139,11 +142,31 @@ impl JobHandler for AgentExecuteRunHandler {
                 config: &resolved_config,
             };
 
-            let outcome = self
-                .engine
-                .evaluate_step(&self.services, &self.pool, &step_ctx)
-                .await
-                .map_err(|e| JobError::Retryable(anyhow::anyhow!("LLM evaluation error: {e}")))?;
+            let outcome = match approved_call {
+                // Run the stored call itself (no model call, no sensitivity
+                // check). It is recorded below as a result step, so the
+                // approval marker is no longer last and it never runs twice.
+                Some(held) => {
+                    self.engine
+                        .execute_approved(
+                            &self.services,
+                            &self.pool,
+                            &step_ctx,
+                            held.tool_name.clone().unwrap_or_default(),
+                            held.tool_input
+                                .clone()
+                                .unwrap_or_else(|| serde_json::json!({})),
+                        )
+                        .await
+                }
+                None => self
+                    .engine
+                    .evaluate_step(&self.services, &self.pool, &step_ctx)
+                    .await
+                    .map_err(|e| {
+                        JobError::Retryable(anyhow::anyhow!("LLM evaluation error: {e}"))
+                    })?,
+            };
 
             let now = now_at_storage_precision();
 
@@ -386,6 +409,195 @@ mod tests {
 
         let res = handler.run(&ctx, payload).await;
         assert!(res.is_ok());
+    }
+
+    /// A handler wired to a scripted LLM, with an account and a started run.
+    async fn approval_fixture(
+        seed: &str,
+        replies: Vec<serde_json::Value>,
+    ) -> (
+        AgentExecuteRunHandler,
+        AppServices,
+        AccountId,
+        AgentRunId,
+        crate::llm::test_support::Seen,
+    ) {
+        use crate::llm::test_support::*;
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let services = AppServices::new(&pool);
+        let owner = AccountId::from_seed(seed);
+        crate::db::pool::seed_account(&pool, &owner).await;
+        let (url, seen) = scripted_replies(replies).await;
+        let handler = AgentExecuteRunHandler::new(
+            services.clone(),
+            pool.clone(),
+            FakeOutbound::connected(),
+            ReActEngine::from_proxy(None),
+            test_config(url),
+        );
+        let run = services
+            .agent
+            .start_user_goal(owner, None, "Deposit 100 USD", None)
+            .await
+            .unwrap();
+        (handler, services, owner, run.id, seen)
+    }
+
+    async fn run_job(handler: &AgentExecuteRunHandler, owner: AccountId, run_id: AgentRunId) {
+        let ctx = JobContext {
+            job_id: JobId(200),
+            account_id: Some(owner),
+            attempt: 1,
+            max_attempts: 3,
+            cancel: CancellationToken::new(),
+        };
+        let payload = serde_json::json!({
+            "run_id": run_id.as_uuid(),
+            "origin_conversation": None::<String>,
+        });
+        handler.run(&ctx, payload).await.unwrap();
+    }
+
+    fn deposit_call() -> serde_json::Value {
+        crate::llm::test_support::tool_reply(
+            "deposit_portfolio_cash",
+            serde_json::json!({"amount": "100", "currency": "USD"}),
+        )
+    }
+
+    async fn cash_minor(services: &AppServices, owner: &AccountId) -> Vec<i64> {
+        services
+            .portfolio
+            .list_cash(owner)
+            .await
+            .unwrap()
+            .iter()
+            .map(|c| c.balance_minor)
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn approved_action_executes_exactly_once_on_resume() {
+        use crate::llm::test_support::text_reply;
+        let (handler, services, owner, run_id, seen) = approval_fixture(
+            "agent-approve-once",
+            vec![deposit_call(), text_reply("Deposited.")],
+        )
+        .await;
+
+        run_job(&handler, owner, run_id).await;
+        let pending = services.agent.list_pending_approvals(&owner).await.unwrap();
+        assert_eq!(pending.len(), 1, "the sensitive call is held");
+        assert!(
+            cash_minor(&services, &owner).await.is_empty(),
+            "nothing ran yet"
+        );
+
+        services
+            .agent
+            .approve_action(&owner, pending[0].id)
+            .await
+            .unwrap();
+        run_job(&handler, owner, run_id).await;
+
+        assert_eq!(
+            cash_minor(&services, &owner).await,
+            vec![10_000],
+            "deposited once"
+        );
+        assert!(
+            services
+                .agent
+                .list_pending_approvals(&owner)
+                .await
+                .unwrap()
+                .is_empty(),
+            "no new approval was opened"
+        );
+        let run = services.agent.get_run_internal(run_id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Completed);
+        assert_eq!(
+            seen.lock().unwrap().len(),
+            2,
+            "no model call to re-decide the action"
+        );
+        let steps = services.agent.get_run_steps(&owner, run_id).await.unwrap();
+        let result = steps
+            .iter()
+            .find(|s| {
+                s.tool_name.as_deref() == Some("deposit_portfolio_cash") && s.tool_output.is_some()
+            })
+            .expect("the executed call is recorded with its result");
+        assert_eq!(result.status, StepStatus::Success);
+    }
+
+    #[tokio::test]
+    async fn rejected_action_is_not_executed() {
+        use crate::llm::test_support::text_reply;
+        let (handler, services, owner, run_id, _seen) = approval_fixture(
+            "agent-reject",
+            vec![deposit_call(), text_reply("Understood, nothing deposited.")],
+        )
+        .await;
+
+        run_job(&handler, owner, run_id).await;
+        let pending = services.agent.list_pending_approvals(&owner).await.unwrap();
+        services
+            .agent
+            .reject_action(&owner, pending[0].id, None)
+            .await
+            .unwrap();
+        run_job(&handler, owner, run_id).await;
+
+        assert!(cash_minor(&services, &owner).await.is_empty());
+        let run = services.agent.get_run_internal(run_id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Completed);
+    }
+
+    #[tokio::test]
+    async fn double_approve_does_not_execute_twice() {
+        use crate::llm::test_support::text_reply;
+        let (handler, services, owner, run_id, _seen) = approval_fixture(
+            "agent-double-approve",
+            vec![deposit_call(), text_reply("Deposited.")],
+        )
+        .await;
+
+        run_job(&handler, owner, run_id).await;
+        let pending = services.agent.list_pending_approvals(&owner).await.unwrap();
+        services
+            .agent
+            .approve_action(&owner, pending[0].id)
+            .await
+            .unwrap();
+        let second = services.agent.approve_action(&owner, pending[0].id).await;
+        assert!(second.is_err(), "an approval resolves once");
+        run_job(&handler, owner, run_id).await;
+
+        assert_eq!(cash_minor(&services, &owner).await, vec![10_000]);
+    }
+
+    #[tokio::test]
+    async fn approving_a_cancelled_run_is_refused_and_runs_nothing() {
+        use crate::llm::test_support::text_reply;
+        let (handler, services, owner, run_id, _seen) = approval_fixture(
+            "agent-approve-cancelled",
+            vec![deposit_call(), text_reply("Deposited.")],
+        )
+        .await;
+
+        run_job(&handler, owner, run_id).await;
+        let pending = services.agent.list_pending_approvals(&owner).await.unwrap();
+        services.agent.cancel_run(&owner, run_id).await.unwrap();
+
+        let approved = services.agent.approve_action(&owner, pending[0].id).await;
+        assert!(approved.is_err());
+        run_job(&handler, owner, run_id).await;
+
+        assert!(cash_minor(&services, &owner).await.is_empty());
+        let run = services.agent.get_run_internal(run_id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Cancelled);
     }
 
     #[tokio::test]

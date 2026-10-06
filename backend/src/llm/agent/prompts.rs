@@ -261,6 +261,54 @@ mod tests {
     }
 
     #[test]
+    fn an_approval_marker_renders_nothing_and_leaves_no_orphan_call() {
+        let run_id = AgentRunId::generate();
+        let input = serde_json::json!({"amount": "100"});
+        let held = AgentStep::new(
+            run_id,
+            1,
+            None,
+            Some("deposit_portfolio_cash".into()),
+            Some(input.clone()),
+            None,
+            StepStatus::Blocked,
+            0,
+            Utc::now(),
+        );
+        let marker = AgentStep::approval_marker(run_id, 2, Utc::now());
+        let result = AgentStep::new(
+            run_id,
+            3,
+            None,
+            Some("deposit_portfolio_cash".into()),
+            Some(input),
+            Some(serde_json::json!({"balance_minor": 10000})),
+            StepStatus::Success,
+            0,
+            Utc::now(),
+        );
+
+        let messages = build_messages("g", &[held, marker, result], &[], 4, 15);
+
+        let call_ids: Vec<String> = messages
+            .iter()
+            .filter_map(|m| m.tool_calls.as_ref())
+            .flatten()
+            .map(|c| c.id.clone())
+            .collect();
+        let answered: Vec<String> = messages
+            .iter()
+            .filter(|m| m.role == "tool")
+            .filter_map(|m| m.tool_call_id.clone())
+            .collect();
+        assert_eq!(call_ids.len(), 2, "the marker adds no call");
+        assert_eq!(
+            call_ids, answered,
+            "every call id has its tool message, in order"
+        );
+    }
+
+    #[test]
     fn tool_content_is_wrapped_and_cannot_close_its_delimiter() {
         let s = step(
             1,

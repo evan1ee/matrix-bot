@@ -238,7 +238,53 @@ impl ReActEngine {
             };
         }
 
-        // Safe tool execution
+        self.run_tool(
+            services,
+            pool,
+            ctx,
+            thought,
+            tool_name,
+            tool_input,
+            tokens_used,
+        )
+        .await
+    }
+
+    /// Runs a call the user approved: the held call from an earlier step, with
+    /// no model call and no sensitivity check (the user just decided). The
+    /// task whitelist still applies, and the owner comes from the run's
+    /// account, as for any call.
+    pub async fn execute_approved(
+        &self,
+        services: &AppServices,
+        pool: &DbPool,
+        ctx: &StepContext<'_>,
+        tool_name: String,
+        tool_input: serde_json::Value,
+    ) -> StepOutcome {
+        let thought = Some("Running the action the user approved".to_string());
+        if !sandbox::is_tool_allowed(&tool_name, ctx.allowed_tools) {
+            return StepOutcome::Failed {
+                thought,
+                error: format!("Tool '{tool_name}' is not allowed by task policy"),
+                tokens_used: 0,
+            };
+        }
+        self.run_tool(services, pool, ctx, thought, tool_name, tool_input, 0)
+            .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn run_tool(
+        &self,
+        services: &AppServices,
+        pool: &DbPool,
+        ctx: &StepContext<'_>,
+        thought: Option<String>,
+        tool_name: String,
+        tool_input: serde_json::Value,
+        tokens_used: i32,
+    ) -> StepOutcome {
         let args_json = tool_input.to_string();
         let exec_result = ToolRegistry::execute_tool(
             services,
