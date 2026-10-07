@@ -174,7 +174,7 @@ The full cutover procedure for the PostgreSQL foundation branch (pre-boot backup
 Tests need a throwaway PostgreSQL server, never a real one:
 
 ```bash
-docker run -d --name pg18-test -p 55433:5432 -e POSTGRES_PASSWORD=bot postgres:18
+docker run -d --name pg18-test -p 55433:5432 -e POSTGRES_PASSWORD=bot pgvector/pgvector:pg18
 export TEST_DATABASE_URL=postgres://postgres:bot@localhost:55433/postgres
 export PG_TEST_URL=$TEST_DATABASE_URL
 ```
