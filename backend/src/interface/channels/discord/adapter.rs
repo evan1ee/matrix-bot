@@ -58,7 +58,7 @@ impl DiscordAdapter {
         &self,
         queue: mpsc::Sender<Work>,
         cancel: &CancellationToken,
-    ) -> Result<(), serenity::Error> {
+    ) -> Result<(), Box<serenity::Error>> {
         let handler = Gateway {
             queue,
             connected: Arc::clone(&self.connected),
@@ -74,7 +74,7 @@ impl DiscordAdapter {
                 shards.shutdown_all().await;
                 Ok(())
             }
-            result = client.start() => result,
+            result = client.start() => result.map_err(Box::new),
         };
         self.connected.store(false, Ordering::Relaxed);
         result
