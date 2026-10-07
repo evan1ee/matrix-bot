@@ -70,7 +70,9 @@ services:
       start_period: 10s
 
   postgres:
-    image: postgres:18
+    # pgvector/pgvector is the official postgres:18 image plus the `vector`
+    # extension that migration 0011 creates; plain postgres:18 lacks it.
+    image: pgvector/pgvector:pg18
     container_name: matrix-bot-postgres
     restart: unless-stopped
     environment:
@@ -81,7 +83,7 @@ services:
     # 64 MB default is not enough — it surfaces as "could not resize shared
     # memory segment" rather than anything that names the real cause.
     shm_size: 1gb
-    # The postgres:18 image keeps its data in a versioned subdirectory
+    # The postgres:18 base image keeps its data in a versioned subdirectory
     # (/var/lib/postgresql/18/docker) and refuses to start with a mount at the
     # old /var/lib/postgresql/data path, so the volume goes one level up.
     volumes:
