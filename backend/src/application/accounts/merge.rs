@@ -378,9 +378,18 @@ mod tests {
         .await
         .unwrap();
         sqlx::query!("INSERT INTO bot_message_targets (event_id, room_id, entity_type, entity_id, owner_id, title) VALUES ('ev1', '!r:x', 'todo', 1, $1, 'a todo')", from.as_uuid()).execute(&pool).await.unwrap();
+        sqlx::query!(
+            "INSERT INTO notes (owner_id, title, content) VALUES ($1, 'a note', 'body')",
+            from.as_uuid()
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        // A zero vector is enough: the merge moves the row by owner and never reads the embedding.
+        sqlx::query!("INSERT INTO knowledge_embeddings (owner_id, item_type, item_id, content_snippet, embedding) VALUES ($1, 'note', 1, 'body', array_fill(0::real, ARRAY[384])::vector)", from.as_uuid()).execute(&pool).await.unwrap();
 
         let preview = MergeService::preview(&pool, &from).await.unwrap();
-        assert_eq!(preview.total(), 21, "one row per owned table");
+        assert_eq!(preview.total(), 23, "one row per owned table");
 
         MergeService::merge(&pool, &from, &into).await.unwrap();
 
