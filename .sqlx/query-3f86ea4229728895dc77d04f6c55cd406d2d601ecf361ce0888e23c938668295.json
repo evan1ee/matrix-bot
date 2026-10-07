@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM knowledge_embeddings\n        WHERE owner_id = $1 AND item_type = $2 AND item_id = $3\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "3f86ea4229728895dc77d04f6c55cd406d2d601ecf361ce0888e23c938668295"
+}

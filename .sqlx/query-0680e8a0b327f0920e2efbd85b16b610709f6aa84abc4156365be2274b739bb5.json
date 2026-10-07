@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE notes\n        SET is_archived = $3, updated_at = NOW()\n        WHERE id = $1 AND owner_id = $2\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Uuid",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0680e8a0b327f0920e2efbd85b16b610709f6aa84abc4156365be2274b739bb5"
+}
