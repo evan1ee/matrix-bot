@@ -493,6 +493,29 @@ pub async fn delivery_probe_for(
         .collect())
 }
 
+/// Test-only: seconds between each of one account's events being created and
+/// its delivery next becoming due, oldest first.
+///
+/// Unlike [`delivery_probe_for`]'s `available_at > NOW()`, this does not shrink
+/// as the test runs: a backoff of `d` seconds always reads `>= d`, however
+/// slowly the machine reaches the assertion. Use it to prove a delivery was
+/// pushed back by at least a given delay; use the probe to prove it is due.
+#[cfg(test)]
+pub async fn delivery_backoff_for(
+    ex: impl PgExecutor<'_>,
+    account: &AccountId,
+) -> sqlx::Result<Vec<f64>> {
+    let rows = sqlx::query!(
+        r#"SELECT EXTRACT(EPOCH FROM (d.available_at - e.created_at))::float8 AS "secs!"
+           FROM outbox_deliveries d JOIN outbox_events e ON e.id = d.event_id
+           WHERE e.account_id = $1 ORDER BY d.id"#,
+        account.as_uuid()
+    )
+    .fetch_all(ex)
+    .await?;
+    Ok(rows.into_iter().map(|r| r.secs).collect())
+}
+
 /// Test-only: the destination keys of one account's deliveries, oldest first.
 #[cfg(test)]
 pub async fn delivery_destinations_for(

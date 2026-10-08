@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT EXTRACT(EPOCH FROM (d.available_at - e.created_at))::float8 AS \"secs!\"\n           FROM outbox_deliveries d JOIN outbox_events e ON e.id = d.event_id\n           WHERE e.account_id = $1 ORDER BY d.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "secs!",
+        "type_info": "Float8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "490815d3293491608a233c8540c4664fc204582c98eba57b577e32b4f6c10ffb"
+}

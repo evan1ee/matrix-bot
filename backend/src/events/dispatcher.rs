@@ -324,13 +324,16 @@ mod tests {
         let (services, owner, _id) = services_with_alert("acct_disp_fail").await;
         let s = sink(true, true);
         assert_eq!(dispatch(&services, s.as_ref()).await, 1);
-        // retry_delay(0) = 1 s on the database clock: scheduled, not due.
-        assert_eq!(
-            outbox_repo::delivery_probe_for(services.outbox.pool(), &owner)
-                .await
-                .unwrap(),
-            vec![("pending".to_string(), 1, true)]
-        );
+        let pool = services.outbox.pool();
+        let probe = outbox_repo::delivery_probe_for(pool, &owner).await.unwrap();
+        assert_eq!((probe[0].0.as_str(), probe[0].1), ("pending", 1));
+        // retry_delay(0) = 1 s on the database clock: scheduled, not due. Read
+        // as a gap from the event's creation, so a slow machine cannot let the
+        // second elapse before the assertion runs.
+        let backoff = outbox_repo::delivery_backoff_for(pool, &owner)
+            .await
+            .unwrap();
+        assert!(backoff[0] >= 1.0, "backed off by retry_delay: {backoff:?}");
         let hooks = services.webhooks.list(&owner).await.unwrap();
         assert_eq!(hooks[0].failure_count, 1, "C1: every failed attempt counts");
         let (logs, _) = services
@@ -400,10 +403,17 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(
-            probe[0],
-            ("pending".to_string(), 1, true),
-            "timed out: counted, backed off"
+            (probe[0].0.as_str(), probe[0].1),
+            ("pending", 1),
+            "timed out: counted"
         );
+        // A gap from the event's creation, not `available_at > NOW()`: the
+        // 300 ms timeout plus a slow machine could otherwise outlast a 1 s
+        // backoff before the probe runs.
+        let backoff = outbox_repo::delivery_backoff_for(services.outbox.pool(), &owner)
+            .await
+            .unwrap();
+        assert!(backoff[0] >= 1.0, "timed out: backed off: {backoff:?}");
         assert_eq!(
             probe[1],
             ("pending".to_string(), 0, false),
@@ -478,7 +488,19 @@ mod tests {
         // Target channel is offline
         s.can_deliver.store(false, Ordering::SeqCst);
 
-        let handled = dispatch(&services, &s).await;
+        // A long defer so the push-back is unmistakable; the test never waits
+        // for the delivery to come due again.
+        let config = EventsConfig {
+            defer_delay: Duration::from_secs(30),
+            ..EventsConfig::for_tests()
+        };
+        let handled = dispatch_once(
+            &services.outbox,
+            s.as_ref(),
+            &config,
+            &CancellationToken::new(),
+        )
+        .await;
         assert_eq!(handled, 1);
         assert_eq!(
             s.calls.load(Ordering::SeqCst),
@@ -487,10 +509,15 @@ mod tests {
         );
 
         // Verify attempt was restored: claim_due set attempts to 1, defer decremented back to 0
-        let probe = outbox_repo::delivery_probe_for(services.outbox.pool(), &owner)
+        let pool = services.outbox.pool();
+        let probe = outbox_repo::delivery_probe_for(pool, &owner).await.unwrap();
+        assert_eq!((probe[0].0.as_str(), probe[0].1), ("pending", 0));
+        // A gap from the event's creation, not `available_at > NOW()`, so a
+        // slow machine cannot let the delay elapse before the assertion.
+        let backoff = outbox_repo::delivery_backoff_for(pool, &owner)
             .await
             .unwrap();
-        assert_eq!(probe[0], ("pending".to_string(), 0, true));
+        assert!(backoff[0] >= 30.0, "deferred by defer_delay: {backoff:?}");
 
         // Webhook failure counter was NOT incremented
         let hooks = services.webhooks.list(&owner).await.unwrap();
