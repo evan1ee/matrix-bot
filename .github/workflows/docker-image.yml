@@ -70,8 +70,13 @@ jobs:
           platforms: linux/amd64
           push: ${{ env.DOCKERHUB_USERNAME != '' && (github.event_name != 'workflow_dispatch' || inputs.push) }}
           tags: ${{ steps.tags.outputs.tags }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # The gha cache backend only exists on GitHub. On Gitea the cache server
+          # address that act_runner hands to buildx (172.17.0.1:8088) is not
+          # reachable from the buildx container, so every build finished and pushed
+          # its image and then failed on the cache export ("i/o timeout"). An empty
+          # value means no cache.
+          cache-from: ${{ github.server_url == 'https://github.com' && 'type=gha' || '' }}
+          cache-to: ${{ github.server_url == 'https://github.com' && 'type=gha,mode=max' || '' }}
 
       - name: Summary
         run: |
