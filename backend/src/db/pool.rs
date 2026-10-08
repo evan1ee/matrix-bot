@@ -353,7 +353,11 @@ mod tests {
                 .await
                 .unwrap();
             let sep = if base.contains('?') { "&" } else { "?" };
-            format!("{base}{sep}options=-c%20search_path%3Dboot_check")
+            // `public` stays on the path: the shared server already holds the
+            // `vector` extension there, so migration 0011's `CREATE EXTENSION
+            // IF NOT EXISTS` is a no-op and its `vector(384)` column resolves
+            // only through `public`. The other test pools do the same.
+            format!("{base}{sep}options=-c%20search_path%3Dboot_check%2Cpublic")
         };
 
         let db = Database::connect(&scoped, 2)
