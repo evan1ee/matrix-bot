@@ -65,13 +65,8 @@ jobs:
       TEST_DATABASE_URL: postgres://postgres:bot@postgres:5432/postgres
       # The #[ignore]d live tests read this one.
       PG_TEST_URL: postgres://postgres:bot@postgres:5432/postgres
-      # `matrix_bot` is one ~110k-line crate behind matrix-sdk, serenity, sqlx
-      # macros and utoipa; rustc on it peaks at several GB. A self-hosted
-      # act_runner shares its host with the inference job, so the kernel's OOM
-      # killer ended the compile with "signal: 9, SIGKILL". Cap parallel rustc
-      # processes and drop debuginfo (profile.dev sets debug = 1) to keep the
-      # peak down; CI never reads the debug symbols.
-      CARGO_BUILD_JOBS: 2
+      # CI never reads debug symbols; profile.dev sets debug = 1 and rustc on
+      # the `matrix_bot` crate is memory-hungry enough that this matters.
       CARGO_PROFILE_DEV_DEBUG: 0
 
     steps:
@@ -136,6 +131,16 @@ jobs:
         run: |
           sqlx migrate run --source backend/migrations
           cargo sqlx prepare --workspace --check -- -p matrix-bot --all-targets
+
+      # `matrix_bot` is one ~110k-line crate, and `cargo test` compiles it twice
+      # at once: the library (rustc peaks near 2.7 GB) and its unit-test build
+      # (near 3.9 GB). Together that exceeds the 5.9 GB a self-hosted runner has,
+      # and the kernel OOM killer ended the compile with "signal: 9, SIGKILL".
+      # Building the library alone first leaves the test build as the only big
+      # rustc process. Capping CARGO_BUILD_JOBS instead did not help: it still
+      # allowed both at once and only made every other crate slower.
+      - name: Build the library before the tests
+        run: cargo build -p matrix-bot --lib
 
       # Scoped to the bot crate. `--workspace` would drag the inference crate's
       # native ML dependencies back into this job, which is the cost this
