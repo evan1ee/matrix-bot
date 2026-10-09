@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO notes (\n            owner_id, title, content, format, source_channel, source_ref, tags\n        )\n        VALUES ($1, $2, $3, $4, $5, $6, $7)\n        RETURNING\n            id, owner_id, title, content, format, source_channel, source_ref,\n            tags, is_archived, created_at, updated_at\n        ",
+  "query": "\n        SELECT\n            id, owner_id, title, content, note_type, source_channel, source_ref, tags,\n            COALESCE(excerpt, left(content, 200)) AS \"excerpt!\",\n            COALESCE(content_hash, encode(sha256(convert_to(content, 'UTF8')), 'hex')) AS \"content_hash!\",\n            is_archived, created_at, updated_at, indexed_at\n        FROM notes\n        WHERE id = $1 AND owner_id = $2\n        ",
   "describe": {
     "columns": [
       {
@@ -49,12 +49,12 @@
       },
       {
         "ordinal": 4,
-        "name": "format",
+        "name": "note_type",
         "type_info": "Text",
         "origin": {
           "Table": {
             "table": "notes",
-            "name": "format"
+            "name": "note_type"
           }
         }
       },
@@ -93,6 +93,18 @@
       },
       {
         "ordinal": 8,
+        "name": "excerpt!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 9,
+        "name": "content_hash!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 10,
         "name": "is_archived",
         "type_info": "Bool",
         "origin": {
@@ -103,7 +115,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 11,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -114,7 +126,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 12,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -123,17 +135,23 @@
             "name": "updated_at"
           }
         }
+      },
+      {
+        "ordinal": 13,
+        "name": "indexed_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "notes",
+            "name": "indexed_at"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "TextArray"
+        "Int8",
+        "Uuid"
       ]
     },
     "nullable": [
@@ -145,10 +163,13 @@
       false,
       true,
       false,
+      null,
+      null,
       false,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "6c8544ce0b251cf868ce738f26a6a3b43ef77693077211151fc9728bdf81634f"
+  "hash": "792af9b872027d9bea94f66f1768a6201bc50d0a7f4ffce903e429b891142051"
 }

@@ -4,7 +4,7 @@ use serde_json::json;
 
 use crate::application::AppServices;
 use crate::domain::accounts::AccountId;
-use crate::domain::knowledge::note::NoteFormat;
+use crate::domain::knowledge::note::NewNote;
 use crate::infrastructure::inference::llm::ToolDefinition;
 
 pub async fn execute_tool(
@@ -59,14 +59,11 @@ pub async fn execute_tool(
 
                 let note = services
                     .notes
-                    .create_note(
+                    .create(
                         owner_id,
-                        title,
-                        content,
-                        Some(NoteFormat::Markdown),
-                        Some("ai"),
-                        None,
-                        tags.as_deref(),
+                        NewNote::new(title, content)
+                            .source("ai", None)
+                            .tags(tags.unwrap_or_default()),
                     )
                     .await
                     .map_err(|e| e.to_string())?;

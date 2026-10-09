@@ -327,7 +327,7 @@ mod tests {
     use super::*;
     use crate::db::migrate::run_migrations_unlocked;
     use crate::db::pool::{seed_account, test_pool};
-    use crate::infrastructure::postgres::repositories::knowledge::notes::insert_note;
+    use crate::infrastructure::postgres::repositories::knowledge::notes::insert_test_note;
 
     #[tokio::test]
     async fn test_knowledge_embeddings_and_hybrid_search() {
@@ -337,14 +337,11 @@ mod tests {
         let alice = AccountId::generate();
         seed_account(&pool, &alice).await;
 
-        let note = insert_note(
+        let note = insert_test_note(
             &pool,
             &alice,
             "Rust Async Guide",
             "Tokio runtimes and cooperative scheduling in Rust",
-            "markdown",
-            "matrix",
-            Some("!event123"),
             &["rust".to_string(), "async".to_string()],
         )
         .await
@@ -402,14 +399,11 @@ mod tests {
         let alice = AccountId::generate();
         seed_account(&pool, &alice).await;
 
-        let note = insert_note(
+        let note = insert_test_note(
             &pool,
             &alice,
             "Unindexed Note",
             "Content waiting for embedding",
-            "markdown",
-            "web",
-            None,
             &[],
         )
         .await

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT count(*) AS \"n!\" FROM notes\n               WHERE id = $1\n                 AND search_vector @@ to_tsquery('simple', 'zebra & plain')\n                 AND NOT search_vector @@ to_tsquery('simple', 'markdown')",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "n!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "d84215b38eaa74336aed45cb57c9d337888b1723122d2dd72f6b7fa2d9efc342"
+}

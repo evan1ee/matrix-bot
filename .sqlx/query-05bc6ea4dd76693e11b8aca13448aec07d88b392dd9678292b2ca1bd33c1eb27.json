@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id, owner_id, title, content, format, source_channel, source_ref,\n            tags, is_archived, created_at, updated_at\n        FROM notes\n        WHERE id = $1 AND owner_id = $2\n        ",
+  "query": "\n        SELECT\n            id, owner_id, title, note_type, source_channel, source_ref, tags,\n            COALESCE(excerpt, left(content, 200)) AS \"excerpt!\",\n            COALESCE(content_hash, encode(sha256(convert_to(content, 'UTF8')), 'hex')) AS \"content_hash!\",\n            is_archived, created_at, updated_at, indexed_at\n        FROM notes\n        WHERE id = $1 AND owner_id = $2\n        ",
   "describe": {
     "columns": [
       {
@@ -38,28 +38,17 @@
       },
       {
         "ordinal": 3,
-        "name": "content",
+        "name": "note_type",
         "type_info": "Text",
         "origin": {
           "Table": {
             "table": "notes",
-            "name": "content"
+            "name": "note_type"
           }
         }
       },
       {
         "ordinal": 4,
-        "name": "format",
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "notes",
-            "name": "format"
-          }
-        }
-      },
-      {
-        "ordinal": 5,
         "name": "source_channel",
         "type_info": "Text",
         "origin": {
@@ -70,7 +59,7 @@
         }
       },
       {
-        "ordinal": 6,
+        "ordinal": 5,
         "name": "source_ref",
         "type_info": "Text",
         "origin": {
@@ -81,7 +70,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 6,
         "name": "tags",
         "type_info": "TextArray",
         "origin": {
@@ -92,7 +81,19 @@
         }
       },
       {
+        "ordinal": 7,
+        "name": "excerpt!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
         "ordinal": 8,
+        "name": "content_hash!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 9,
         "name": "is_archived",
         "type_info": "Bool",
         "origin": {
@@ -103,7 +104,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -114,13 +115,24 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
           "Table": {
             "table": "notes",
             "name": "updated_at"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "indexed_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "notes",
+            "name": "indexed_at"
           }
         }
       }
@@ -137,13 +149,15 @@
       false,
       false,
       false,
-      false,
       true,
       false,
+      null,
+      null,
       false,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "7767f87848ee5b15ad9ff5f7ffd7dd065da61ddde9e24ffd2259b1a20a91d03a"
+  "hash": "05bc6ea4dd76693e11b8aca13448aec07d88b392dd9678292b2ca1bd33c1eb27"
 }

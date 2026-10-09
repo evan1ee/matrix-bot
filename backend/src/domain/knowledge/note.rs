@@ -18,44 +18,6 @@ impl std::fmt::Display for NoteId {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum NoteFormat {
-    #[default]
-    Markdown,
-    Plain,
-    Quote,
-}
-
-impl std::str::FromStr for NoteFormat {
-    type Err = KnowledgeError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.trim().to_ascii_lowercase().as_str() {
-            "markdown" | "md" => Ok(Self::Markdown),
-            "plain" | "text" | "txt" => Ok(Self::Plain),
-            "quote" => Ok(Self::Quote),
-            _ => Ok(Self::Markdown),
-        }
-    }
-}
-
-impl NoteFormat {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Markdown => "markdown",
-            Self::Plain => "plain",
-            Self::Quote => "quote",
-        }
-    }
-}
-
-impl std::fmt::Display for NoteFormat {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.as_str())
-    }
-}
-
 /// Hex SHA-256 of a note's Markdown. Compared to detect a changed body without
 /// loading it (optimistic concurrency, embedding skip).
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -149,14 +111,60 @@ pub struct Note {
     pub id: NoteId,
     pub owner_id: AccountId,
     pub title: String,
-    pub content: String,
-    pub format: NoteFormat,
+    pub note_type: NoteType,
     pub source_channel: String,
     pub source_ref: Option<String>,
     pub tags: Vec<String>,
+    /// First characters of the plain text, for lists. Derived on write.
+    pub excerpt: String,
+    pub content_hash: ContentHash,
     pub is_archived: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// When the embeddings were last built from `content_hash`.
+    pub indexed_at: Option<DateTime<Utc>>,
+}
+
+/// Input for creating a note. Validation and tag normalisation happen in the
+/// service, not here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewNote {
+    pub title: String,
+    pub markdown: String,
+    pub note_type: NoteType,
+    pub source_channel: String,
+    pub source_ref: Option<String>,
+    pub tags: Vec<String>,
+}
+
+impl NewNote {
+    /// A web note with no tags.
+    pub fn new(title: impl Into<String>, markdown: impl Into<String>) -> Self {
+        Self {
+            title: title.into(),
+            markdown: markdown.into(),
+            note_type: NoteType::default(),
+            source_channel: "web".to_string(),
+            source_ref: None,
+            tags: Vec::new(),
+        }
+    }
+
+    pub fn note_type(mut self, note_type: NoteType) -> Self {
+        self.note_type = note_type;
+        self
+    }
+
+    pub fn source(mut self, channel: impl Into<String>, source_ref: Option<String>) -> Self {
+        self.source_channel = channel.into();
+        self.source_ref = source_ref;
+        self
+    }
+
+    pub fn tags(mut self, tags: Vec<String>) -> Self {
+        self.tags = tags;
+        self
+    }
 }
 
 /// A note together with its Markdown body. Lists and events carry `Note`
@@ -300,20 +308,6 @@ mod tests {
         assert_eq!(
             normalize_tags(&raw),
             vec!["ai".to_string(), "rust".to_string()]
-        );
-    }
-
-    #[test]
-    fn format_parsing_works() {
-        assert_eq!(
-            "markdown".parse::<NoteFormat>().unwrap(),
-            NoteFormat::Markdown
-        );
-        assert_eq!("quote".parse::<NoteFormat>().unwrap(), NoteFormat::Quote);
-        assert_eq!("plain".parse::<NoteFormat>().unwrap(), NoteFormat::Plain);
-        assert_eq!(
-            "unknown".parse::<NoteFormat>().unwrap(),
-            NoteFormat::Markdown
         );
     }
 

@@ -176,6 +176,7 @@ mod tests {
     use crate::application::knowledge::NoteService;
     use crate::db::migrate::run_migrations_unlocked;
     use crate::db::pool::{seed_account, test_pool};
+    use crate::domain::knowledge::note::NewNote;
     use crate::infrastructure::inference::embedding::MockEmbeddingProvider;
 
     #[tokio::test]
@@ -191,14 +192,12 @@ mod tests {
         let search_svc = SearchService::new(pool.clone(), embedder.clone());
 
         let note = note_svc
-            .create_note(
+            .create(
                 &alice,
-                "Neural Networks",
-                "Backpropagation and gradient descent explained",
-                None,
-                None,
-                None,
-                None,
+                NewNote::new(
+                    "Neural Networks",
+                    "Backpropagation and gradient descent explained",
+                ),
             )
             .await
             .expect("create note");

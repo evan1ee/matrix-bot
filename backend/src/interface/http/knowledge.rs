@@ -8,7 +8,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::domain::knowledge::note::NoteFormat;
+use crate::domain::knowledge::note::{ExpectedHash, NewNote, NoteDocument, NotePatch};
 use crate::interface::http::auth::{ApiState, AuthUser};
 use crate::interface::http::error::ApiError;
 
@@ -27,14 +27,17 @@ pub struct Note {
     pub updated_at: String,
 }
 
-impl From<crate::domain::knowledge::note::Note> for Note {
-    fn from(n: crate::domain::knowledge::note::Note) -> Self {
+// The wire shape is unchanged for now (notes refactor task 7 splits it into a
+// summary and a document); `format` is always Markdown.
+impl From<NoteDocument> for Note {
+    fn from(doc: NoteDocument) -> Self {
+        let n = doc.note;
         Self {
             id: n.id.0,
             owner_id: n.owner_id.to_string(),
             title: n.title,
-            content: n.content,
-            format: n.format.to_string(),
+            content: doc.markdown,
+            format: "markdown".to_string(),
             source_channel: n.source_channel,
             source_ref: n.source_ref,
             tags: n.tags,
@@ -119,7 +122,7 @@ pub async fn list_notes(
     let notes = state
         .services
         .notes
-        .list_notes(
+        .list_documents(
             &user.account_id,
             query.tag.as_deref(),
             query.archived.unwrap_or(false),
@@ -171,7 +174,7 @@ pub async fn get_note(
     let note = state
         .services
         .notes
-        .get_note(&user.account_id, id)
+        .get(&user.account_id, id)
         .await
         .map_err(ApiError::from)?;
 
@@ -191,27 +194,22 @@ pub async fn create_note(
     State(state): State<ApiState>,
     Json(payload): Json<CreateNoteInput>,
 ) -> Result<(StatusCode, Json<Note>), ApiError> {
-    let format = payload
-        .format
-        .as_deref()
-        .and_then(|f| f.parse::<NoteFormat>().ok());
-
-    let note = state
+    // `format` is accepted for compatibility and ignored: notes are Markdown.
+    let new = NewNote::new(payload.title, payload.content).tags(payload.tags.unwrap_or_default());
+    let created = state
         .services
         .notes
-        .create_note(
-            &user.account_id,
-            &payload.title,
-            &payload.content,
-            format,
-            Some("web"),
-            None,
-            payload.tags.as_deref(),
-        )
+        .create(&user.account_id, new)
+        .await
+        .map_err(ApiError::from)?;
+    let document = state
+        .services
+        .notes
+        .get(&user.account_id, created.id.0)
         .await
         .map_err(ApiError::from)?;
 
-    Ok((StatusCode::CREATED, Json(note.into())))
+    Ok((StatusCode::CREATED, Json(document.into())))
 }
 
 #[utoipa::path(
@@ -229,40 +227,30 @@ pub async fn update_note(
     Path(id): Path<i64>,
     Json(payload): Json<UpdateNoteInput>,
 ) -> Result<Json<Note>, ApiError> {
-    let format = payload
-        .format
-        .as_deref()
-        .and_then(|f| f.parse::<NoteFormat>().ok());
-
-    let existing = state
-        .services
-        .notes
-        .get_note(&user.account_id, id)
+    let patch = NotePatch {
+        title: payload.title,
+        markdown: payload.content,
+        tags: payload.tags,
+        note_type: None,
+        expected: ExpectedHash::Any,
+    };
+    let notes = &state.services.notes;
+    notes
+        .update(&user.account_id, id, patch)
         .await
         .map_err(ApiError::from)?;
-
-    let title = payload.title.as_deref().unwrap_or(&existing.title);
-    let content = payload.content.as_deref().unwrap_or(&existing.content);
-    let tags = payload.tags.as_deref();
-
-    let note = state
-        .services
-        .notes
-        .update_note(&user.account_id, id, title, content, format, tags)
-        .await
-        .map_err(ApiError::from)?;
-
     if let Some(archived) = payload.is_archived {
-        let note = state
-            .services
-            .notes
+        notes
             .archive_note(&user.account_id, id, archived)
             .await
             .map_err(ApiError::from)?;
-        return Ok(Json(note.into()));
     }
+    let document = notes
+        .get(&user.account_id, id)
+        .await
+        .map_err(ApiError::from)?;
 
-    Ok(Json(note.into()))
+    Ok(Json(document.into()))
 }
 
 #[utoipa::path(

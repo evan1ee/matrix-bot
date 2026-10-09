@@ -78,6 +78,7 @@ mod tests {
     use crate::db::pool::{seed_account, test_pool};
     use crate::domain::accounts::AccountId;
     use crate::domain::jobs::JobId;
+    use crate::domain::knowledge::note::NewNote;
     use crate::infrastructure::inference::embedding::MockEmbeddingProvider;
     use crate::infrastructure::postgres::repositories;
 
@@ -106,14 +107,12 @@ mod tests {
         // Create a note
         let note = services
             .notes
-            .create_note(
+            .create(
                 &alice,
-                "Microservices vs Modular Monolith",
-                "Start from the smallest version that works end to end.",
-                None,
-                None,
-                None,
-                None,
+                NewNote::new(
+                    "Microservices vs Modular Monolith",
+                    "Start from the smallest version that works end to end.",
+                ),
             )
             .await
             .expect("create note");
@@ -153,14 +152,11 @@ mod tests {
         services.knowledge_search = services.knowledge_search.with_embedder(mock_embedder);
 
         // Directly insert note into database without enqueuing job or embeddings
-        let note = repositories::knowledge::insert_note(
+        let note = repositories::knowledge::insert_test_note(
             &pool,
             &alice,
             "Unindexed Direct Note",
             "Content that needs backfill",
-            "markdown",
-            "web",
-            None,
             &[],
         )
         .await

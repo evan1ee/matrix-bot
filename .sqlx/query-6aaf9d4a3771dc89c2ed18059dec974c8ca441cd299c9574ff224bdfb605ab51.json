@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        UPDATE notes\n        SET\n            title = $3,\n            content = $4,\n            format = $5,\n            tags = $6,\n            updated_at = NOW()\n        WHERE id = $1 AND owner_id = $2\n        RETURNING\n            id, owner_id, title, content, format, source_channel, source_ref,\n            tags, is_archived, created_at, updated_at\n        ",
+  "query": "\n        SELECT\n            id, owner_id, title, note_type, source_channel, source_ref, tags,\n            COALESCE(excerpt, left(content, 200)) AS \"excerpt!\",\n            COALESCE(content_hash, encode(sha256(convert_to(content, 'UTF8')), 'hex')) AS \"content_hash!\",\n            is_archived, created_at, updated_at, indexed_at\n        FROM notes\n        WHERE owner_id = $1\n          AND ($2::TEXT IS NULL OR $2 = ANY(tags))\n          AND ($3::BOOLEAN OR is_archived = FALSE)\n        ORDER BY updated_at DESC\n        LIMIT $4\n        ",
   "describe": {
     "columns": [
       {
@@ -38,28 +38,17 @@
       },
       {
         "ordinal": 3,
-        "name": "content",
+        "name": "note_type",
         "type_info": "Text",
         "origin": {
           "Table": {
             "table": "notes",
-            "name": "content"
+            "name": "note_type"
           }
         }
       },
       {
         "ordinal": 4,
-        "name": "format",
-        "type_info": "Text",
-        "origin": {
-          "Table": {
-            "table": "notes",
-            "name": "format"
-          }
-        }
-      },
-      {
-        "ordinal": 5,
         "name": "source_channel",
         "type_info": "Text",
         "origin": {
@@ -70,7 +59,7 @@
         }
       },
       {
-        "ordinal": 6,
+        "ordinal": 5,
         "name": "source_ref",
         "type_info": "Text",
         "origin": {
@@ -81,7 +70,7 @@
         }
       },
       {
-        "ordinal": 7,
+        "ordinal": 6,
         "name": "tags",
         "type_info": "TextArray",
         "origin": {
@@ -92,7 +81,19 @@
         }
       },
       {
+        "ordinal": 7,
+        "name": "excerpt!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
         "ordinal": 8,
+        "name": "content_hash!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 9,
         "name": "is_archived",
         "type_info": "Bool",
         "origin": {
@@ -103,7 +104,7 @@
         }
       },
       {
-        "ordinal": 9,
+        "ordinal": 10,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -114,7 +115,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -123,16 +124,25 @@
             "name": "updated_at"
           }
         }
+      },
+      {
+        "ordinal": 12,
+        "name": "indexed_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "notes",
+            "name": "indexed_at"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Int8",
         "Uuid",
         "Text",
-        "Text",
-        "Text",
-        "TextArray"
+        "Bool",
+        "Int8"
       ]
     },
     "nullable": [
@@ -141,13 +151,15 @@
       false,
       false,
       false,
-      false,
       true,
       false,
+      null,
+      null,
       false,
       false,
-      false
+      false,
+      true
     ]
   },
-  "hash": "86b7c95b2e7fb78667749d90eb6dbd90061c486be547445ce521ee93f28b6e22"
+  "hash": "6aaf9d4a3771dc89c2ed18059dec974c8ca441cd299c9574ff224bdfb605ab51"
 }

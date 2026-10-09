@@ -83,6 +83,24 @@ pub fn content_hash(content: &str) -> ContentHash {
     }
 }
 
+/// Everything a note stores besides its Markdown, computed in one place so no
+/// caller derives a field itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Derived {
+    pub content_hash: ContentHash,
+    pub search_text: String,
+    pub excerpt: String,
+}
+
+pub fn derive(markdown: &str) -> Derived {
+    let search_text = to_plain_text(markdown);
+    Derived {
+        content_hash: content_hash(markdown),
+        excerpt: excerpt(&search_text, EXCERPT_CHARS),
+        search_text,
+    }
+}
+
 /// Embedding chunks for a note: the title and plain text, split into
 /// overlapping windows. Empty when the note has no plain text.
 pub fn chunks(title: &str, plain: &str) -> Vec<String> {
@@ -199,5 +217,23 @@ mod tests {
     #[test]
     fn chunks_of_empty_plain_text_is_empty() {
         assert!(chunks("Title", "   ").is_empty());
+    }
+
+    #[test]
+    fn derive_computes_hash_plain_text_and_excerpt_from_the_markdown() {
+        let md = "# Hi\n\n**bold** text";
+        let derived = derive(md);
+        assert_eq!(derived.content_hash, content_hash(md));
+        assert_eq!(derived.search_text, "Hi\nbold text");
+        assert_eq!(derived.excerpt, "Hi bold text");
+    }
+
+    #[test]
+    fn derive_caps_the_excerpt_but_not_the_search_text() {
+        let md = "word ".repeat(200);
+        let derived = derive(&md);
+        assert!(derived.excerpt.chars().count() <= EXCERPT_CHARS + 1);
+        assert!(derived.excerpt.ends_with('…'));
+        assert!(derived.search_text.chars().count() > EXCERPT_CHARS);
     }
 }

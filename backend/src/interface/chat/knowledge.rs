@@ -9,7 +9,7 @@ use tracing::error;
 use crate::application::AppServices;
 use crate::db::Database;
 use crate::domain::accounts::AccountId;
-use crate::domain::knowledge::note::NoteFormat;
+use crate::domain::knowledge::note::NewNote;
 use crate::domain::knowledge::search::KnowledgeItemType;
 use crate::interface::channels::message::Reply;
 use crate::interface::chat::{error_reply, BotModule, CommandContext, CommandHelp};
@@ -166,14 +166,11 @@ async fn handle_add(
     let room_key = ctx.room_key();
     match services
         .notes
-        .create_note(
+        .create(
             owner,
-            &title,
-            &content,
-            Some(NoteFormat::Markdown),
-            Some(&channel),
-            Some(&room_key),
-            Some(&tags),
+            NewNote::new(&title, &content)
+                .source(&channel, Some(room_key.clone()))
+                .tags(tags),
         )
         .await
     {
@@ -198,14 +195,11 @@ async fn handle_quick_note(
     let room_key = ctx.room_key();
     match services
         .notes
-        .create_note(
+        .create(
             owner,
-            &title,
-            &content,
-            Some(NoteFormat::Markdown),
-            Some(&channel),
-            Some(&room_key),
-            Some(&tags),
+            NewNote::new(&title, &content)
+                .source(&channel, Some(room_key.clone()))
+                .tags(tags),
         )
         .await
     {
@@ -232,14 +226,11 @@ async fn handle_quoted_note(
     let room_key = ctx.room_key();
     match services
         .notes
-        .create_note(
+        .create(
             owner,
-            &title,
-            &content,
-            Some(NoteFormat::Markdown),
-            Some(&channel),
-            Some(&room_key),
-            Some(&tags),
+            NewNote::new(&title, &content)
+                .source(&channel, Some(room_key.clone()))
+                .tags(tags),
         )
         .await
     {
@@ -253,7 +244,7 @@ async fn handle_quoted_note(
 }
 
 async fn handle_list(services: &AppServices, owner: &AccountId, tag: Option<&str>) -> String {
-    match services.notes.list_notes(owner, tag, false, 10).await {
+    match services.notes.list(owner, tag, false, 10).await {
         Ok(notes) if notes.is_empty() => {
             if let Some(t) = tag {
                 format!(
@@ -267,11 +258,6 @@ async fn handle_list(services: &AppServices, owner: &AccountId, tag: Option<&str
         Ok(notes) => {
             let mut html = String::from("<p>📝 <b>Your Recent Notes:</b></p><ul>");
             for n in notes {
-                let snippet = if n.content.chars().count() > 60 {
-                    format!("{}...", n.content.chars().take(57).collect::<String>())
-                } else {
-                    n.content.clone()
-                };
                 let tags_str = if n.tags.is_empty() {
                     String::new()
                 } else {
@@ -282,7 +268,7 @@ async fn handle_list(services: &AppServices, owner: &AccountId, tag: Option<&str
                     n.id.0,
                     html_escape(&n.title),
                     html_escape(&tags_str),
-                    html_escape(&snippet)
+                    html_escape(&n.excerpt)
                 ));
             }
             html.push_str("</ul>");
@@ -377,14 +363,11 @@ pub async fn capture_photo_note(
     let tags = vec!["photo".to_string(), "ocr".to_string()];
     match services
         .notes
-        .create_note(
+        .create(
             owner_id,
-            &title,
-            &content,
-            Some(NoteFormat::Markdown),
-            Some("matrix"),
-            Some(room_id),
-            Some(&tags),
+            NewNote::new(&title, &content)
+                .source("matrix", Some(room_id.to_string()))
+                .tags(tags),
         )
         .await
     {
@@ -447,14 +430,11 @@ pub async fn capture_voice_note(
     let tags = vec!["voice".to_string()];
     match services
         .notes
-        .create_note(
+        .create(
             owner_id,
-            &title,
-            &transcription,
-            Some(NoteFormat::Markdown),
-            Some("matrix"),
-            Some(room_id),
-            Some(&tags),
+            NewNote::new(&title, &transcription)
+                .source("matrix", Some(room_id.to_string()))
+                .tags(tags),
         )
         .await
     {
@@ -566,11 +546,7 @@ mod tests {
             .contains("No knowledge items found"));
 
         // After embedding the note, search returns results
-        let notes = services
-            .notes
-            .list_notes(&alice, None, false, 10)
-            .await
-            .unwrap();
+        let notes = services.notes.list(&alice, None, false, 10).await.unwrap();
         services
             .knowledge_search
             .embed_item(

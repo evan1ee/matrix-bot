@@ -90,6 +90,24 @@ pub async fn test_pool_sized(max_connections: u32) -> crate::db::DbPool {
     let admin = connect_pool(&base, 1)
         .await
         .expect("TEST_DATABASE_URL must point at a reachable server");
+    // Parallel tests would otherwise race on `CREATE EXTENSION IF NOT EXISTS`
+    // in their first migration, and the loser can lose the race with a unique
+    // violation, or leave the extension inside a test schema that is later
+    // dropped. Install them once, in `public`, which every test path includes.
+    static EXTENSIONS: tokio::sync::OnceCell<()> = tokio::sync::OnceCell::const_new();
+    EXTENSIONS
+        .get_or_init(|| async {
+            for extension in ["vector", "pg_trgm"] {
+                sqlx::QueryBuilder::<sqlx::Postgres>::new("CREATE EXTENSION IF NOT EXISTS ")
+                    .push(extension)
+                    .push(" SCHEMA public")
+                    .build()
+                    .execute(&admin)
+                    .await
+                    .unwrap();
+            }
+        })
+        .await;
     test_schemas::drop_schema(&admin, &schema).await.unwrap();
     sqlx::QueryBuilder::<sqlx::Postgres>::new("CREATE SCHEMA ")
         .push(&schema)
