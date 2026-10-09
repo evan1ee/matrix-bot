@@ -311,7 +311,7 @@ mod tests {
     use crate::db::migrate::run_migrations_unlocked;
     use crate::db::pool::{seed_account, test_pool};
     use crate::db::DbPool;
-    use crate::domain::knowledge::search::LEGACY_EMBEDDING_MODEL;
+    use crate::domain::knowledge::search::DEFAULT_EMBEDDING_MODEL;
     use crate::infrastructure::postgres::repositories::knowledge::{
         archive_note, insert_legacy_note, insert_test_note, upsert_embedding_chunk,
     };
@@ -517,6 +517,7 @@ mod tests {
                 0,
                 "kayak routes along the coast",
                 &unit(0),
+                DEFAULT_EMBEDDING_MODEL,
             )
             .await
             .unwrap();
@@ -550,25 +551,52 @@ mod tests {
             .await
             .unwrap();
         // `near` has two chunks, both close; `far` has one distant chunk.
-        upsert_embedding_chunk(&pool, &alice, "note", near.id.0, 0, "weaker chunk", &{
-            let mut v = unit(0);
-            v[1] = 0.5;
-            v
-        })
+        upsert_embedding_chunk(
+            &pool,
+            &alice,
+            "note",
+            near.id.0,
+            0,
+            "weaker chunk",
+            &{
+                let mut v = unit(0);
+                v[1] = 0.5;
+                v
+            },
+            DEFAULT_EMBEDDING_MODEL,
+        )
         .await
         .unwrap();
-        upsert_embedding_chunk(&pool, &alice, "note", near.id.0, 1, "best chunk", &unit(0))
-            .await
-            .unwrap();
-        upsert_embedding_chunk(&pool, &alice, "note", far.id.0, 0, "far chunk", &unit(5))
-            .await
-            .unwrap();
+        upsert_embedding_chunk(
+            &pool,
+            &alice,
+            "note",
+            near.id.0,
+            1,
+            "best chunk",
+            &unit(0),
+            DEFAULT_EMBEDDING_MODEL,
+        )
+        .await
+        .unwrap();
+        upsert_embedding_chunk(
+            &pool,
+            &alice,
+            "note",
+            far.id.0,
+            0,
+            "far chunk",
+            &unit(5),
+            DEFAULT_EMBEDDING_MODEL,
+        )
+        .await
+        .unwrap();
 
         let hits = search_vector(
             &pool,
             &alice,
             &unit(0),
-            LEGACY_EMBEDDING_MODEL,
+            DEFAULT_EMBEDDING_MODEL,
             &all(),
             false,
             10,
@@ -604,9 +632,18 @@ mod tests {
             (&alice, archived.id.0),
             (&bob, theirs.id.0),
         ] {
-            upsert_embedding_chunk(&pool, owner, "note", id, 0, "chunk", &unit(0))
-                .await
-                .unwrap();
+            upsert_embedding_chunk(
+                &pool,
+                owner,
+                "note",
+                id,
+                0,
+                "chunk",
+                &unit(0),
+                DEFAULT_EMBEDDING_MODEL,
+            )
+            .await
+            .unwrap();
         }
         sqlx::query!(
             "UPDATE knowledge_embeddings SET embedding_model = 'older-model' WHERE item_id = $1",
@@ -623,7 +660,7 @@ mod tests {
             &pool,
             &alice,
             &unit(0),
-            LEGACY_EMBEDDING_MODEL,
+            DEFAULT_EMBEDDING_MODEL,
             &all(),
             false,
             10,
@@ -637,7 +674,7 @@ mod tests {
             &pool,
             &alice,
             &unit(0),
-            LEGACY_EMBEDDING_MODEL,
+            DEFAULT_EMBEDDING_MODEL,
             &all(),
             true,
             10,

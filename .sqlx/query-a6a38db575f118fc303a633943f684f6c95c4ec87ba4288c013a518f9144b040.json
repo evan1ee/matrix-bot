@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE jobs SET status = 'completed', completed_at = NOW()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "a6a38db575f118fc303a633943f684f6c95c4ec87ba4288c013a518f9144b040"
+}

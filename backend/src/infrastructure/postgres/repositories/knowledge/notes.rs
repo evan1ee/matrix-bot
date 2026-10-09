@@ -161,6 +161,10 @@ pub async fn update_note(
         r#"
         UPDATE notes
         SET
+            -- The title is part of every embedded chunk, so a renamed note's
+            -- embeddings are stale even though its body hash is unchanged.
+            indexed_content_hash = CASE WHEN title IS DISTINCT FROM $3 THEN NULL
+                                        ELSE indexed_content_hash END,
             title = $3,
             content = $4,
             note_type = $5,

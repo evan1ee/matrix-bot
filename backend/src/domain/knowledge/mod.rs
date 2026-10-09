@@ -8,6 +8,7 @@ pub use note::{
     NewNote, Note, NoteDocument, NoteId, NotePatch, NoteType, MAX_CONTENT_CHARS, MAX_TITLE_LEN,
 };
 pub use search::{
-    contains_cjk, distance_to_similarity, rrf, ItemKey, KnowledgeChunk, KnowledgeItemType,
-    SearchMode, SearchOutcome, SearchResultItem, LEGACY_EMBEDDING_MODEL,
+    contains_cjk, distance_to_similarity, embedding_prefixes, rrf, EmbeddingPrefixes, IndexOutcome,
+    ItemKey, KnowledgeChunk, KnowledgeItemType, SearchMode, SearchOutcome, SearchResultItem,
+    DEFAULT_EMBEDDING_MODEL,
 };

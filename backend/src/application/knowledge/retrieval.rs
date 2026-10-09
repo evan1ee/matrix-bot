@@ -374,6 +374,7 @@ mod tests {
                 chunk_index,
                 chunk,
                 &embedding,
+                &self.search.model,
             )
             .await
             .unwrap();
@@ -583,6 +584,7 @@ mod tests {
             0,
             "paddling routes along the coast",
             &embedding,
+            &f.search.model,
         )
         .await
         .unwrap();

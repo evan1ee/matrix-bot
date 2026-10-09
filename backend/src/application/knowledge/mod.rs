@@ -3,6 +3,7 @@
 //! Owns business use cases, transactional boundaries, and outbox event
 //! publication for notes and cross-domain semantic hybrid search.
 
+mod indexing;
 pub mod markdown;
 mod notes;
 mod retrieval;

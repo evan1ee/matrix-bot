@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM knowledge_embeddings",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "79656276997b89d41a0db07133ee699ecf912307fca19a529ed2aace8e294b70"
+}

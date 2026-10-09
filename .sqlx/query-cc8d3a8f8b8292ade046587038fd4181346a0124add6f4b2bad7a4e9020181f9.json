@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE notes\n        SET indexed_content_hash = $4, indexed_at = NOW()\n        WHERE id = $1 AND owner_id = $2 AND title = $3\n          AND COALESCE(content_hash, encode(sha256(convert_to(content, 'UTF8')), 'hex')) = $4\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cc8d3a8f8b8292ade046587038fd4181346a0124add6f4b2bad7a4e9020181f9"
+}

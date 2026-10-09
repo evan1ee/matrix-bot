@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO bookmarks (owner_id, url, title, domain, description)\n               VALUES ($1, 'https://example.com/b', 'Saved', 'example.com', 'about kayaks')\n               RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "bookmarks",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "493c361cc39be7a973c9bd67192cc4516285efc677c507466c9a5c4bb64f8287"
+}

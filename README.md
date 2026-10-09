@@ -211,6 +211,10 @@ TAVILY_API_KEY=tvly-...                # Live Web Search (fallback to DuckDuckGo
 # TTS_MODEL=kokoro                       # Ignored by the bundled server; required for a hosted provider
 # TTS_VOICE=0                            # House default voice; each user can override it in Settings
 # TTS_DIALECT=openai                     # openai (default) or elevenlabs
+
+# Knowledge-base embeddings (Optional — unset means keyword search only)
+# EMBEDDING_BASE_URL=http://inference:8090  # OpenAI-compatible /v1/embeddings (the bundled inference server)
+# EMBEDDING_MODEL=multilingual-e5-small     # Chunks are tagged with it; changing it re-embeds everything in the background
 ```
 
 > [!WARNING]

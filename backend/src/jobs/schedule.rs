@@ -38,6 +38,10 @@ fn agent_scheduled_tasks(s: &AppServices, _now: DateTime<Utc>) -> TickFuture<'_>
     Box::pin(s.agent.enqueue_due_scheduled_tasks())
 }
 
+fn knowledge_backfill(s: &AppServices, now: DateTime<Utc>) -> TickFuture<'_> {
+    Box::pin(s.knowledge_search.enqueue_backfill(now))
+}
+
 pub fn default_ticks() -> Vec<Tick> {
     vec![
         Tick {
@@ -65,6 +69,11 @@ pub fn default_ticks() -> Vec<Tick> {
             every: Duration::from_secs(60),
             fire: agent_scheduled_tasks,
         },
+        Tick {
+            name: "knowledge_backfill",
+            every: Duration::from_secs(3_600),
+            fire: knowledge_backfill,
+        },
     ]
 }
 
@@ -86,6 +95,7 @@ mod tests {
                 ("portfolio_alerts", 120),
                 ("portfolio_refresh", 3_600),
                 ("agent_scheduled_tasks", 60),
+                ("knowledge_backfill", 3_600),
             ]
         );
     }

@@ -1,0 +1,71 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT chunk_index, content_snippet, embedding_model, embedding AS \"embedding!: Vector\"\n        FROM knowledge_embeddings\n        WHERE owner_id = $1 AND item_type = $2 AND item_id = $3\n        ORDER BY chunk_index\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "chunk_index",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "knowledge_embeddings",
+            "name": "chunk_index"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "content_snippet",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "knowledge_embeddings",
+            "name": "content_snippet"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "embedding_model",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "knowledge_embeddings",
+            "name": "embedding_model"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "embedding!: Vector",
+        "type_info": {
+          "Custom": {
+            "name": "vector",
+            "kind": "Simple"
+          }
+        },
+        "origin": {
+          "Table": {
+            "table": "knowledge_embeddings",
+            "name": "embedding"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "731ece0a4db121c76b60517f7286a9d9a34b69e4766ec64ae24d18961a2abc87"
+}

@@ -197,6 +197,10 @@ pub struct Config {
     pub tts_dialect: crate::infrastructure::inference::tts::TtsDialect,
     /// Base URL of an OpenAI-compatible embedding API.
     pub embedding_base_url: Option<String>,
+    /// The embedding model (`EMBEDDING_MODEL`). Chunks are tagged with it and
+    /// only chunks from this model are searched, so changing it re-embeds
+    /// everything in the background.
+    pub embedding_model: String,
     /// Whether to believe `X-Forwarded-For`/`X-Real-IP` from a trusted peer.
     ///
     /// Forwarded headers are believed only when this is on *and* the connecting
@@ -353,6 +357,14 @@ impl Config {
             .map(|v| v.trim().to_string())
             .filter(|v| !v.is_empty());
 
+        let embedding_model = env::var("EMBEDDING_MODEL")
+            .ok()
+            .map(|v| v.trim().to_string())
+            .filter(|v| !v.is_empty())
+            .unwrap_or_else(|| {
+                crate::domain::knowledge::search::DEFAULT_EMBEDDING_MODEL.to_string()
+            });
+
         let trust_forwarded_for = env::var("TRUST_FORWARDED_FOR")
             .map(|v| v.eq_ignore_ascii_case("true") || v == "1")
             .unwrap_or(false);
@@ -396,6 +408,7 @@ impl Config {
             tts_voice,
             tts_dialect,
             embedding_base_url,
+            embedding_model,
             trust_forwarded_for,
             ai,
             storage,
@@ -420,7 +433,7 @@ impl Config {
             std::sync::Arc::new(
                 crate::infrastructure::inference::embedding::LocalOnnxEmbeddingClient::new(
                     Some(base_url.clone()),
-                    None,
+                    Some(self.embedding_model.clone()),
                 ),
             )
         } else {
@@ -546,6 +559,7 @@ impl Config {
             tts_voice: "0".to_string(),
             tts_dialect: crate::infrastructure::inference::tts::TtsDialect::OpenAi,
             embedding_base_url: None,
+            embedding_model: "multilingual-e5-small".to_string(),
             trust_forwarded_for: false,
             ai: AiEnvConfig::default(),
             storage: StorageConfig::default(),
@@ -720,6 +734,7 @@ mod tests {
             tts_voice: "0".to_string(),
             tts_dialect: crate::infrastructure::inference::tts::TtsDialect::OpenAi,
             embedding_base_url: None,
+            embedding_model: "multilingual-e5-small".to_string(),
             trust_forwarded_for: false,
             ai: AiEnvConfig::default(),
             storage: StorageConfig::default(),

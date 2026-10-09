@@ -56,9 +56,50 @@ pub fn distance_to_similarity(distance: f32) -> f32 {
     1.0 - (clamped / 2.0)
 }
 
-/// The embedding model chunks are tagged with until the configured model is
-/// wired through (it is the column default in migration 0013).
-pub const LEGACY_EMBEDDING_MODEL: &str = "bge-small-en-v1.5";
+/// The embedding model used when none is configured. Mixed English and Chinese
+/// notes need a multilingual model; the old English-only default produced
+/// near-meaningless vectors for Chinese.
+pub const DEFAULT_EMBEDDING_MODEL: &str = "multilingual-e5-small";
+
+/// Text prepended before embedding, which asymmetric retrieval models require:
+/// a query and a stored passage are embedded differently. Not part of any
+/// stored snippet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EmbeddingPrefixes {
+    pub query: &'static str,
+    pub passage: &'static str,
+}
+
+/// The prefixes `model` expects. E5 models are trained with `query: ` and
+/// `passage: `; any other model gets none.
+pub fn embedding_prefixes(model: &str) -> EmbeddingPrefixes {
+    if model.to_ascii_lowercase().contains("e5") {
+        EmbeddingPrefixes {
+            query: "query: ",
+            passage: "passage: ",
+        }
+    } else {
+        EmbeddingPrefixes {
+            query: "",
+            passage: "",
+        }
+    }
+}
+
+/// What `embed_item` did, so the job handler can tell a no-op from work and
+/// from a write that lost a race.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IndexOutcome {
+    /// Chunks were (re)built and stored.
+    Indexed,
+    /// The stored chunks already match the current content and model.
+    Skipped,
+    /// The item is gone or has no text; its chunks were removed.
+    Removed,
+    /// The item changed while it was being embedded, so nothing was written
+    /// and the work must be redone.
+    Stale,
+}
 
 /// What a search returned and how it was produced.
 #[derive(Debug, Clone, PartialEq)]
@@ -285,6 +326,15 @@ mod tests {
     #[test]
     fn rrf_of_two_empty_lists_is_empty() {
         assert!(rrf(&[], &[], 60).is_empty());
+    }
+
+    #[test]
+    fn e5_models_get_query_and_passage_prefixes_and_others_none() {
+        let e5 = embedding_prefixes(DEFAULT_EMBEDDING_MODEL);
+        assert_eq!((e5.query, e5.passage), ("query: ", "passage: "));
+        assert_eq!(embedding_prefixes("Multilingual-E5-Large"), e5);
+        let bge = embedding_prefixes("bge-small-en-v1.5");
+        assert_eq!((bge.query, bge.passage), ("", ""));
     }
 
     #[test]

@@ -424,6 +424,7 @@ mod server_shutdown_tests {
             tts_voice: "0".to_string(),
             tts_dialect: crate::infrastructure::inference::tts::TtsDialect::OpenAi,
             embedding_base_url: None,
+            embedding_model: "multilingual-e5-small".to_string(),
             trust_forwarded_for: false,
             ai: crate::config::AiEnvConfig::default(),
             storage: crate::config::StorageConfig::default(),

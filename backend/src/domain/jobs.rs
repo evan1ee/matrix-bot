@@ -281,12 +281,46 @@ impl NewJob {
         )
     }
 
+    /// Embeds an item once. The key is permanent until finished jobs are
+    /// purged, so use [`Self::knowledge_embed_item_versioned`] for anything that
+    /// can change and need embedding again.
     pub fn knowledge_embed_item(
         owner: AccountId,
         item_type: KnowledgeItemType,
         item_id: i64,
     ) -> Self {
-        let dedupe_key = format!("{}:{item_id}", item_type.as_str());
+        Self::knowledge_embed(
+            owner,
+            item_type,
+            item_id,
+            format!("{}:{item_id}", item_type.as_str()),
+        )
+    }
+
+    /// Embeds one version of an item. A new `version` (an edit, a model switch)
+    /// gets a new key, so it is not swallowed by the finished job of the
+    /// version before it, while a repeated request for the same version is
+    /// still deduplicated.
+    pub fn knowledge_embed_item_versioned(
+        owner: AccountId,
+        item_type: KnowledgeItemType,
+        item_id: i64,
+        version: &str,
+    ) -> Self {
+        Self::knowledge_embed(
+            owner,
+            item_type,
+            item_id,
+            format!("{}:{item_id}:{version}", item_type.as_str()),
+        )
+    }
+
+    fn knowledge_embed(
+        owner: AccountId,
+        item_type: KnowledgeItemType,
+        item_id: i64,
+        dedupe_key: String,
+    ) -> Self {
         let payload = JobPayload::KnowledgeEmbed(KnowledgeEmbedPayload {
             account_id: owner,
             item_type,
@@ -302,8 +336,10 @@ impl NewJob {
         )
     }
 
-    pub fn knowledge_backfill_embeddings() -> Self {
-        let dedupe_key = "knowledge:backfill".to_string();
+    /// One backfill per UTC hour: the scheduler ticks hourly, and a key that
+    /// never changed would let the first finished run block every later one.
+    pub fn knowledge_backfill_embeddings(now: DateTime<Utc>) -> Self {
+        let dedupe_key = format!("knowledge:backfill:{}", now.format("%Y-%m-%dT%H"));
         Self::new(
             JobType::KnowledgeBackfillEmbeddings,
             None,
@@ -566,9 +602,40 @@ mod tests {
         let back: KnowledgeEmbedPayload = serde_json::from_value(val).unwrap();
         assert_eq!(&back, payload);
 
-        let backfill = NewJob::knowledge_backfill_embeddings();
+        let now = Utc.with_ymd_and_hms(2026, 10, 9, 14, 30, 0).unwrap();
+        let backfill = NewJob::knowledge_backfill_embeddings(now);
         assert_eq!(backfill.job_type(), JobType::KnowledgeBackfillEmbeddings);
         assert_eq!(backfill.account_id(), None);
-        assert_eq!(backfill.dedupe_key(), Some("knowledge:backfill"));
+        assert_eq!(
+            backfill.dedupe_key(),
+            Some("knowledge:backfill:2026-10-09T14")
+        );
+        let same_hour = now + chrono::Duration::minutes(20);
+        assert_eq!(
+            NewJob::knowledge_backfill_embeddings(same_hour).dedupe_key(),
+            backfill.dedupe_key()
+        );
+        let next_hour = now + chrono::Duration::hours(1);
+        assert_ne!(
+            NewJob::knowledge_backfill_embeddings(next_hour).dedupe_key(),
+            backfill.dedupe_key()
+        );
+    }
+
+    #[test]
+    fn a_new_version_of_an_item_gets_its_own_embed_key() {
+        let o = owner();
+        let v1 = NewJob::knowledge_embed_item_versioned(o, KnowledgeItemType::Note, 7, "100");
+        let v2 = NewJob::knowledge_embed_item_versioned(o, KnowledgeItemType::Note, 7, "200");
+        assert_eq!(v1.dedupe_key(), Some("note:7:100"));
+        assert_ne!(v1.dedupe_key(), v2.dedupe_key());
+        assert_eq!(
+            v1.dedupe_key(),
+            NewJob::knowledge_embed_item_versioned(o, KnowledgeItemType::Note, 7, "100")
+                .dedupe_key(),
+            "the same version stays deduplicated"
+        );
+        assert_eq!(v1.job_type(), JobType::KnowledgeEmbedItem);
+        assert_eq!((v1.max_attempts(), v1.backoff_seconds()), (3, 30));
     }
 }

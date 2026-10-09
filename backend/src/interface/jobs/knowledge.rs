@@ -12,6 +12,7 @@ use async_trait::async_trait;
 use super::parse_payload;
 use crate::application::AppServices;
 use crate::domain::jobs::{JobType, KnowledgeEmbedPayload};
+use crate::domain::knowledge::search::IndexOutcome;
 use crate::jobs::{JobContext, JobError, JobHandler};
 
 /// Handler for `knowledge.embed_item`.
@@ -33,12 +34,22 @@ impl JobHandler for KnowledgeEmbedHandler {
 
     async fn run(&self, _ctx: &JobContext, payload: serde_json::Value) -> Result<(), JobError> {
         let p: KnowledgeEmbedPayload = parse_payload(payload)?;
-        self.services
+        let outcome = self
+            .services
             .knowledge_search
             .embed_item(&p.account_id, p.item_type, p.item_id)
             .await
-            .map_err(|e| JobError::Permanent(anyhow::anyhow!("{e}")))?;
-        Ok(())
+            .map_err(JobError::from)?;
+        match outcome {
+            // The item changed while it was embedded and nothing was written;
+            // run again so the newer content is the one indexed.
+            IndexOutcome::Stale => Err(JobError::Retryable(anyhow::anyhow!(
+                "{} {} changed while it was being embedded",
+                p.item_type.as_str(),
+                p.item_id
+            ))),
+            IndexOutcome::Indexed | IndexOutcome::Skipped | IndexOutcome::Removed => Ok(()),
+        }
     }
 }
 
@@ -72,7 +83,7 @@ impl JobHandler for KnowledgeBackfillHandler {
                 .notes
                 .backfill_derived_fields(DERIVED_BATCH)
                 .await
-                .map_err(|e| JobError::Permanent(anyhow::anyhow!("{e}")))?;
+                .map_err(JobError::from)?;
             if filled < DERIVED_BATCH as usize || ctx.cancel.is_cancelled() {
                 break;
             }
@@ -81,7 +92,7 @@ impl JobHandler for KnowledgeBackfillHandler {
             .knowledge_search
             .backfill_embeddings(50)
             .await
-            .map_err(|e| JobError::Permanent(anyhow::anyhow!("{e}")))?;
+            .map_err(JobError::from)?;
         Ok(())
     }
 }

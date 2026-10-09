@@ -219,6 +219,13 @@ impl AppServices {
         self
     }
 
+    /// Sets the configured embedding model: new chunks are tagged with it and
+    /// vector search reads only its chunks.
+    pub fn with_embedding_model(mut self, model: &str) -> Self {
+        self.knowledge_search = self.knowledge_search.with_model(model);
+        self
+    }
+
     /// Configures the embedding provider used for semantic and hybrid knowledge searches.
     pub fn with_embedder(
         mut self,

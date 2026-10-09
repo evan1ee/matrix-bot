@@ -292,7 +292,15 @@ async fn enqueue_embedding(
     owner: &AccountId,
     note: &Note,
 ) -> Result<(), AppError> {
-    let job = NewJob::knowledge_embed_item(*owner, KnowledgeItemType::Note, note.id.0);
+    // Keyed by this edit: a finished job for an earlier version of the note
+    // must not swallow the request to embed the new one.
+    let version = note.updated_at.timestamp_micros().to_string();
+    let job = NewJob::knowledge_embed_item_versioned(
+        *owner,
+        KnowledgeItemType::Note,
+        note.id.0,
+        &version,
+    );
     repositories::jobs::enqueue(&mut **tx, &job).await?;
     Ok(())
 }
@@ -746,6 +754,95 @@ mod tests {
             svc.get(&alice, note.id.0).await.unwrap().markdown,
             "private"
         );
+    }
+
+    #[tokio::test]
+    async fn every_edit_enqueues_its_own_embedding_job() {
+        let pool = test_pool().await;
+        let (svc, alice) = setup(&pool).await;
+        let note = svc.create(&alice, NewNote::new("T", "v1")).await.unwrap();
+        // Finish the first job, as a worker would.
+        sqlx::query!("UPDATE jobs SET status = 'completed', completed_at = NOW()")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        svc.update(
+            &alice,
+            note.id.0,
+            NotePatch {
+                markdown: Some("v2".to_string()),
+                ..NotePatch::default()
+            },
+        )
+        .await
+        .unwrap();
+        svc.update(
+            &alice,
+            note.id.0,
+            NotePatch {
+                title: Some("Renamed".to_string()),
+                ..NotePatch::default()
+            },
+        )
+        .await
+        .unwrap();
+
+        // A fixed per-note key would drop both: the first job is finished but
+        // not yet purged.
+        assert_eq!(embed_jobs(&pool).await, 3);
+    }
+
+    #[tokio::test]
+    async fn renaming_a_note_invalidates_its_indexed_hash_but_tag_edits_do_not() {
+        let pool = test_pool().await;
+        let (svc, alice) = setup(&pool).await;
+        let note = svc.create(&alice, NewNote::new("T", "body")).await.unwrap();
+        let indexed = repositories::knowledge::mark_note_indexed(
+            &pool,
+            &alice,
+            note.id.0,
+            "T",
+            &note.content_hash,
+        )
+        .await
+        .unwrap();
+        assert!(indexed);
+
+        svc.update(
+            &alice,
+            note.id.0,
+            NotePatch {
+                tags: Some(vec!["x".to_string()]),
+                ..NotePatch::default()
+            },
+        )
+        .await
+        .unwrap();
+        let after_tags = repositories::knowledge::get_note_for_indexing(&pool, &alice, note.id.0)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            after_tags.indexed_content_hash.as_deref(),
+            Some(note.content_hash.as_str())
+        );
+
+        svc.update(
+            &alice,
+            note.id.0,
+            NotePatch {
+                title: Some("Renamed".to_string()),
+                ..NotePatch::default()
+            },
+        )
+        .await
+        .unwrap();
+        let after_rename = repositories::knowledge::get_note_for_indexing(&pool, &alice, note.id.0)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(after_rename.indexed_content_hash, None);
     }
 
     async fn insert_legacy(pool: &PgPool, owner: &AccountId, title: &str, body: &str) -> i64 {
