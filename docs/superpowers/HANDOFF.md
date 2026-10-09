@@ -119,7 +119,7 @@ Spec: `docs/superpowers/specs/2026-10-08-second-brain-refactor-design.md`. Plan:
 | Task | Scope | Status |
 |---|---|---|
 | 0 | Relabel "Second Brain" to "Notes" (UI, chat help, tool descriptions) | Done |
-| 1 | Markdown module + domain split | Pending |
+| 1 | Markdown module + domain split | Done |
 | 2 | Migrations 0012/0013 + derived write path | Pending |
 | 3 | Backfill derived fields | Pending |
 | 4 | Search rewrite (lexical + vector + RRF) | Pending |

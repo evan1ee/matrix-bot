@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -53,6 +54,79 @@ pub struct SearchResultItem {
 pub fn distance_to_similarity(distance: f32) -> f32 {
     let clamped = distance.clamp(0.0, 2.0);
     1.0 - (clamped / 2.0)
+}
+
+/// Identifies one searchable item across the four knowledge item types.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ItemKey {
+    pub item_type: KnowledgeItemType,
+    pub item_id: i64,
+}
+
+impl ItemKey {
+    pub fn new(item_type: KnowledgeItemType, item_id: i64) -> Self {
+        Self { item_type, item_id }
+    }
+}
+
+/// Whether the vector list contributed to a search.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchMode {
+    Hybrid,
+    /// The embedder failed or timed out; only keyword results are returned.
+    Lexical,
+}
+
+impl SearchMode {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Hybrid => "hybrid",
+            Self::Lexical => "lexical",
+        }
+    }
+}
+
+/// Reciprocal rank fusion of a lexical and a vector ranking (best first).
+///
+/// Each item scores `sum(1 / (k + rank))` over the lists that contain it, with
+/// 1-based ranks, and appears once however many chunks matched. A repeated key
+/// within one list counts only at its first position. Results are ordered by
+/// fused score (descending), then by earlier lexical rank, then by lower item
+/// id, so equal scores never reorder between runs.
+pub fn rrf(lexical: &[ItemKey], vector: &[ItemKey], k: u32) -> Vec<(ItemKey, f64)> {
+    let mut scores: HashMap<ItemKey, (f64, usize)> = HashMap::new();
+    let mut accumulate = |list: &[ItemKey], is_lexical: bool| {
+        let mut seen: HashSet<ItemKey> = HashSet::new();
+        for key in list {
+            if !seen.insert(*key) {
+                continue;
+            }
+            let rank = seen.len();
+            let entry = scores.entry(*key).or_insert((0.0, usize::MAX));
+            entry.0 += 1.0 / (f64::from(k) + rank as f64);
+            if is_lexical {
+                entry.1 = rank;
+            }
+        }
+    };
+    accumulate(lexical, true);
+    accumulate(vector, false);
+
+    let mut fused: Vec<(ItemKey, f64, usize)> = scores
+        .into_iter()
+        .map(|(key, (score, lexical_rank))| (key, score, lexical_rank))
+        .collect();
+    fused.sort_by(|a, b| {
+        b.1.total_cmp(&a.1)
+            .then(a.2.cmp(&b.2))
+            .then(a.0.item_id.cmp(&b.0.item_id))
+            .then(a.0.item_type.cmp(&b.0.item_type))
+    });
+    fused
+        .into_iter()
+        .map(|(key, score, _)| (key, score))
+        .collect()
 }
 
 /// Chunks text into segments of at most `chunk_size` characters with `overlap` characters
@@ -135,5 +209,62 @@ mod tests {
         assert!(!u_chunks.is_empty());
         // verify concatenation preserves characters
         assert_eq!(u_chunks[0], "🦀 Rust 编");
+    }
+
+    fn key(id: i64) -> ItemKey {
+        ItemKey::new(KnowledgeItemType::Note, id)
+    }
+
+    #[test]
+    fn rrf_rewards_items_present_in_both_lists() {
+        let fused = rrf(&[key(1), key(2)], &[key(2), key(3)], 60);
+        let order: Vec<i64> = fused.iter().map(|(k, _)| k.item_id).collect();
+        assert_eq!(order, vec![2, 1, 3]);
+        let expected = 1.0 / 62.0 + 1.0 / 61.0;
+        assert!((fused[0].1 - expected).abs() < 1e-12);
+    }
+
+    #[test]
+    fn rrf_returns_each_item_once_even_if_a_list_repeats_it() {
+        let fused = rrf(&[key(1), key(1), key(2)], &[key(1)], 60);
+        assert_eq!(fused.len(), 2);
+        // The duplicate does not add a second contribution or shift later ranks.
+        let first = 1.0 / 61.0 + 1.0 / 61.0;
+        assert!((fused[0].1 - first).abs() < 1e-12);
+        assert_eq!(fused[1].0, key(2));
+    }
+
+    #[test]
+    fn rrf_breaks_equal_scores_by_earlier_lexical_rank() {
+        // 7 is only lexical rank 1 and 3 only vector rank 1: equal scores.
+        let fused = rrf(&[key(7)], &[key(3)], 60);
+        assert_eq!(fused[0].0, key(7));
+        assert_eq!(fused[1].0, key(3));
+        assert!((fused[0].1 - fused[1].1).abs() < f64::EPSILON);
+
+        // 9 and 2 swap ranks across the lists, so they tie exactly; the earlier
+        // lexical rank wins even though its item id is higher.
+        let fused = rrf(&[key(9), key(2)], &[key(2), key(9)], 60);
+        assert_eq!(fused[0].0, key(9));
+        assert_eq!(fused[1].0, key(2));
+    }
+
+    #[test]
+    fn rrf_ranks_by_score_before_any_tie_break() {
+        // 5 is lexical 3 and vector 1; 8 is lexical 2 and vector 2.
+        let fused = rrf(&[key(1), key(8), key(5)], &[key(5), key(8)], 60);
+        assert_eq!(fused[0].0, key(5));
+        assert_eq!(fused[1].0, key(8));
+    }
+
+    #[test]
+    fn rrf_of_two_empty_lists_is_empty() {
+        assert!(rrf(&[], &[], 60).is_empty());
+    }
+
+    #[test]
+    fn search_mode_has_stable_wire_names() {
+        assert_eq!(SearchMode::Hybrid.as_str(), "hybrid");
+        assert_eq!(SearchMode::Lexical.as_str(), "lexical");
     }
 }

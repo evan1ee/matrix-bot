@@ -4,7 +4,10 @@ pub mod search;
 
 pub use error::KnowledgeError;
 pub use note::{
-    normalize_tag, normalize_tags, validate_content, validate_title, Note, NoteFormat, NoteId,
-    MAX_TITLE_LEN,
+    normalize_tag, normalize_tags, validate_content, validate_title, ContentHash, ExpectedHash,
+    Note, NoteDocument, NoteFormat, NoteId, NotePatch, NoteType, MAX_CONTENT_CHARS, MAX_TITLE_LEN,
 };
-pub use search::{distance_to_similarity, KnowledgeChunk, KnowledgeItemType, SearchResultItem};
+pub use search::{
+    distance_to_similarity, rrf, ItemKey, KnowledgeChunk, KnowledgeItemType, SearchMode,
+    SearchResultItem,
+};
