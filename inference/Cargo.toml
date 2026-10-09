@@ -24,6 +24,10 @@ opus-decoder = "0.1"
 opus = "0.4"
 tar = "0.4"
 bzip2 = "0.5"
+# Pure-Rust regex backend: the default `onig` and `esaxx_fast` features pull in C/C++ builds that
+# the Windows + Linux CI would each have to provide; inference needs neither (no training).
+tokenizers = { version = "0.22", default-features = false, features = ["fancy-regex"] }
+sha2 = "0.10"
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

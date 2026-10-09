@@ -181,15 +181,13 @@ mod tests {
     ));
 
     fn state_with_missing_models() -> AppState {
-        AppState {
-            config: Arc::new(InferenceConfig {
-                port: 0,
-                ocr_model_dir: std::path::PathBuf::from("/nonexistent/ocr/models"),
-                voice_model_dir: std::path::PathBuf::from("/nonexistent/voice/models"),
-                tts_model_dir: std::path::PathBuf::from("/nonexistent/tts/models"),
-                embedding_model_dir: std::path::PathBuf::from("/nonexistent/embed/models"),
-            }),
-        }
+        AppState::new(Arc::new(InferenceConfig {
+            port: 0,
+            ocr_model_dir: std::path::PathBuf::from("/nonexistent/ocr/models"),
+            voice_model_dir: std::path::PathBuf::from("/nonexistent/voice/models"),
+            tts_model_dir: std::path::PathBuf::from("/nonexistent/tts/models"),
+            embedding_model_dir: std::path::PathBuf::from("/nonexistent/embed/models"),
+        }))
     }
 
     async fn post_speech(body: serde_json::Value) -> StatusCode {

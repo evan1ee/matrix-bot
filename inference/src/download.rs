@@ -1,5 +1,6 @@
 //! Streaming model downloads, shared by every capability's provisioning.
 
+use sha2::{Digest, Sha256};
 use std::path::Path;
 use std::time::Duration;
 use thiserror::Error;
@@ -19,18 +20,36 @@ pub struct DownloadError(pub String);
 
 /// Streams `url` into `dest` with the default idle timeout.
 pub async fn download_to(url: &str, dest: &Path) -> Result<(), DownloadError> {
-    download_with_idle(url, dest, DOWNLOAD_IDLE_TIMEOUT).await
+    download_with_idle(url, dest, DOWNLOAD_IDLE_TIMEOUT, None).await
+}
+
+/// Like [`download_to`], but installs the file only if its SHA-256 equals
+/// `sha256` (lowercase hex). The models are fetched from a third-party host
+/// and loaded into a native runtime, so a truncated or tampered file must be
+/// refused before it can ever be seen at `dest`.
+pub async fn download_verified(url: &str, dest: &Path, sha256: &str) -> Result<(), DownloadError> {
+    download_with_idle(url, dest, DOWNLOAD_IDLE_TIMEOUT, Some(sha256)).await
 }
 
 /// Streams `url` into `dest` via a `.tmp` file that is renamed into place
-/// only on success, so anything watching `dest` never sees a partial file.
+/// only on success (and, when `expected_sha256` is given, only if the
+/// checksum matches), so anything watching `dest` never sees a partial or
+/// unverified file.
 /// There is deliberately no total-transfer timeout, only `idle`, applied to
 /// each chunk: the models are hundreds of megabytes, and a total timeout
 /// fails deterministically on any link slower than it assumes.
-async fn download_with_idle(url: &str, dest: &Path, idle: Duration) -> Result<(), DownloadError> {
+async fn download_with_idle(
+    url: &str,
+    dest: &Path,
+    idle: Duration,
+    expected_sha256: Option<&str>,
+) -> Result<(), DownloadError> {
     let tmp_dest = dest.with_extension("tmp");
 
-    match stream_to_file(url, &tmp_dest, idle).await {
+    let streamed = stream_to_file(url, &tmp_dest, idle)
+        .await
+        .and_then(|actual| verify_checksum(url, expected_sha256, &actual));
+    match streamed {
         Ok(()) => tokio::fs::rename(&tmp_dest, dest)
             .await
             .map_err(|e| DownloadError(format!("Failed to persist model file: {}", e))),
@@ -38,6 +57,16 @@ async fn download_with_idle(url: &str, dest: &Path, idle: Duration) -> Result<()
             remove_partial_download(&tmp_dest).await;
             Err(err)
         }
+    }
+}
+
+fn verify_checksum(url: &str, expected: Option<&str>, actual: &str) -> Result<(), DownloadError> {
+    match expected {
+        Some(expected) if !expected.eq_ignore_ascii_case(actual) => Err(DownloadError(format!(
+            "Downloaded file failed its checksum (expected {}, got {}): {}",
+            expected, actual, url
+        ))),
+        _ => Ok(()),
     }
 }
 
@@ -52,8 +81,13 @@ async fn remove_partial_download(tmp_dest: &Path) {
 }
 
 /// Requests `url` and writes its body to `tmp_dest` chunk by chunk, failing
-/// if no chunk arrives within `idle`.
-async fn stream_to_file(url: &str, tmp_dest: &Path, idle: Duration) -> Result<(), DownloadError> {
+/// if no chunk arrives within `idle`. Returns the body's SHA-256 as lowercase
+/// hex, hashed as it streams so verifying costs no second pass over the file.
+async fn stream_to_file(
+    url: &str,
+    tmp_dest: &Path,
+    idle: Duration,
+) -> Result<String, DownloadError> {
     let client = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(30))
         .build()
@@ -77,6 +111,7 @@ async fn stream_to_file(url: &str, tmp_dest: &Path, idle: Duration) -> Result<()
         .await
         .map_err(|e| DownloadError(format!("Failed to create tmp model file: {}", e)))?;
 
+    let mut hasher = Sha256::new();
     loop {
         let chunk = tokio::time::timeout(idle, response.chunk())
             .await
@@ -92,6 +127,7 @@ async fn stream_to_file(url: &str, tmp_dest: &Path, idle: Duration) -> Result<()
             break;
         };
 
+        hasher.update(&bytes);
         file.write_all(&bytes)
             .await
             .map_err(|e| DownloadError(format!("Failed to write tmp model file: {}", e)))?;
@@ -101,7 +137,7 @@ async fn stream_to_file(url: &str, tmp_dest: &Path, idle: Duration) -> Result<()
         .await
         .map_err(|e| DownloadError(format!("Failed to flush tmp model file: {}", e)))?;
 
-    Ok(())
+    Ok(format!("{:x}", hasher.finalize()))
 }
 
 #[cfg(test)]
@@ -134,6 +170,7 @@ mod tests {
             &format!("{}/model.bin", base),
             &dest,
             Duration::from_secs(5),
+            None,
         )
         .await
         .expect("download of a well-behaved body should succeed");
@@ -174,6 +211,7 @@ mod tests {
             &format!("{}/model.bin", base),
             &dest,
             Duration::from_millis(200),
+            None,
         )
         .await;
 
@@ -190,5 +228,57 @@ mod tests {
             !tmp_dest.exists(),
             "tmp file must not remain after a stalled download"
         );
+    }
+
+    fn sha256_hex(bytes: &[u8]) -> String {
+        use sha2::{Digest, Sha256};
+        format!("{:x}", Sha256::digest(bytes))
+    }
+
+    async fn serve_body(body: Vec<u8>) -> String {
+        let app = axum::Router::new().route(
+            "/model.bin",
+            axum::routing::get(move || {
+                let body = body.clone();
+                async move { body }
+            }),
+        );
+        format!("{}/model.bin", crate::test_support::spawn_server(app).await)
+    }
+
+    #[tokio::test]
+    async fn test_download_with_a_matching_checksum_is_kept() {
+        let body = vec![9u8; 4096];
+        let url = serve_body(body.clone()).await;
+        let dest = scratch_dest("sum-ok");
+        std::fs::remove_file(&dest).ok();
+
+        download_with_idle(
+            &url,
+            &dest,
+            Duration::from_secs(5),
+            Some(&sha256_hex(&body)),
+        )
+        .await
+        .expect("a body matching its checksum should be accepted");
+
+        assert_eq!(std::fs::read(&dest).unwrap(), body);
+        std::fs::remove_file(&dest).ok();
+    }
+
+    #[tokio::test]
+    async fn test_download_with_a_wrong_checksum_is_rejected_and_leaves_nothing() {
+        let url = serve_body(vec![9u8; 4096]).await;
+        let dest = scratch_dest("sum-bad");
+        let tmp_dest = dest.with_extension("tmp");
+        std::fs::remove_file(&dest).ok();
+
+        let wrong = sha256_hex(b"some other model");
+        let result = download_with_idle(&url, &dest, Duration::from_secs(5), Some(&wrong)).await;
+
+        let err = result.expect_err("a corrupt or tampered body must be refused");
+        assert!(err.0.contains("checksum"), "unhelpful error: {}", err.0);
+        assert!(!dest.exists(), "a rejected model must never be installed");
+        assert!(!tmp_dest.exists(), "the rejected tmp file must be removed");
     }
 }

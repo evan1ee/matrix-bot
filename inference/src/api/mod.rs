@@ -20,6 +20,16 @@ const MAX_BODY_BYTES: usize = 32 * 1024 * 1024;
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<InferenceConfig>,
+    pub embedder: Arc<crate::embeddings::Embedder>,
+}
+
+impl AppState {
+    pub fn new(config: Arc<InferenceConfig>) -> Self {
+        let embedder = Arc::new(crate::embeddings::Embedder::new(
+            config.embedding_model_dir.clone(),
+        ));
+        Self { config, embedder }
+    }
 }
 
 /// Per-capability model presence. A capability reports `false` when its model
@@ -70,9 +80,7 @@ mod tests {
             tts_model_dir: std::path::PathBuf::from("/nonexistent/tts/models"),
             embedding_model_dir: std::path::PathBuf::from("/nonexistent/embed/models"),
         };
-        let state = AppState {
-            config: Arc::new(config),
-        };
+        let state = AppState::new(Arc::new(config));
 
         let Json(body) = health(State(state)).await;
 
@@ -100,9 +108,7 @@ mod tests {
             tts_model_dir: std::path::PathBuf::from("/nonexistent/tts/models"),
             embedding_model_dir: std::path::PathBuf::from("/nonexistent/embed/models"),
         };
-        let state = AppState {
-            config: Arc::new(config),
-        };
+        let state = AppState::new(Arc::new(config));
         let router = build_router(state);
 
         let response = router

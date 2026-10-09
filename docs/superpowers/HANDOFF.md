@@ -124,7 +124,7 @@ Spec: `docs/superpowers/specs/2026-10-08-second-brain-refactor-design.md`. Plan:
 | 3 | Backfill derived fields | Done |
 | 4 | Search rewrite (lexical + vector + RRF) | Done |
 | 5 | Indexing: skip-on-hash, model tagging | Done |
-| 6 | Real e5 inference | Pending |
+| 6 | Real e5 inference | Done (code + real-model tests; operator deploy pending, Track 1) |
 | 7 | API contract + frontend | Pending |
 | 8 | LLM / MCP tools | Pending |
 | 9 | Export / import | Pending |
@@ -180,7 +180,7 @@ Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in exact seque
 ### Track 2: Post-Cutover Enhancements & Technical Debt
 
 0. **Notes refactor (next up, plan ready, not started):** design [`specs/2026-10-08-second-brain-refactor-design.md`](specs/2026-10-08-second-brain-refactor-design.md) (approved 2026-10-09), plan [`plans/2026-10-09-notes-refactor.md`](plans/2026-10-09-notes-refactor.md), branch `feat/notes-refactor`. PostgreSQL stays the content store (Markdown files as a store were rejected); derived FTS/trigram/excerpt columns; RRF search with lexical fallback; `multilingual-e5-small`; relabel "Second Brain" → "Notes".
-   - Ruling: the inference `/v1/embeddings` handler is a byte-folding placeholder, not a model — Task 6 replaces it with real ONNX e5 inference — until then, vector search quality is meaningless, so don't tune ranking against it.
+   - Ruling: the inference `/v1/embeddings` handler now runs the real int8 `multilingual-e5-small` (ONNX + `tokenizers`, mean-pooled, L2-normalised, 384-d), downloaded on first start and SHA-256 verified. It adds no e5 prefixes; the backend applies `query: ` / `passage: ` (`embedding_prefixes`). Vectors written by the old byte-folding placeholder are meaningless: set `EMBEDDING_MODEL=multilingual-e5-small` on the backend and the backfill re-embeds every chunk (Track 1 operator step; keyword search covers the gap).
 
 1. **Deep Procedural Pipelines for Built-in Agent Tasks (`backend/src/domain/agent/task.rs`):**
    - The 5 standard task plugins (`WeeklyBookmarkDigestTask`, `MonthlyFinancialAuditTask`, `PortfolioRebalanceAlertTask`, `BillDueDigestTask`, `HabitConsistencyReviewTask`) currently formulate goals executed through the agent's native tool calling.
@@ -210,7 +210,7 @@ Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in exact seque
 - **PostgreSQL 18 Exclusivity:** The application database is PostgreSQL only. `BIGINT` for row IDs, native `UUID` for `accounts.id` and `owner_id`. No SQL in `domain/`, `application/`, `jobs/`, or `interface/`.
 - **Transactional Outbox:** State mutations and their corresponding `SystemEvent` must be committed in the same database transaction. Outbox deliveries handle external fan-out with independent retries.
 - **Unified Tool Registry:** Interactive user chat uses direct LLM + tool calling bounded by `MAX_TOOL_ROUNDS = 5`. The autonomous agent loop (native tool calling, one tool call per step) is strictly reserved for scheduled background workflows.
-- **pgvector Hybrid Search:** Multi-chunk embeddings (`vector(384)`) indexed via HNSW (`vector_cosine_ops`), populated asynchronously via transactional outbox + background durable jobs (`knowledge.embed`), combining vector cosine distance with full-text search without external vector DBs.
+- **pgvector Hybrid Search:** Multi-chunk `multilingual-e5-small` embeddings (`vector(384)`, served by `matrix-bot-inference`, tagged with the model that made them) indexed via HNSW (`vector_cosine_ops`), populated asynchronously via transactional outbox + background durable jobs (`knowledge.embed`). Search fuses a lexical list (FTS + trigram/substring, which also covers unembedded notes and CJK) with the vector list by reciprocal rank fusion, and degrades to lexical-only if the embedder fails, without external vector DBs.
 - **Account Identity Model:** One human account (`accounts.id`) links multiple chat identities across Matrix, Discord, Telegram, and Email via `platform_identities`.
 - **File Length & Code Quality:** No file in `backend/src/` or `inference/src/` may exceed 500 lines of production code (target < 300 lines). Every feature follows:
   `domain/<f>` (pure rules) → `application/<f>` (service & transactions) → `infrastructure/postgres/repositories/<f>.rs` (SQL) → `interface/` (DTOs & chat handlers).

@@ -210,15 +210,13 @@ mod tests {
     const BOUNDARY: &str = "matrix-bot-test-boundary";
 
     fn state_with_missing_models() -> AppState {
-        AppState {
-            config: Arc::new(InferenceConfig {
-                port: 0,
-                ocr_model_dir: std::path::PathBuf::from("/nonexistent/ocr/models"),
-                voice_model_dir: std::path::PathBuf::from("/nonexistent/voice/models"),
-                tts_model_dir: std::path::PathBuf::from("/nonexistent/tts/models"),
-                embedding_model_dir: std::path::PathBuf::from("/nonexistent/embed/models"),
-            }),
-        }
+        AppState::new(Arc::new(InferenceConfig {
+            port: 0,
+            ocr_model_dir: std::path::PathBuf::from("/nonexistent/ocr/models"),
+            voice_model_dir: std::path::PathBuf::from("/nonexistent/voice/models"),
+            tts_model_dir: std::path::PathBuf::from("/nonexistent/tts/models"),
+            embedding_model_dir: std::path::PathBuf::from("/nonexistent/embed/models"),
+        }))
     }
 
     /// A multipart/form-data body; each part is (name, filename, bytes).

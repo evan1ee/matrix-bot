@@ -24,9 +24,7 @@ async fn main() -> anyhow::Result<()> {
     let config = config::InferenceConfig::from_env();
     let port = config.port;
 
-    let state = api::AppState {
-        config: Arc::new(config),
-    };
+    let state = api::AppState::new(Arc::new(config));
 
     // Provisioning downloads models and can take minutes; run it beside the
     // server, not in front of it. See `provision::provision_models`.

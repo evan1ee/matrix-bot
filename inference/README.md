@@ -30,7 +30,8 @@ inference/
     │   ├── mod.rs             # Axum router & /health endpoint
     │   ├── ocr.rs             # POST /ocr
     │   ├── stt.rs             # POST /v1/audio/transcriptions
-    │   └── tts.rs             # POST /v1/audio/speech
+    │   ├── tts.rs             # POST /v1/audio/speech
+    │   └── embeddings.rs      # POST /v1/embeddings
     ├── ocr/                   # OCR inference & model resolution
     │   ├── mod.rs             # Module exports
     │   └── paddle.rs          # PaddleOCR ONNX engine
@@ -38,6 +39,12 @@ inference/
     │   ├── mod.rs             # Module exports
     │   ├── audio.rs           # Audio decoding (WAV, MP3, AAC, FLAC, Ogg Opus) to 16kHz mono PCM
     │   └── sherpa.rs          # Sherpa-onnx SenseVoice offline recognizer
+    ├── embeddings/            # Text embeddings (multilingual-e5-small)
+    │   ├── mod.rs             # Constants, model-presence check
+    │   ├── engine.rs          # Lazy one-time load, FIFO-serialised access
+    │   ├── model.rs           # ONNX session + tokenizer, batching
+    │   ├── pooling.rs         # Masked mean-pool + L2 normalisation
+    │   └── provision.rs       # Pinned, SHA-256-verified model download
     └── tts/                   # Text-to-speech synthesis & audio encoding
         ├── mod.rs             # Module exports
         ├── kokoro.rs          # Kokoro multi-language TTS engine
@@ -84,7 +91,8 @@ Returns the installation status of each capability's model:
 {
   "stt": true,
   "tts": true,
-  "ocr": true
+  "ocr": true,
+  "embeddings": true
 }
 ```
 *Note: Responds immediately even while background provisioning is downloading models.*
@@ -158,6 +166,25 @@ Accepts JSON:
 
 ---
 
+### 5. Embeddings (OpenAI Compatible)
+`POST /v1/embeddings`
+
+Accepts JSON:
+```json
+{
+  "input": ["passage: The cat sits on the mat", "passage: 猫坐在垫子上"],
+  "model": "multilingual-e5-small"
+}
+```
+
+- `input`: a string or an array of up to 128 strings, each up to 20,000 characters. Text beyond 512 tokens is truncated.
+- `model` *(optional)*: must be `multilingual-e5-small`; any other name is a `400`, because vectors from different models are not comparable.
+- **The server adds no prefix.** e5 expects `query: ` on search queries and `passage: ` on stored text; the backend applies them.
+- **Response:** `{ "object": "list", "data": [{ "index": 0, "embedding": [384 floats, L2-normalised] }], "model", "usage" }`.
+- `503` while the model is still downloading, or installed but unloadable (the cause is in the server log).
+
+---
+
 ## 📦 Model Auto-Provisioning
 
 Models download automatically on first run to the directories configured under `models/`:
@@ -167,9 +194,11 @@ Models download automatically on first run to the directories configured under `
 | **OCR** | `ch_PP-OCRv4_det_infer.onnx`<br>`ch_ppocr_mobile_v2.0_cls_infer.onnx`<br>`ch_PP-OCRv4_rec_infer.onnx` | ~16 MB | [RapidOCR Hugging Face](https://huggingface.co/SWHL/RapidOCR) |
 | **STT** | `model.int8.onnx`<br>`tokens.txt` | ~230 MB | [SenseVoice Small Hugging Face](https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17) |
 | **TTS** | `kokoro-multi-lang-v1_1.tar.bz2` (ONNX, voices, lexicons, FSTs) | ~311 MB | [Sherpa-onnx GitHub Releases](https://github.com/k2-fsa/sherpa-onnx/releases) |
+| **Embeddings** | `model.onnx` (int8 `multilingual-e5-small`)<br>`tokenizer.json` | ~135 MB | [Xenova/multilingual-e5-small Hugging Face](https://huggingface.co/Xenova/multilingual-e5-small), pinned to a commit |
 
 - **Resilient**: Downloads stream into `.tmp` files with an idle timeout and are renamed on completion, preventing corrupt or partial models from ever loading.
-- **Independent**: OCR, STT, and TTS provision concurrently; a retry or network hiccup in one capability never blocks the others.
+- **Verified**: the embedding files are checked against a SHA-256 pinned in `embeddings/provision.rs` before they are installed; a mismatch is retried, never loaded. Changing the model means changing the revision, both hashes, and the backend's `EMBEDDING_MODEL`.
+- **Independent**: OCR, STT, TTS, and embeddings provision concurrently; a retry or network hiccup in one capability never blocks the others.
 
 ---
 
@@ -183,6 +212,7 @@ Environment variables (read at boot):
 | `OCR_MODEL_DIR` | `models/ocr` | Directory for PaddleOCR ONNX models. |
 | `VOICE_MODEL_DIR` | `models/stt` | Directory for SenseVoice STT ONNX files. |
 | `TTS_MODEL_DIR` | `models/tts` | Directory for Kokoro TTS unpacked model assets. |
+| `EMBEDDING_MODEL_DIR` | `models/embeddings` | Directory for the e5 `model.onnx` + `tokenizer.json`. Keep it on the data volume (the container defaults do) so the ~135 MB download is not repeated on every restart. |
 
 ---
 

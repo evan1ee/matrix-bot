@@ -215,6 +215,7 @@ TAVILY_API_KEY=tvly-...                # Live Web Search (fallback to DuckDuckGo
 # Knowledge-base embeddings (Optional — unset means keyword search only)
 # EMBEDDING_BASE_URL=http://inference:8090  # OpenAI-compatible /v1/embeddings (the bundled inference server)
 # EMBEDDING_MODEL=multilingual-e5-small     # Chunks are tagged with it; changing it re-embeds everything in the background
+# EMBEDDING_MODEL_DIR=/app/data/embedding_models/multilingual-e5-small  # Read by the inference container: where it downloads the model
 ```
 
 > [!WARNING]

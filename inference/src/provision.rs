@@ -60,8 +60,8 @@ where
 /// deployment answers `/health` at once instead of reading unhealthy for the
 /// minutes a download takes. Each route gates on its own `models_present` and
 /// answers 503 until its files land; downloads write to a temporary file and
-/// rename, so a route never sees a partial model. OCR, STT and TTS provision
-/// concurrently, so one retrying forever never holds up the others.
+/// rename, so a route never sees a partial model. OCR, STT, TTS and embeddings
+/// provision concurrently, so one retrying forever never holds up the others.
 pub async fn provision_models(config: Arc<InferenceConfig>) {
     let ocr_config = Arc::clone(&config);
     let ocr = async move {
@@ -87,7 +87,15 @@ pub async fn provision_models(config: Arc<InferenceConfig>) {
         .await;
     };
 
-    tokio::join!(ocr, stt, tts);
+    let embedding_config = Arc::clone(&config);
+    let embeddings = async move {
+        retry_until_ready("Embeddings", || {
+            crate::embeddings::ensure_models(&embedding_config.embedding_model_dir)
+        })
+        .await;
+    };
+
+    tokio::join!(ocr, stt, tts, embeddings);
 }
 
 #[cfg(test)]
@@ -106,6 +114,8 @@ mod tests {
             crate::ocr::REC_MODEL_NAME,
             crate::stt::SENSEVOICE_MODEL_FILE,
             crate::stt::SENSEVOICE_TOKENS_FILE,
+            crate::embeddings::MODEL_FILE,
+            crate::embeddings::TOKENIZER_FILE,
         ] {
             std::fs::write(dir.join(name), b"x").expect("model stub should be writable");
         }
