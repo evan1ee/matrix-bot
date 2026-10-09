@@ -150,6 +150,9 @@ Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in exact seque
 
 ### Track 2: Post-Cutover Enhancements & Technical Debt
 
+0. **Notes refactor (next up, plan ready, not started):** design [`specs/2026-10-08-second-brain-refactor-design.md`](specs/2026-10-08-second-brain-refactor-design.md) (approved 2026-10-09), plan [`plans/2026-10-09-notes-refactor.md`](plans/2026-10-09-notes-refactor.md), branch `feat/notes-refactor`. PostgreSQL stays the content store (Markdown files as a store were rejected); derived FTS/trigram/excerpt columns; RRF search with lexical fallback; `multilingual-e5-small`; relabel "Second Brain" → "Notes".
+   - Ruling: the inference `/v1/embeddings` handler is a byte-folding placeholder, not a model — Task 6 replaces it with real ONNX e5 inference — until then, vector search quality is meaningless, so don't tune ranking against it.
+
 1. **Deep Procedural Pipelines for Built-in Agent Tasks (`backend/src/domain/agent/task.rs`):**
    - The 5 standard task plugins (`WeeklyBookmarkDigestTask`, `MonthlyFinancialAuditTask`, `PortfolioRebalanceAlertTask`, `BillDueDigestTask`, `HabitConsistencyReviewTask`) currently formulate goals executed through the agent's native tool calling.
    - Expand specialized procedural workflows where appropriate:

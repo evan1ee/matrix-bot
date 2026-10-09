@@ -24,3 +24,6 @@ frontend/blob-report/
 frontend/.playwright/
 frontend/screenshots/
 
+# Local runner & editor directories
+.claude/
+
