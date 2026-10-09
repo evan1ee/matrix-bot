@@ -1,7 +1,7 @@
 # Second Brain Refactor — Design
 
 > **Date:** 2026-10-08
-> **Status:** Approved 2026-10-09. Plan: [`plans/2026-10-09-notes-refactor.md`](../plans/2026-10-09-notes-refactor.md)
+> **Status:** Implemented 2026-10-09 on `feat/notes-refactor` (operator deploy steps pending, see HANDOFF §3b). Plan: [`plans/2026-10-09-notes-refactor.md`](../plans/2026-10-09-notes-refactor.md)
 > **Target branch:** `feat/notes-refactor`
 > **Supersedes:** the 2026-10-08 "Markdown files as source of truth" proposal (rejected, see §2)
 > **Builds on:** [`2026-10-05-second-brain-design.md`](2026-10-05-second-brain-design.md)

@@ -240,7 +240,7 @@ pub async fn get_note_document(
 /// Every note of `owner` with its body, archived ones included, oldest id
 /// first. For export: the caller passes a cap and treats a full page as
 /// "maybe more".
-pub async fn list_documents(
+pub async fn export_documents(
     executor: impl PgExecutor<'_>,
     owner: &AccountId,
     limit: i64,

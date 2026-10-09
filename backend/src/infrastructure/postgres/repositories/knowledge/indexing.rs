@@ -111,7 +111,8 @@ pub async fn mark_note_indexed(
     Ok(res.rows_affected() > 0)
 }
 
-/// Retrieves textual content for a given knowledge item to be chunked and embedded.
+/// Retrieves textual content of a bookmark, journal log or footprint to be
+/// chunked and embedded.
 pub async fn get_item_content_for_embedding(
     executor: impl PgExecutor<'_>,
     owner: &AccountId,
@@ -119,20 +120,12 @@ pub async fn get_item_content_for_embedding(
     item_id: i64,
 ) -> Result<Option<String>, sqlx::Error> {
     match item_type {
-        KnowledgeItemType::Note => {
-            let row = sqlx::query!(
-                r#"
-                SELECT title, content
-                FROM notes
-                WHERE id = $1 AND owner_id = $2
-                "#,
-                item_id,
-                owner.as_uuid()
-            )
-            .fetch_optional(executor)
-            .await?;
-            Ok(row.map(|r| format!("{}\n\n{}", r.title, r.content)))
-        }
+        // Notes are chunked from their derived plain text with the hash
+        // bookkeeping in `get_note_for_indexing`; routing one here would
+        // embed raw Markdown.
+        KnowledgeItemType::Note => Err(sqlx::Error::Protocol(
+            "notes are indexed through get_note_for_indexing".to_string(),
+        )),
         KnowledgeItemType::Bookmark => {
             let row = sqlx::query!(
                 r#"

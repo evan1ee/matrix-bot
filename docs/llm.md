@@ -140,6 +140,14 @@ Well-formed model output is still not authoritative. Tool results are fed back a
 - `knowledge_get_note { id }` returns `{id, title, note_type, tags, content, truncated, total_chars}` for the turn's owner. `content` is the Markdown cut to 8,000 characters; `truncated` and `total_chars` say when it was cut. Another account's id is reported exactly like a missing one. The tool is tainted like `knowledge_search`.
 - `knowledge_list_tags`.
 
+### Knowledge search and embeddings
+
+Search ranks in two lists and fuses them (`application/knowledge/search.rs`): a **lexical** list (PostgreSQL full text plus trigram/substring matching, which also finds CJK text) and a **vector** list (pgvector cosine distance over `knowledge_embeddings`, best chunk per item). Reciprocal rank fusion (`rrf`, k = 60) merges them, with ties broken by the earlier lexical rank and then the lower item id, so a result list is deterministic. The vector side is optional: the query is embedded under a 3-second timeout, and if the embedder errors or times out the search returns the lexical list alone and reports `mode: "lexical"` (HTTP: `X-Search-Mode`; chat: "(keyword results only)"; LLM tool: the `mode` field). A note is therefore findable the moment it is saved, before any embedding exists.
+
+The embedder is `multilingual-e5-small` (384 dimensions, int8 ONNX, run by `matrix-bot-inference`). E5 models are asymmetric, so the backend prefixes text before embedding: `query: ` for a search query and `passage: ` for every stored chunk (`embedding_prefixes`); the inference service adds nothing. Notes are chunked from `title + "
+
+" + search_text` (500 characters, 100 overlap), not from raw Markdown. `EMBEDDING_MODEL` names the model; chunks are tagged with it and only chunks of the configured model are searched, so changing it re-embeds everything in the background while lexical search covers the gap. Vectors from the old placeholder embedder (a byte-folding hash, not a model) are meaningless and must be re-embedded the same way.
+
 ### Web search
 
 `llm/search.rs` searches Tavily first and falls back to keyless DuckDuckGo scraping when no key is set or the API errors. `should_enable_web_search()` gates it by intent (fact-checking, verification, live information, or a quoted claim to verify) and skips routine productivity commands, so "add a todo" never pays for a search. A URL built from user input needs an SSRF guard (`infrastructure/web/ssrf.rs`).

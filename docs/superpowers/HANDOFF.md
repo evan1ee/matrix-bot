@@ -2,7 +2,7 @@
 
 **Read this before touching code.** This document is the authoritative hand-off state for `matrix-bot`. It outlines the current state of the platform, immediate operational cutover actions, remaining roadmap enhancements, and settled architectural invariants.
 
-> **Current Status (2026-10):** All major subsystems across the PostgreSQL foundation, omnichannel architecture, storage decoupling, autonomous agent runtime, web console polish, and **Second Brain & Knowledge Base (pgvector + hybrid search)** are **fully implemented and verified**.
+> **Current Status (2026-10):** All major subsystems across the PostgreSQL foundation, omnichannel architecture, storage decoupling, autonomous agent runtime, web console polish, and **Notes & Knowledge Base (pgvector + hybrid search)** are **fully implemented and verified**.
 
 ---
 
@@ -112,7 +112,7 @@ Rulings:
 
 ---
 
-## 3b. Notes refactor (branch `feat/notes-refactor`)
+## 3b. Notes refactor (branch `feat/notes-refactor`) — implemented, awaiting merge and operator steps
 
 Spec: `docs/superpowers/specs/2026-10-08-second-brain-refactor-design.md`. Plan: `docs/superpowers/plans/2026-10-09-notes-refactor.md` (approved 2026-10-09). One commit per task.
 
@@ -129,7 +129,7 @@ Spec: `docs/superpowers/specs/2026-10-08-second-brain-refactor-design.md`. Plan:
 | 8 | LLM / MCP tools | Done |
 | 9 | Export / import | Done |
 | 10 | Migration 0014 | Done |
-| 11 | Cleanup + docs | Pending |
+| 11 | Cleanup + docs | Done |
 
 Runbook (task 10): migration `0014` makes `content_hash`, `search_text` and `excerpt` NOT NULL and aborts, naming up to 20 note ids, if any row still lacks one. The derived-column backfill (`backfill_derived_fields`, its job step and repository helpers) shipped in task 3 and is removed in the same commit as 0014, so **the release before 0014 must have run `knowledge.backfill_embeddings`**. Check each environment before deploying 0014:
 
@@ -144,6 +144,12 @@ Ruling (task 10): the task 3 backfill machinery (`backfill_derived_fields`, `lis
 Ruling (task 8): `knowledge_create_note` took `source_channel` "ai", which the `notes.source_channel` CHECK rejects, so the tool always failed; the channel now comes from the tool call's room id (`mcp`, the platform, or `web`). `knowledge_get_note` returns at most 8,000 characters and flags `truncated` — the chat path has no shared tool-output cap, and the agent engine's 2,000-character prompt cap would have made the tool useless. Cost if wrong: raise `GET_NOTE_MAX_CHARS` in `llm/tools/knowledge.rs`.
 
 Ruling (task 9): import writes each note in its own transaction (not batches of 100) — one invalid note must not roll back its neighbours, and personal-scale imports do not need batching — cost if wrong: a 5,000-note import is 5,000 small transactions. The global `RequestBodyLimitLayer(1 MB)` became `DefaultBodyLimit(1 MB)` plus a 20 MB `RequestBodyLimitLayer` backstop so the import route can lift its own limit; the Telegram webhook still caps its own body.
+
+Rulings R1–R6 (spec §0 and plan): R1 note bodies are capped at 100,000 characters; R2 Markdown parsing lives in `application/knowledge/markdown.rs`; R3 archived notes are excluded from search unless `include_archived`; R4 the degraded-search signal is the `X-Search-Mode` header; R5 columns stay `owner_id`; R6 the inference embeddings handler was a byte-folding placeholder and now runs the real `multilingual-e5-small`. The pgvector bullet in §5 describes the fused lexical + vector search; before R6 the vectors were meaningless, so retrieval quality only starts once the operator steps below are done.
+
+Operator steps (user-gated, none done): (1) confirm the runbook query above returns 0 in each environment; (2) deploy `matrix-bot-inference` — first start downloads the ~135 MB model into `EMBEDDING_MODEL_DIR` (a persisted volume) and verifies its SHA-256; (3) deploy the backend with `EMBEDDING_MODEL=multilingual-e5-small`, which applies `0012`–`0014` and lets `knowledge.backfill_embeddings` re-embed every chunk (keyword search covers the gap); (4) optionally rehearse the migrations on a production copy first.
+
+Ruling (task 11): `Config::validate` moved to `config/validate.rs` — `config/mod.rs` was already 508 production lines on `master` and the branch pushed it to 521; the split is behaviour-neutral. The export repository function is `export_documents` (it was `list_documents`, the name of the temporary task 2 helper the plan wanted gone). `get_item_content_for_embedding` no longer has a note arm: notes are indexed through `get_note_for_indexing`, so the arm returns an error instead of embedding raw Markdown. `LocalOnnxEmbeddingClient`'s fallback model is `multilingual-e5-small`, not `bge-small-en-v1.5`.
 
 Local test DB note: `CREATE EXTENSION vector` / `pg_trgm` race between parallel tests on a fresh server and land in a test schema. Create both once in `public` (`CREATE EXTENSION vector SCHEMA public; CREATE EXTENSION pg_trgm SCHEMA public;`) before the first `cargo test`.
 
@@ -187,7 +193,7 @@ Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in exact seque
 
 ### Track 2: Post-Cutover Enhancements & Technical Debt
 
-0. **Notes refactor (next up, plan ready, not started):** design [`specs/2026-10-08-second-brain-refactor-design.md`](specs/2026-10-08-second-brain-refactor-design.md) (approved 2026-10-09), plan [`plans/2026-10-09-notes-refactor.md`](plans/2026-10-09-notes-refactor.md), branch `feat/notes-refactor`. PostgreSQL stays the content store (Markdown files as a store were rejected); derived FTS/trigram/excerpt columns; RRF search with lexical fallback; `multilingual-e5-small`; relabel "Second Brain" → "Notes".
+0. **Notes refactor (implemented on `feat/notes-refactor`; merge and operator steps pending, §3b):** design [`specs/2026-10-08-second-brain-refactor-design.md`](specs/2026-10-08-second-brain-refactor-design.md) (approved 2026-10-09), plan [`plans/2026-10-09-notes-refactor.md`](plans/2026-10-09-notes-refactor.md), branch `feat/notes-refactor`. PostgreSQL stays the content store (Markdown files as a store were rejected); derived FTS/trigram/excerpt columns; RRF search with lexical fallback; `multilingual-e5-small`; relabel "Second Brain" → "Notes".
    - Ruling: the inference `/v1/embeddings` handler now runs the real int8 `multilingual-e5-small` (ONNX + `tokenizers`, mean-pooled, L2-normalised, 384-d), downloaded on first start and SHA-256 verified. It adds no e5 prefixes; the backend applies `query: ` / `passage: ` (`embedding_prefixes`). Vectors written by the old byte-folding placeholder are meaningless: set `EMBEDDING_MODEL=multilingual-e5-small` on the backend and the backfill re-embeds every chunk (Track 1 operator step; keyword search covers the gap).
 
 1. **Deep Procedural Pipelines for Built-in Agent Tasks (`backend/src/domain/agent/task.rs`):**

@@ -110,22 +110,42 @@ Migration `0011_knowledge_base` introduces the personal knowledge base and vecto
 - **`notes` table:**
   - `id BIGSERIAL PRIMARY KEY`
   - `owner_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE`
-  - `title TEXT NOT NULL`, `content TEXT NOT NULL`, `format TEXT NOT NULL DEFAULT 'markdown'`
+  - `title TEXT NOT NULL`, `content TEXT NOT NULL` (Markdown, the single source of truth), `format TEXT NOT NULL DEFAULT 'markdown'` (only `markdown` is allowed; kept for API compatibility)
   - `source_channel TEXT NOT NULL DEFAULT 'web'`, `source_ref TEXT`
   - `tags TEXT[] NOT NULL DEFAULT '{}'`
   - `is_archived BOOLEAN NOT NULL DEFAULT FALSE`
   - `created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`, `updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
-  - Indexes: `idx_notes_owner_updated (owner_id, updated_at DESC)`, `idx_notes_tags USING GIN (tags)`, `idx_notes_search USING GIN (to_tsvector('english', title || ' ' || content))`.
+  - Indexes: `idx_notes_owner_updated (owner_id, updated_at DESC)`, `idx_notes_tags USING GIN (tags)`. The full-text and trigram indexes are described under *Notes: derived columns* below.
 - **`knowledge_embeddings` table:**
   - `id BIGSERIAL PRIMARY KEY`
   - `owner_id UUID NOT NULL REFERENCES accounts(id) ON DELETE CASCADE`
   - `item_type TEXT NOT NULL`, `item_id BIGINT NOT NULL`, `chunk_index INTEGER NOT NULL DEFAULT 0`
   - `content_chunk TEXT NOT NULL`
-  - `embedding vector(384) NOT NULL` (sized for `bge-small-en-v1.5` / `all-MiniLM-L6-v2`)
+  - `embedding vector(384) NOT NULL` (sized for `multilingual-e5-small`)
+  - `embedding_model TEXT NOT NULL` (added in `0013`): the model that produced the chunk; search only compares vectors of the configured `EMBEDDING_MODEL`, and a chunk of any other model is re-embedded by the backfill
   - `created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
   - Unique constraint: `UNIQUE (owner_id, item_type, item_id, chunk_index)`
   - Vector Index: `idx_knowledge_embeddings_vector USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64)`.
 - **Ownership & Account Merge:** Both `notes` and `knowledge_embeddings` are listed in `OWNED_TABLES` (`domain/accounts/mod.rs`), so an account merge safely cascades and reassigns all notes and vector embeddings to the surviving account.
+
+### Notes: derived columns (`0012`–`0014`)
+
+`notes.content` holds the Markdown and nothing else is authoritative. Everything search needs is **derived from it by the service on every write** (`application/knowledge/markdown.rs::derive`) and can be rebuilt from it:
+
+| Column | Meaning |
+|---|---|
+| `content_hash` | SHA-256 of the UTF-8 body, lowercase hex. The optimistic-concurrency token (`expected_content_hash`) and the indexing skip check. |
+| `search_text` | The body as plain text (syntax, HTML and URLs dropped). What full-text and trigram search and the embedder read. |
+| `excerpt` | The first 200 characters of `search_text`, whitespace collapsed. What lists show, so a list never loads a body. |
+| `note_type` | `note`, `idea`, `fact`, `observation` or `decision` (CHECK constraint). |
+| `search_vector` | Generated, stored `tsvector`: `title` (weight A) and `search_text` (weight B) under the `simple` configuration, with a GIN index. `simple` keeps CJK runs as single tokens, so CJK matching goes through the trigram path. |
+| `indexed_content_hash`, `indexed_at` | The body hash the stored embedding chunks were built from. The backfill re-embeds a note whose `indexed_content_hash` differs from `content_hash` (a rename clears it too, because the title is part of every chunk). |
+
+`0012` rewrites `format` to `markdown` (guarded, data only), `0013` adds the columns, `pg_trgm` and the indexes, and `0014` makes `content_hash`, `search_text` and `excerpt` NOT NULL and rebuilds the generated column and trigram index over `search_text` alone. `0014` aborts naming up to 20 note ids if any column is still NULL, which means the previous release's backfill did not finish (runbook in `docs/superpowers/HANDOFF.md`).
+
+`pg_trgm` and `vector` come from the `pgvector/pgvector` image's contrib set; the trigram GIN index covers `title || ' ' || search_text`, which is the exact expression the `ILIKE` and `word_similarity` queries use, so a query must keep that expression to use it.
+
+**Rebuild invariant.** Embeddings are derived data. Deleting every row of `knowledge_embeddings` and clearing `notes.indexed_content_hash` loses nothing: `knowledge.backfill_embeddings` re-queues every item and the chunks come back identical (a test pins this). The same path re-tags everything after an `EMBEDDING_MODEL` change.
 
 ## Migrations
 

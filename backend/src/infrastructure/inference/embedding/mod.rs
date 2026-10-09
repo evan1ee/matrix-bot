@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use thiserror::Error;
 
+use crate::domain::knowledge::search::DEFAULT_EMBEDDING_MODEL;
+
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
 
 #[derive(Debug, Error)]
@@ -63,7 +65,7 @@ impl LocalOnnxEmbeddingClient {
         let base_url = base_url
             .map(|u| u.trim().trim_end_matches('/').to_string())
             .filter(|u| !u.is_empty());
-        let model = model.unwrap_or_else(|| "bge-small-en-v1.5".to_string());
+        let model = model.unwrap_or_else(|| DEFAULT_EMBEDDING_MODEL.to_string());
         let http = reqwest::Client::builder()
             .timeout(DEFAULT_TIMEOUT)
             .build()
@@ -292,7 +294,7 @@ mod tests {
                 Json(serde_json::json!({
                     "object": "list",
                     "data": data,
-                    "model": "bge-small-en-v1.5",
+                    "model": "multilingual-e5-small",
                     "usage": { "prompt_tokens": 10, "total_tokens": 10 }
                 }))
             }),

@@ -63,7 +63,7 @@ impl NoteService {
         let fetch = i64::try_from(max_notes)
             .unwrap_or(i64::MAX)
             .saturating_add(1);
-        let documents = repositories::knowledge::list_documents(&self.pool, owner, fetch).await?;
+        let documents = repositories::knowledge::export_documents(&self.pool, owner, fetch).await?;
         if documents.len() > max_notes {
             return Err(AppError::Validation(format!(
                 "too many notes to export at once (limit {max_notes})"
