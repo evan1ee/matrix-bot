@@ -122,7 +122,7 @@ Personal notes and semantic search endpoints are mounted under `/api/v1`:
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| `GET` | `/api/v1/notes` | Session / Bearer | List `NoteSummary` items (metadata and an `excerpt`; never `content`) with optional `?archived=bool`, `?tag=string`, `?limit=n` |
+| `GET` | `/api/v1/notes` | Session / Bearer | List `NoteSummary` items (metadata and an `excerpt`; never `content`) with optional `?archived=bool`, `?tag=string`, `?search=text` (case-insensitive substring of title or body, literal, at most 200 characters, 400 beyond), `?limit=n` |
 | `POST` | `/api/v1/notes` | Session / Bearer | Create note (`CreateNoteInput: { title, content, note_type?, tags?, format? }`); `format` is accepted and ignored, an unknown `note_type` is a 400. Returns `Note` |
 | `GET` | `/api/v1/notes/tags` | Session / Bearer | List all unique tags used across notes |
 | `GET` | `/api/v1/notes/:id` | Session / Bearer | Fetch one `Note`: the summary fields plus `content` (Markdown) and `format` (always `"markdown"`) |

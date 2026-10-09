@@ -275,13 +275,19 @@ pub async fn lock_note_for_update(
 }
 
 /// Metadata only: this query never selects `content`.
+///
+/// `search` is plain text matched as a case-insensitive substring of the
+/// title or body (wildcards escaped), the same expression the `pg_trgm` index
+/// on `notes` covers.
 pub async fn list_notes(
     executor: impl PgExecutor<'_>,
     owner: &AccountId,
     tag_filter: Option<&str>,
+    search: Option<&str>,
     include_archived: bool,
     limit: i64,
 ) -> Result<Vec<Note>, sqlx::Error> {
+    let search_pattern = search.map(super::retrieval::like_pattern);
     let rows = sqlx::query_as!(
         NoteRow,
         r#"
@@ -294,13 +300,15 @@ pub async fn list_notes(
         WHERE owner_id = $1
           AND ($2::TEXT IS NULL OR $2 = ANY(tags))
           AND ($3::BOOLEAN OR is_archived = FALSE)
+          AND ($5::TEXT IS NULL OR (title || ' ' || COALESCE(search_text, content)) ILIKE $5)
         ORDER BY updated_at DESC
         LIMIT $4
         "#,
         owner.as_uuid(),
         tag_filter,
         include_archived,
-        limit
+        limit,
+        search_pattern
     )
     .fetch_all(executor)
     .await?;
@@ -597,12 +605,12 @@ mod tests {
         assert_eq!(updated.excerpt, "Updated focus tactics");
 
         // List notes with tag filter
-        let list_filtered = list_notes(&pool, &alice, Some("focus"), false, 10)
+        let list_filtered = list_notes(&pool, &alice, Some("focus"), None, false, 10)
             .await
             .expect("list notes");
         assert_eq!(list_filtered.len(), 1);
 
-        let list_unmatched = list_notes(&pool, &alice, Some("nonexistent"), false, 10)
+        let list_unmatched = list_notes(&pool, &alice, Some("nonexistent"), None, false, 10)
             .await
             .expect("list notes");
         assert_eq!(list_unmatched.len(), 0);
@@ -613,12 +621,12 @@ mod tests {
             .expect("archive note");
         assert!(archived);
 
-        let list_active = list_notes(&pool, &alice, None, false, 10)
+        let list_active = list_notes(&pool, &alice, None, None, false, 10)
             .await
             .expect("list active");
         assert_eq!(list_active.len(), 0);
 
-        let list_all = list_notes(&pool, &alice, None, true, 10)
+        let list_all = list_notes(&pool, &alice, None, None, true, 10)
             .await
             .expect("list all");
         assert_eq!(list_all.len(), 1);
@@ -652,7 +660,9 @@ mod tests {
         .await
         .unwrap();
 
-        let listed = list_notes(&pool, &alice, None, false, 10).await.unwrap();
+        let listed = list_notes(&pool, &alice, None, None, false, 10)
+            .await
+            .unwrap();
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].content_hash.as_str(), ABC_HASH);
         assert_eq!(listed[0].excerpt, "abc");

@@ -6951,6 +6951,8 @@ export interface operations {
             query?: {
                 /** @description Filter by tag */
                 tag?: string | null;
+                /** @description Text the title or body must contain (case-insensitive) */
+                search?: string | null;
                 /** @description Filter by archived state */
                 archived?: boolean | null;
                 /** @description Max results (1-100) */

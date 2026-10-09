@@ -124,6 +124,8 @@ impl UpdateNoteInput {
 #[derive(Debug, Clone, Deserialize, ToSchema, Default)]
 pub struct NoteQuery {
     pub tag: Option<String>,
+    /// Case-insensitive text to find in the title or body (at most 200 characters).
+    pub search: Option<String>,
     pub archived: Option<bool>,
     pub limit: Option<i64>,
 }
@@ -166,6 +168,7 @@ impl From<crate::domain::knowledge::search::SearchResultItem> for SearchResultIt
     path = "/api/v1/notes",
     params(
         ("tag" = Option<String>, Query, description = "Filter by tag"),
+        ("search" = Option<String>, Query, description = "Text the title or body must contain (case-insensitive)"),
         ("archived" = Option<bool>, Query, description = "Filter by archived state"),
         ("limit" = Option<i64>, Query, description = "Max results (1-100)")
     ),
@@ -183,6 +186,7 @@ pub async fn list_notes(
         .list(
             &user.account_id,
             query.tag.as_deref(),
+            query.search.as_deref(),
             query.archived.unwrap_or(false),
             query.limit.unwrap_or(50),
         )
@@ -545,6 +549,42 @@ mod tests {
         assert_eq!(first["excerpt"], "Heading Borrow checker rules");
         assert_eq!(first["note_type"], "note");
         assert_eq!(first["content_hash"].as_str().unwrap().len(), 64);
+    }
+
+    #[tokio::test]
+    async fn the_list_filters_by_title_or_body_text() {
+        let (state, user) = mock_state().await;
+        for (title, body) in [("Ownership", "borrow checker"), ("Pasta", "tomato sauce")] {
+            let _created = create_note(
+                user.clone(),
+                State(state.clone()),
+                create_input(title, body, None),
+            )
+            .await
+            .expect("create");
+        }
+        let search = |text: &str| {
+            Query(NoteQuery {
+                search: Some(text.to_string()),
+                ..NoteQuery::default()
+            })
+        };
+
+        let Json(by_body) = list_notes(user.clone(), State(state.clone()), search("TOMATO"))
+            .await
+            .expect("search by body");
+        assert_eq!(by_body.len(), 1);
+        assert_eq!(by_body[0].title, "Pasta");
+
+        let Json(by_title) = list_notes(user.clone(), State(state.clone()), search("owner"))
+            .await
+            .expect("search by title");
+        assert_eq!(by_title[0].title, "Ownership");
+
+        let err = list_notes(user, State(state), search(&"a".repeat(201)))
+            .await
+            .expect_err("oversized search");
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
     }
 
     #[tokio::test]

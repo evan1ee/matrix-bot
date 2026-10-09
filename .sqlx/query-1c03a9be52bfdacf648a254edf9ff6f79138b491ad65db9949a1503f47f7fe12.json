@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id, owner_id, title, note_type, source_channel, source_ref, tags,\n            COALESCE(excerpt, left(content, 200)) AS \"excerpt!\",\n            COALESCE(content_hash, encode(sha256(convert_to(content, 'UTF8')), 'hex')) AS \"content_hash!\",\n            is_archived, created_at, updated_at, indexed_at\n        FROM notes\n        WHERE owner_id = $1\n          AND ($2::TEXT IS NULL OR $2 = ANY(tags))\n          AND ($3::BOOLEAN OR is_archived = FALSE)\n        ORDER BY updated_at DESC\n        LIMIT $4\n        ",
+  "query": "\n        SELECT\n            id, owner_id, title, note_type, source_channel, source_ref, tags,\n            COALESCE(excerpt, left(content, 200)) AS \"excerpt!\",\n            COALESCE(content_hash, encode(sha256(convert_to(content, 'UTF8')), 'hex')) AS \"content_hash!\",\n            is_archived, created_at, updated_at, indexed_at\n        FROM notes\n        WHERE owner_id = $1\n          AND ($2::TEXT IS NULL OR $2 = ANY(tags))\n          AND ($3::BOOLEAN OR is_archived = FALSE)\n          AND ($5::TEXT IS NULL OR (title || ' ' || COALESCE(search_text, content)) ILIKE $5)\n        ORDER BY updated_at DESC\n        LIMIT $4\n        ",
   "describe": {
     "columns": [
       {
@@ -142,7 +142,8 @@
         "Uuid",
         "Text",
         "Bool",
-        "Int8"
+        "Int8",
+        "Text"
       ]
     },
     "nullable": [
@@ -161,5 +162,5 @@
       true
     ]
   },
-  "hash": "6aaf9d4a3771dc89c2ed18059dec974c8ca441cd299c9574ff224bdfb605ab51"
+  "hash": "1c03a9be52bfdacf648a254edf9ff6f79138b491ad65db9949a1503f47f7fe12"
 }

@@ -41,6 +41,23 @@ fn not_found() -> AppError {
     AppError::NotFound("Note not found".to_string())
 }
 
+/// Longest text filter a list accepts; the filter scans the owner's notes, so
+/// it is bounded like every other user-supplied string.
+const MAX_SEARCH_LEN: usize = 200;
+
+/// Trims a list filter; blank means "no filter".
+fn normalize_search(search: Option<&str>) -> Result<Option<&str>, AppError> {
+    let Some(trimmed) = search.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(None);
+    };
+    if trimmed.chars().count() > MAX_SEARCH_LEN {
+        return Err(AppError::Validation(format!(
+            "search text must be at most {MAX_SEARCH_LEN} characters"
+        )));
+    }
+    Ok(Some(trimmed))
+}
+
 impl NoteService {
     pub fn new(pool: PgPool) -> Self {
         Self { pool }
@@ -144,20 +161,28 @@ impl NoteService {
             .ok_or_else(not_found)
     }
 
-    /// Lists note metadata for `owner` with an optional tag filter. Never
-    /// loads a body.
+    /// Lists note metadata for `owner`, optionally narrowed to a tag and to
+    /// notes whose title or body contains `search` (case-insensitive, literal).
+    /// Never loads a body. Blank `search` means no text filter.
     pub async fn list(
         &self,
         owner: &AccountId,
         tag: Option<&str>,
+        search: Option<&str>,
         include_archived: bool,
         limit: i64,
     ) -> Result<Vec<Note>, AppError> {
         let limit = limit.clamp(1, 100);
-        Ok(
-            repositories::knowledge::list_notes(&self.pool, owner, tag, include_archived, limit)
-                .await?,
+        let search = normalize_search(search)?;
+        Ok(repositories::knowledge::list_notes(
+            &self.pool,
+            owner,
+            tag,
+            search,
+            include_archived,
+            limit,
         )
+        .await?)
     }
 
     /// Fills the derived columns (hash, plain text, excerpt) of up to `batch`
@@ -412,7 +437,7 @@ mod tests {
 
         // List
         let list = svc
-            .list(&alice, Some("habits"), false, 10)
+            .list(&alice, Some("habits"), None, false, 10)
             .await
             .expect("list notes");
         assert_eq!(list.len(), 1);
@@ -423,7 +448,11 @@ mod tests {
             .await
             .expect("archive note");
         assert!(archived.is_archived);
-        assert!(svc.list(&alice, None, false, 10).await.unwrap().is_empty());
+        assert!(svc
+            .list(&alice, None, None, false, 10)
+            .await
+            .unwrap()
+            .is_empty());
 
         // Delete
         svc.delete_note(&alice, note.id.0)
@@ -701,7 +730,11 @@ mod tests {
 
         assert!(event_types(&pool).await.is_empty());
         assert_eq!(embed_jobs(&pool).await, 0);
-        assert!(svc.list(&alice, None, true, 10).await.unwrap().is_empty());
+        assert!(svc
+            .list(&alice, None, None, true, 10)
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]
@@ -727,7 +760,11 @@ mod tests {
             svc.append(&bob, note.id.0, "x").await,
             Err(AppError::NotFound(_))
         ));
-        assert!(svc.list(&bob, None, true, 10).await.unwrap().is_empty());
+        assert!(svc
+            .list(&bob, None, None, true, 10)
+            .await
+            .unwrap()
+            .is_empty());
         assert_eq!(
             svc.get(&alice, note.id.0).await.unwrap().markdown,
             "private"
@@ -934,5 +971,105 @@ mod tests {
             derived_columns(&pool, id).await.1.as_deref(),
             Some("fresh body")
         );
+    }
+
+    async fn titles(svc: &NoteService, owner: &AccountId, search: &str) -> Vec<String> {
+        let mut titles: Vec<String> = svc
+            .list(owner, None, Some(search), false, 50)
+            .await
+            .expect("list with search")
+            .into_iter()
+            .map(|n| n.title)
+            .collect();
+        titles.sort();
+        titles
+    }
+
+    async fn seed_search_notes(svc: &NoteService, owner: &AccountId) {
+        for (title, body, tags) in [
+            (
+                "Rust ownership",
+                "The borrow checker enforces aliasing rules",
+                vec!["rust"],
+            ),
+            ("Sauce", "100% tomato_sauce with basil", vec!["food"]),
+            ("垫子", "猫坐在垫子上", vec!["rust"]),
+        ] {
+            let tags = tags.into_iter().map(str::to_string).collect();
+            svc.create(owner, NewNote::new(title, body).tags(tags))
+                .await
+                .expect("seed note");
+        }
+    }
+
+    #[tokio::test]
+    async fn list_search_matches_title_and_body_ignoring_case() {
+        let pool = test_pool().await;
+        let (svc, alice) = setup(&pool).await;
+        seed_search_notes(&svc, &alice).await;
+
+        assert_eq!(titles(&svc, &alice, "OWNERSHIP").await, ["Rust ownership"]);
+        assert_eq!(
+            titles(&svc, &alice, "borrow checker").await,
+            ["Rust ownership"]
+        );
+        assert_eq!(titles(&svc, &alice, "垫子").await, ["垫子"]);
+        assert!(titles(&svc, &alice, "nothing like this").await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_search_treats_like_wildcards_literally() {
+        let pool = test_pool().await;
+        let (svc, alice) = setup(&pool).await;
+        seed_search_notes(&svc, &alice).await;
+
+        assert_eq!(titles(&svc, &alice, "100%").await, ["Sauce"]);
+        assert_eq!(titles(&svc, &alice, "tomato_sauce").await, ["Sauce"]);
+        // `_` as a wildcard would match "bor" in "borrow".
+        assert!(titles(&svc, &alice, "b_r").await.is_empty());
+        // `%` as a wildcard would match everything.
+        assert!(titles(&svc, &alice, "%zzz").await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_search_combines_with_tag_and_ignores_blank_text() {
+        let pool = test_pool().await;
+        let (svc, alice) = setup(&pool).await;
+        seed_search_notes(&svc, &alice).await;
+
+        let both = svc
+            .list(&alice, Some("rust"), Some("垫子"), false, 50)
+            .await
+            .unwrap();
+        assert_eq!(both.len(), 1);
+        let none = svc
+            .list(&alice, Some("food"), Some("ownership"), false, 50)
+            .await
+            .unwrap();
+        assert!(none.is_empty());
+        assert_eq!(titles(&svc, &alice, "   ").await.len(), 3);
+    }
+
+    #[tokio::test]
+    async fn list_search_never_crosses_owners() {
+        let pool = test_pool().await;
+        let (svc, alice) = setup(&pool).await;
+        seed_search_notes(&svc, &alice).await;
+        let bob = AccountId::generate();
+        seed_account(&pool, &bob).await;
+
+        assert!(titles(&svc, &bob, "ownership").await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_search_rejects_an_oversized_query() {
+        let pool = test_pool().await;
+        let (svc, alice) = setup(&pool).await;
+
+        let err = svc
+            .list(&alice, None, Some(&"a".repeat(201)), false, 10)
+            .await
+            .expect_err("a 201 character search");
+        assert!(matches!(err, AppError::Validation(_)), "got {err:?}");
     }
 }

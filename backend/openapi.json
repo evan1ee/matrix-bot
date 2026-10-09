@@ -4378,6 +4378,16 @@
             }
           },
           {
+            "name": "search",
+            "in": "query",
+            "description": "Text the title or body must contain (case-insensitive)",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          },
+          {
             "name": "archived",
             "in": "query",
             "description": "Filter by archived state",

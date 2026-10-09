@@ -245,7 +245,7 @@ async fn handle_quoted_note(
 }
 
 async fn handle_list(services: &AppServices, owner: &AccountId, tag: Option<&str>) -> String {
-    match services.notes.list(owner, tag, false, 10).await {
+    match services.notes.list(owner, tag, None, false, 10).await {
         Ok(notes) if notes.is_empty() => {
             if let Some(t) = tag {
                 format!(
@@ -549,7 +549,11 @@ mod tests {
         assert!(!reply_search.html_body().contains("keyword results only"));
 
         // After embedding the note, search returns results
-        let notes = services.notes.list(&alice, None, false, 10).await.unwrap();
+        let notes = services
+            .notes
+            .list(&alice, None, None, false, 10)
+            .await
+            .unwrap();
         services
             .knowledge_search
             .embed_item(

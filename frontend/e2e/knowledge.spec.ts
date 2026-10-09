@@ -85,6 +85,27 @@ test.describe('Notes', () => {
     await expect(app.getByText('Design Note')).toBeVisible();
   });
 
+  test('the filter box narrows the list through the search parameter', async ({ app, api }) => {
+    api.seedNote({ title: 'Rust Note', content: 'About borrow checker' });
+    api.seedNote({ title: 'Design Note', content: 'About typography' });
+    const searches: string[] = [];
+    app.on('request', (req) => {
+      const url = new URL(req.url());
+      if (url.pathname === '/api/v1/notes' && url.searchParams.has('search')) {
+        searches.push(url.searchParams.get('search') ?? '');
+      }
+    });
+
+    await gotoKnowledge(app);
+    await expect(app.getByText('Design Note')).toBeVisible();
+
+    await app.getByTestId('notes-search-input').fill('borrow');
+
+    await expect(app.getByText('Rust Note')).toBeVisible();
+    await expect(app.getByText('Design Note')).not.toBeVisible();
+    expect(searches).toContain('borrow');
+  });
+
   test('deletes a note with confirmation modal', async ({ app, api }) => {
     const note = api.seedNote({ title: 'Note to be deleted', content: 'Ephemeral snippet' });
 

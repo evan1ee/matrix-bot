@@ -77,7 +77,7 @@ pub async fn search_notes_fts(
 }
 
 /// Escapes `%`, `_` and `\` so `query` matches literally inside an `ILIKE`.
-fn like_pattern(query: &str) -> String {
+pub(super) fn like_pattern(query: &str) -> String {
     let mut pattern = String::with_capacity(query.len() + 2);
     pattern.push('%');
     for c in query.chars() {
