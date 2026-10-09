@@ -7,6 +7,8 @@ export type Note = components['schemas']['Note'];
 export type CreateNoteInput = components['schemas']['CreateNoteInput'];
 export type UpdateNoteInput = components['schemas']['UpdateNoteInput'];
 export type SearchResultItem = components['schemas']['SearchResultItem'];
+/** What an import did: notes created and updated, and files it skipped with a reason. */
+export type ImportReport = components['schemas']['ImportReportDto'];
 export type KnowledgeSearchRequest = components['schemas']['KnowledgeSearchRequest'];
 
 /** Mirrors `domain::knowledge::note::NoteType`. */

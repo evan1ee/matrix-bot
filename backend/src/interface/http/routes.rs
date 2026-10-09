@@ -1,13 +1,15 @@
 use axum::{
+    extract::DefaultBodyLimit,
     routing::{delete, get, patch, post, put},
     Router,
 };
 
 use super::{
     account, agent, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_categories,
-    finance_net_worth, footprints, habits, identities, knowledge, life, life_activity, link, mcp,
-    ocr, openapi, portfolio, portfolio_alerts, portfolio_cash, portfolio_history, portfolio_prices,
-    recurring_bills, reminders, rooms, settings, sse, storage, todos, voice, webhooks,
+    finance_net_worth, footprints, habits, identities, knowledge, knowledge_transfer, life,
+    life_activity, link, mcp, ocr, openapi, portfolio, portfolio_alerts, portfolio_cash,
+    portfolio_history, portfolio_prices, recurring_bills, reminders, rooms, settings, sse, storage,
+    todos, voice, webhooks,
 };
 
 /// The API route table.
@@ -173,6 +175,13 @@ fn routes_productivity() -> Router<auth::ApiState> {
             get(knowledge::list_notes).post(knowledge::create_note),
         )
         .route("/notes/tags", get(knowledge::list_tags))
+        .route("/notes/export", get(knowledge_transfer::export_notes))
+        .route(
+            "/notes/import",
+            post(knowledge_transfer::import_notes).layer(DefaultBodyLimit::max(
+                knowledge_transfer::IMPORT_BODY_LIMIT_BYTES,
+            )),
+        )
         .route(
             "/notes/:id",
             get(knowledge::get_note)

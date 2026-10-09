@@ -5,6 +5,7 @@ import { NoteCard } from './NoteCard';
 import { NoteEditorModal } from './NoteEditorModal';
 import type { NoteEditorSave } from './NoteEditorModal';
 import { KnowledgeSearchPanel } from './KnowledgeSearchPanel';
+import { NotesTransfer } from './NotesTransfer';
 import { TagFilterChips } from './TagFilterChips';
 import { ConfirmModal } from '../../components/ConfirmModal';
 import type { NoteSummary, SearchResultItem } from './types';
@@ -151,6 +152,8 @@ export const KnowledgeMainView: React.FC = () => {
           </button>
         </div>
       </div>
+
+      <NotesTransfer />
 
       {/* Semantic Hybrid Search Panel */}
       {showHybridSearch && (

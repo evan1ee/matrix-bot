@@ -246,6 +246,36 @@ pub async fn get_note_document(
     row.map(NoteDocument::try_from).transpose()
 }
 
+/// Every note of `owner` with its body, archived ones included, oldest id
+/// first. For export: the caller passes a cap and treats a full page as
+/// "maybe more".
+pub async fn list_documents(
+    executor: impl PgExecutor<'_>,
+    owner: &AccountId,
+    limit: i64,
+) -> Result<Vec<NoteDocument>, sqlx::Error> {
+    let rows = sqlx::query_as!(
+        NoteDocumentRow,
+        r#"
+        SELECT
+            id, owner_id, title, content, note_type, source_channel, source_ref, tags,
+            COALESCE(excerpt, left(content, 200)) AS "excerpt!",
+            COALESCE(content_hash, encode(sha256(convert_to(content, 'UTF8')), 'hex')) AS "content_hash!",
+            is_archived, created_at, updated_at, indexed_at
+        FROM notes
+        WHERE owner_id = $1
+        ORDER BY id
+        LIMIT $2
+        "#,
+        owner.as_uuid(),
+        limit
+    )
+    .fetch_all(executor)
+    .await?;
+
+    rows.into_iter().map(NoteDocument::try_from).collect()
+}
+
 /// Loads a note with its body and locks the row until the transaction ends, so
 /// a read-modify-write on the body cannot interleave with another writer.
 pub async fn lock_note_for_update(

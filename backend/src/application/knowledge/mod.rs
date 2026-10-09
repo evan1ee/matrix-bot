@@ -5,13 +5,16 @@
 
 mod indexing;
 pub mod markdown;
+mod note_file;
 mod notes;
 mod retrieval;
 mod search;
+mod transfer;
 
 pub use notes::NoteService;
 pub use retrieval::SearchQuery;
 pub use search::SearchService;
+pub use transfer::{ExportFile, ImportFile, ImportReport, SkippedFile, MAX_EXPORT_NOTES};
 
 use crate::application::AppError;
 use crate::domain::knowledge::error::KnowledgeError;

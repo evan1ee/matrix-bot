@@ -32,8 +32,8 @@ use crate::interface::http::todos::{TodoItem, TodoPriority};
 use crate::interface::http::webhooks::{TelegramMessageResult, TelegramQuery, TelegramResponse};
 use crate::interface::http::{
     account, agent, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_categories,
-    finance_net_worth, footprints, habits, health, identities, knowledge, life, life_activity,
-    link, mcp, ocr, portfolio, portfolio_alerts, portfolio_cash, portfolio_history,
+    finance_net_worth, footprints, habits, health, identities, knowledge, knowledge_transfer, life,
+    life_activity, link, mcp, ocr, portfolio, portfolio_alerts, portfolio_cash, portfolio_history,
     portfolio_prices, recurring_bills, reminders, rooms, settings, sse, storage, todos, voice,
     webhooks,
 };
@@ -159,6 +159,8 @@ use crate::interface::http::{
         knowledge::update_note,
         knowledge::delete_note,
         knowledge::search_knowledge,
+        knowledge_transfer::export_notes,
+        knowledge_transfer::import_notes,
         mcp::list_mcp_tokens,
         mcp::create_mcp_token,
         mcp::delete_mcp_token,
@@ -337,6 +339,8 @@ use crate::interface::http::{
             knowledge::UpdateNoteInput,
             knowledge::KnowledgeSearchRequest,
             knowledge::SearchResultItem,
+            knowledge_transfer::ImportReportDto,
+            knowledge_transfer::SkippedFileDto,
             crate::interface::mcp::models::CreateMcpTokenRequest,
             crate::interface::mcp::models::CreateMcpTokenResponse,
             crate::interface::mcp::models::McpTokenSummary,

@@ -34,7 +34,7 @@ struct Change {
 /// Service managing user notes lifecycle and transactional outbox events.
 #[derive(Clone)]
 pub struct NoteService {
-    pool: PgPool,
+    pub(super) pool: PgPool,
 }
 
 fn not_found() -> AppError {

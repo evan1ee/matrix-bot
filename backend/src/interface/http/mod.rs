@@ -1,5 +1,6 @@
 use anyhow::Context;
 use axum::{
+    extract::DefaultBodyLimit,
     http::{header, HeaderValue, Method},
     routing::{get, post},
     Router,
@@ -10,6 +11,9 @@ use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tower_http::cors::CorsLayer;
 use tower_http::limit::RequestBodyLimitLayer;
+
+const DEFAULT_BODY_LIMIT_BYTES: usize = 1024 * 1024;
+const HARD_BODY_LIMIT_BYTES: usize = knowledge_transfer::IMPORT_BODY_LIMIT_BYTES;
 use tower_http::timeout::TimeoutLayer;
 use tower_http::trace::TraceLayer;
 use tracing::info;
@@ -36,10 +40,12 @@ pub mod identities;
 #[cfg(test)]
 mod identity_api_tests;
 pub mod knowledge;
+pub mod knowledge_transfer;
 pub mod life;
 pub mod life_activity;
 pub mod link;
 pub mod mcp;
+mod note_archive;
 pub mod ocr;
 pub mod openapi;
 pub mod portfolio;
@@ -177,7 +183,11 @@ pub fn start_api_server(
         .layer(cors)
         .layer(TraceLayer::new_for_http())
         .layer(TimeoutLayer::new(std::time::Duration::from_secs(180)))
-        .layer(RequestBodyLimitLayer::new(1024 * 1024)) // 1 MB
+        // Extractors stop at 1 MB unless a route raises it (note import);
+        // the outer layer is the hard backstop for handlers that read the
+        // body themselves.
+        .layer(DefaultBodyLimit::max(DEFAULT_BODY_LIMIT_BYTES))
+        .layer(RequestBodyLimitLayer::new(HARD_BODY_LIMIT_BYTES))
         .with_state(state);
 
     Ok(tokio::spawn(async move {
@@ -220,6 +230,8 @@ mod step_up_tests {
         ("POST", "/api/v1/account/recovery-codes"),
         ("DELETE", "/api/v1/account/passkeys/some-id"),
         ("PUT", "/api/v1/account/passkeys/some-id"),
+        ("GET", "/api/v1/notes/export"),
+        ("POST", "/api/v1/notes/import"),
     ];
 
     /// Routes an ordinary, hours-old session must still be able to use.

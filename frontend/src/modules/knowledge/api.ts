@@ -1,5 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { fetchApi, fetchApiResponse } from '../../core/apiClient';
+import { fetchApi, fetchApiBlob, fetchApiResponse } from '../../core/apiClient';
+import { filenameFromDisposition, saveBlob } from '../../core/download';
+import { useSensitiveAction } from '../../core/security';
 import type {
   Note,
   NoteSummary,
@@ -7,6 +9,7 @@ import type {
   UpdateNoteInput,
   SearchResultItem,
   KnowledgeSearchResponse,
+  ImportReport,
 } from './types';
 
 export function useNotes(filter?: { tag?: string | null; archived?: boolean; search?: string }) {
@@ -116,4 +119,27 @@ export function useDeleteNote() {
       queryClient.invalidateQueries({ queryKey: ['notes-tags'] });
     },
   });
+}
+
+/**
+ * Downloads every note as a zip of Markdown files. Needs a recently verified
+ * session, so a stale one is asked for a passkey and the download retried.
+ */
+export function useExportNotes() {
+  return useSensitiveAction<void, void>(async () => {
+    const { blob, headers } = await fetchApiBlob('/notes/export');
+    saveBlob(blob, filenameFromDisposition(headers.get('content-disposition')) ?? 'notes.zip');
+  });
+}
+
+/** Uploads a zip of Markdown files; same step-up handling as the export. */
+export function useImportNotes() {
+  return useSensitiveAction<File, ImportReport>(
+    (file) => {
+      const form = new FormData();
+      form.append('file', file);
+      return fetchApi<ImportReport>('/notes/import', { method: 'POST', body: form });
+    },
+    [['notes'], ['notes-tags']]
+  );
 }

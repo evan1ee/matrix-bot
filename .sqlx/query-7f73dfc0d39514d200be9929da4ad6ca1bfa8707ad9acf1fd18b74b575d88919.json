@@ -1,0 +1,175 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            id, owner_id, title, content, note_type, source_channel, source_ref, tags,\n            COALESCE(excerpt, left(content, 200)) AS \"excerpt!\",\n            COALESCE(content_hash, encode(sha256(convert_to(content, 'UTF8')), 'hex')) AS \"content_hash!\",\n            is_archived, created_at, updated_at, indexed_at\n        FROM notes\n        WHERE owner_id = $1\n        ORDER BY id\n        LIMIT $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "notes",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "owner_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "notes",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "notes",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "content",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "notes",
+            "name": "content"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "note_type",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "notes",
+            "name": "note_type"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "source_channel",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "notes",
+            "name": "source_channel"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "source_ref",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "notes",
+            "name": "source_ref"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "tags",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "notes",
+            "name": "tags"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "excerpt!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 9,
+        "name": "content_hash!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 10,
+        "name": "is_archived",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "notes",
+            "name": "is_archived"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "created_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "notes",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "updated_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "notes",
+            "name": "updated_at"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "indexed_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "notes",
+            "name": "indexed_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      null,
+      null,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "7f73dfc0d39514d200be9929da4ad6ca1bfa8707ad9acf1fd18b74b575d88919"
+}

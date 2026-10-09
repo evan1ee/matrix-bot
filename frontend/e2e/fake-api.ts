@@ -383,6 +383,14 @@ export class FakeApi {
   notes: FakeNote[] = [];
   /** The `X-Search-Mode` header `POST /knowledge/search` answers with. */
   searchMode: 'hybrid' | 'lexical' = 'hybrid';
+  /** What `POST /notes/import` answers with. */
+  importReport: {
+    created: number;
+    updated: number;
+    skipped: { file: string; reason: string }[];
+  } = { created: 0, updated: 0, skipped: [] };
+  /** File names of the zips `POST /notes/import` received. */
+  importedFileNames: string[] = [];
   nextNoteId = 1;
   rooms: FakeRoom[] = [
     { room_id: '!general:mbm.one', name: 'General' },
@@ -3078,6 +3086,26 @@ export class FakeApi {
     if (path === '/notes/tags' && method === 'GET') {
       const allTags = Array.from(new Set(this.notes.flatMap((n) => n.tags))).sort();
       return json(route, 200, allTags);
+    }
+
+    if (path === '/notes/export' && method === 'GET') {
+      return route.fulfill({
+        status: 200,
+        headers: {
+          'content-type': 'application/zip',
+          'content-disposition': 'attachment; filename="notes-2026-10-09.zip"',
+        },
+        // An empty zip: just its end-of-central-directory record.
+        body: Buffer.from('504b0506000000000000000000000000000000000000', 'hex'),
+      });
+    }
+
+    if (path === '/notes/import' && method === 'POST') {
+      // The body is multipart, so only the uploaded file's name is recorded.
+      const raw = route.request().postDataBuffer()?.toString('latin1') ?? '';
+      const name = raw.match(/filename="([^"]+)"/)?.[1];
+      if (name) this.importedFileNames.push(name);
+      return json(route, 200, this.importReport);
     }
 
     if (path === '/notes' && method === 'GET') {

@@ -1328,6 +1328,47 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/notes/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Downloads every note as `notes-<date>.zip`, one `notes/<slug>-<id>.md` per
+         * @description note with YAML frontmatter.
+         */
+        get: operations["export_notes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notes/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Imports the `*.md` files of an uploaded zip (multipart field `file`, at most
+         * @description 20 MB, 5,000 entries, 1 MB per entry and 100 MB unpacked). A file whose `id`
+         *     is one of the caller's notes updates it; any other id creates a new note.
+         */
+        post: operations["import_notes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/notes/tags": {
         parameters: {
             query?: never;
@@ -2674,6 +2715,11 @@ export interface components {
         IdentityListResponse: {
             identities: components["schemas"]["IdentityDto"][];
         };
+        ImportReportDto: {
+            created: number;
+            skipped: components["schemas"]["SkippedFileDto"][];
+            updated: number;
+        };
         InboundAcceptedResponse: {
             outbox_id: string;
             status: string;
@@ -3275,6 +3321,10 @@ export interface components {
         ShareRequest: {
             is_enabled: boolean;
             title?: string | null;
+        };
+        SkippedFileDto: {
+            file: string;
+            reason: string;
         };
         StartAgentRunRequest: {
             goal: string;
@@ -6994,6 +7044,71 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Note"];
                 };
+            };
+        };
+    };
+    export_notes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description A zip archive of Markdown files (application/zip) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description More notes than one export holds */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The session needs to be verified again */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    import_notes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportReportDto"];
+                };
+            };
+            /** @description Not a zip, or over one of the archive limits */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The session needs to be verified again */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

@@ -4464,6 +4464,65 @@
         ]
       }
     },
+    "/api/v1/notes/export": {
+      "get": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Downloads every note as `notes-<date>.zip`, one `notes/<slug>-<id>.md` per",
+        "description": "note with YAML frontmatter.",
+        "operationId": "export_notes",
+        "responses": {
+          "200": {
+            "description": "A zip archive of Markdown files (application/zip)"
+          },
+          "400": {
+            "description": "More notes than one export holds"
+          },
+          "403": {
+            "description": "The session needs to be verified again"
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/notes/import": {
+      "post": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Imports the `*.md` files of an uploaded zip (multipart field `file`, at most",
+        "description": "20 MB, 5,000 entries, 1 MB per entry and 100 MB unpacked). A file whose `id`\nis one of the caller's notes updates it; any other id creates a new note.",
+        "operationId": "import_notes",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ImportReportDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Not a zip, or over one of the archive limits"
+          },
+          "403": {
+            "description": "The session needs to be verified again"
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/notes/tags": {
       "get": {
         "tags": [
@@ -9267,6 +9326,30 @@
           }
         }
       },
+      "ImportReportDto": {
+        "type": "object",
+        "required": [
+          "created",
+          "updated",
+          "skipped"
+        ],
+        "properties": {
+          "created": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "skipped": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/SkippedFileDto"
+            }
+          },
+          "updated": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
       "InboundAcceptedResponse": {
         "type": "object",
         "required": [
@@ -11069,6 +11152,21 @@
           "title": {
             "type": "string",
             "nullable": true
+          }
+        }
+      },
+      "SkippedFileDto": {
+        "type": "object",
+        "required": [
+          "file",
+          "reason"
+        ],
+        "properties": {
+          "file": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
           }
         }
       },

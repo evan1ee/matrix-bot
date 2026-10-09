@@ -127,7 +127,7 @@ Spec: `docs/superpowers/specs/2026-10-08-second-brain-refactor-design.md`. Plan:
 | 6 | Real e5 inference | Done (code + real-model tests; operator deploy pending, Track 1) |
 | 7 | API contract + frontend | Done |
 | 8 | LLM / MCP tools | Done |
-| 9 | Export / import | Pending |
+| 9 | Export / import | Done |
 | 10 | Migration 0014 | Pending |
 | 11 | Cleanup + docs | Pending |
 
@@ -138,6 +138,8 @@ SELECT count(*) FROM notes WHERE content_hash IS NULL OR search_text IS NULL OR 
 ```
 
 Ruling (task 8): `knowledge_create_note` took `source_channel` "ai", which the `notes.source_channel` CHECK rejects, so the tool always failed; the channel now comes from the tool call's room id (`mcp`, the platform, or `web`). `knowledge_get_note` returns at most 8,000 characters and flags `truncated` — the chat path has no shared tool-output cap, and the agent engine's 2,000-character prompt cap would have made the tool useless. Cost if wrong: raise `GET_NOTE_MAX_CHARS` in `llm/tools/knowledge.rs`.
+
+Ruling (task 9): import writes each note in its own transaction (not batches of 100) — one invalid note must not roll back its neighbours, and personal-scale imports do not need batching — cost if wrong: a 5,000-note import is 5,000 small transactions. The global `RequestBodyLimitLayer(1 MB)` became `DefaultBodyLimit(1 MB)` plus a 20 MB `RequestBodyLimitLayer` backstop so the import route can lift its own limit; the Telegram webhook still caps its own body.
 
 Local test DB note: `CREATE EXTENSION vector` / `pg_trgm` race between parallel tests on a fresh server and land in a test schema. Create both once in `public` (`CREATE EXTENSION vector SCHEMA public; CREATE EXTENSION pg_trgm SCHEMA public;`) before the first `cargo test`.
 

@@ -236,4 +236,57 @@ test.describe('Notes', () => {
     await expect(app.getByText('Transformer Attention')).toBeVisible();
     await expect(app.getByTestId('search-lexical-notice')).toHaveCount(0);
   });
+
+  test('exports the notes as a zip download', async ({ app }) => {
+    await gotoKnowledge(app);
+
+    const [download] = await Promise.all([
+      app.waitForEvent('download'),
+      app.getByTestId('export-notes-button').click(),
+    ]);
+
+    expect(download.suggestedFilename()).toBe('notes-2026-10-09.zip');
+  });
+
+  test('imports a zip and summarises what happened', async ({ app, api }) => {
+    api.importReport = {
+      created: 2,
+      updated: 1,
+      skipped: [{ file: 'notes/empty.md', reason: 'note content cannot be empty' }],
+    };
+    await gotoKnowledge(app);
+
+    await app.getByTestId('import-notes-input').setInputFiles({
+      name: 'vault.zip',
+      mimeType: 'application/zip',
+      buffer: Buffer.from('PK'),
+    });
+
+    const report = app.getByTestId('import-report');
+    await expect(report).toContainText('2 created, 1 updated, 1 skipped');
+    await expect(report).toContainText('notes/empty.md');
+    await expect(report).toContainText('note content cannot be empty');
+    expect(api.importedFileNames).toEqual(['vault.zip']);
+
+    await report.getByRole('button', { name: 'Dismiss import summary' }).click();
+    await expect(report).toHaveCount(0);
+  });
+
+  test('reports an import the server refused and shows no summary', async ({ app, api }) => {
+    api.failNext = {
+      path: /notes\/import/,
+      status: 400,
+      error: 'the file is not a readable zip archive',
+    };
+    await gotoKnowledge(app);
+
+    await app.getByTestId('import-notes-input').setInputFiles({
+      name: 'notes.txt',
+      mimeType: 'text/plain',
+      buffer: Buffer.from('hello'),
+    });
+
+    await expect(app.getByRole('alert')).toContainText('not a readable zip');
+    await expect(app.getByTestId('import-report')).toHaveCount(0);
+  });
 });

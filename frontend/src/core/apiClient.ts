@@ -16,29 +16,28 @@ export class ApiHttpError extends Error {
   }
 }
 
+type ApiRequestOptions = RequestInit & {
+  /**
+   * Suppresses {@link AUTH_EXPIRED_EVENT} on a 401.
+   */
+  suppressAuthEvent?: boolean;
+  /**
+   * Optional client-side timeout in milliseconds (defaults to 90 seconds).
+   */
+  timeoutMs?: number;
+};
+
 /**
- * Calls the API with the session cookie attached, and returns the response
- * headers alongside the body (a few endpoints signal state in a header).
+ * Sends the request with the session cookie attached and returns the raw
+ * response.
  *
  * There is no token to read or store any more. The session lives in an
  * HttpOnly cookie the browser sends automatically, which is why `credentials:
  * 'include'` is the whole of the auth logic here — and why an XSS on this page
  * cannot read the credential out and use it elsewhere.
  */
-export async function fetchApiResponse<T>(
-  endpoint: string,
-  options: RequestInit & {
-    /**
-     * Suppresses {@link AUTH_EXPIRED_EVENT} on a 401.
-     */
-    suppressAuthEvent?: boolean;
-    /**
-     * Optional client-side timeout in milliseconds (defaults to 90 seconds).
-     */
-    timeoutMs?: number;
-  } = {}
-): Promise<{ data: T; headers: Headers }> {
-  const { timeoutMs = 90_000, suppressAuthEvent, signal: callerSignal, ...fetchOptions } = options;
+async function sendRequest(endpoint: string, options: ApiRequestOptions): Promise<Response> {
+  const { timeoutMs = 90_000, suppressAuthEvent: _suppress, signal: callerSignal, ...fetchOptions } = options;
 
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -51,15 +50,17 @@ export async function fetchApiResponse<T>(
     }
   }
 
+  // A multipart body needs the browser to write its own Content-Type, boundary
+  // included; forcing JSON here would make the server reject the upload.
+  const defaultHeaders: Record<string, string> =
+    fetchOptions.body instanceof FormData ? {} : { 'Content-Type': 'application/json' };
   const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
+    ...defaultHeaders,
     ...(fetchOptions.headers as Record<string, string>),
   };
 
-  const url = `${API_BASE}${endpoint}`;
-  let response: Response;
   try {
-    response = await fetch(url, {
+    return await fetch(`${API_BASE}${endpoint}`, {
       ...fetchOptions,
       headers,
       credentials: 'include',
@@ -73,35 +74,61 @@ export async function fetchApiResponse<T>(
   } finally {
     clearTimeout(timer);
   }
+}
 
-  if (response.status === 204) {
-    return { data: {} as T, headers: response.headers };
-  }
-
-  let data: any;
+/** The body of a response: JSON when the server sent JSON, otherwise `{ error }` holding a text excerpt. */
+async function readBody(response: Response): Promise<any> {
   const contentType = response.headers.get('content-type');
   if (contentType && contentType.includes('application/json')) {
     try {
-      data = await response.json();
+      return await response.json();
     } catch {
-      data = { error: `Malformed JSON response from server (Status: ${response.status})` };
+      return { error: `Malformed JSON response from server (Status: ${response.status})` };
     }
-  } else {
-    const rawText = await response.text();
-    data = { error: rawText.substring(0, 200) || `Server error (Status: ${response.status})` };
   }
+  const rawText = await response.text();
+  return { error: rawText.substring(0, 200) || `Server error (Status: ${response.status})` };
+}
 
+function rejectFailed(response: Response, data: any, options: ApiRequestOptions): never {
   if (response.status === 401 && !options.suppressAuthEvent) {
     // The session is gone — expired, revoked, or never established. Tell the
     // app so it can show the sign-in screen rather than looping on 401s.
     window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
   }
+  throw new ApiHttpError(data.error || `HTTP error! Status: ${response.status}`, response.status, data);
+}
 
-  if (!response.ok) {
-    throw new ApiHttpError(data.error || `HTTP error! Status: ${response.status}`, response.status, data);
+/**
+ * Calls the API and returns the response headers alongside the body (a few
+ * endpoints signal state in a header).
+ */
+export async function fetchApiResponse<T>(
+  endpoint: string,
+  options: ApiRequestOptions = {}
+): Promise<{ data: T; headers: Headers }> {
+  const response = await sendRequest(endpoint, options);
+
+  if (response.status === 204) {
+    return { data: {} as T, headers: response.headers };
   }
 
+  const data = await readBody(response);
+  if (!response.ok) rejectFailed(response, data, options);
   return { data: data as T, headers: response.headers };
+}
+
+/**
+ * Downloads a binary response (a zip export). A failure carries the same
+ * `{ error, code }` body as any other call.
+ */
+export async function fetchApiBlob(
+  endpoint: string,
+  options: ApiRequestOptions = {}
+): Promise<{ blob: Blob; headers: Headers }> {
+  const response = await sendRequest(endpoint, options);
+  if (!response.ok) rejectFailed(response, await readBody(response), options);
+  return { blob: await response.blob(), headers: response.headers };
 }
 
 /** [`fetchApiResponse`] for callers that only need the body. */
