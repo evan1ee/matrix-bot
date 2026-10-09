@@ -1,0 +1,56 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT item_type AS \"item_type!\", item_id AS \"item_id!\", content_snippet AS \"content_snippet!\"\n        FROM (\n            SELECT DISTINCT ON (ke.item_type, ke.item_id)\n                   ke.item_type, ke.item_id, ke.content_snippet,\n                   ts_rank_cd(to_tsvector('simple', ke.content_snippet), q) AS rank\n            FROM knowledge_embeddings ke\n            LEFT JOIN bookmarks b\n                ON ke.item_type = 'bookmark' AND b.id = ke.item_id AND b.owner_id = ke.owner_id,\n                 websearch_to_tsquery('simple', $2) q\n            WHERE ke.owner_id = $1\n              AND ke.item_type <> 'note'\n              AND ke.item_type = ANY($3)\n              AND to_tsvector('simple', ke.content_snippet) @@ q\n              AND ($4 OR NOT COALESCE(b.is_archived, FALSE))\n            ORDER BY ke.item_type, ke.item_id,\n                     ts_rank_cd(to_tsvector('simple', ke.content_snippet), q) DESC\n        ) best\n        ORDER BY rank DESC, item_id DESC\n        LIMIT $5\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "item_type!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "knowledge_embeddings",
+            "name": "item_type"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "item_id!",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "knowledge_embeddings",
+            "name": "item_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "content_snippet!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "knowledge_embeddings",
+            "name": "content_snippet"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "TextArray",
+        "Bool",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d35496ab46e01f1fd95eb2a04e22d33774e698c3a762a5073274ab58a515fc74"
+}

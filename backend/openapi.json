@@ -3498,6 +3498,14 @@
         "responses": {
           "200": {
             "description": "",
+            "headers": {
+              "X-Search-Mode": {
+                "schema": {
+                  "type": "string"
+                },
+                "description": "`hybrid`, or `lexical` when the embedder was unavailable and only keyword results are returned"
+              }
+            },
             "content": {
               "application/json": {
                 "schema": {
@@ -9316,6 +9324,11 @@
             "items": {
               "type": "string"
             },
+            "nullable": true
+          },
+          "include_archived": {
+            "type": "boolean",
+            "description": "Include archived notes and bookmarks (default false).",
             "nullable": true
           },
           "limit": {

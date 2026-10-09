@@ -92,6 +92,7 @@ mod tests {
     use tokio_util::sync::CancellationToken;
 
     use super::*;
+    use crate::application::knowledge::SearchQuery;
     use crate::db::migrate::run_migrations_unlocked;
     use crate::db::pool::{seed_account, test_pool};
     use crate::domain::accounts::AccountId;
@@ -149,9 +150,10 @@ mod tests {
         // Verify search finds it through generated embedding
         let results = services
             .knowledge_search
-            .search(&alice, "Modular Monolith", None, 5)
+            .search(&alice, SearchQuery::new("Modular Monolith"))
             .await
-            .expect("search");
+            .expect("search")
+            .items;
         assert!(!results.is_empty());
         assert_eq!(results[0].item_id, note.id.0);
         assert_eq!(results[0].title, "Microservices vs Modular Monolith");

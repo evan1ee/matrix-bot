@@ -2,15 +2,19 @@
 
 use axum::{
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{HeaderMap, HeaderValue, StatusCode},
     Json,
 };
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::application::knowledge::SearchQuery;
 use crate::domain::knowledge::note::{ExpectedHash, NewNote, NoteDocument, NotePatch};
 use crate::interface::http::auth::{ApiState, AuthUser};
 use crate::interface::http::error::ApiError;
+
+/// Response header telling a client whether a search used semantic ranking.
+pub const SEARCH_MODE_HEADER: &str = "x-search-mode";
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 pub struct Note {
@@ -77,6 +81,8 @@ pub struct KnowledgeSearchRequest {
     pub query: String,
     pub filter_types: Option<Vec<String>>,
     pub limit: Option<i64>,
+    /// Include archived notes and bookmarks (default false).
+    pub include_archived: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -281,28 +287,39 @@ pub async fn delete_note(
     tag = "knowledge",
     path = "/api/v1/knowledge/search",
     request_body = KnowledgeSearchRequest,
-    responses((status = 200, body = Vec<SearchResultItem>)),
+    responses((
+        status = 200,
+        body = Vec<SearchResultItem>,
+        headers(("X-Search-Mode" = String,
+            description = "`hybrid`, or `lexical` when the embedder was unavailable and only keyword results are returned"))
+    )),
     security(("session_cookie" = []))
 )]
 pub async fn search_knowledge(
     user: AuthUser,
     State(state): State<ApiState>,
     Json(payload): Json<KnowledgeSearchRequest>,
-) -> Result<Json<Vec<SearchResultItem>>, ApiError> {
-    let limit = payload.limit.unwrap_or(5);
-    let items = state
+) -> Result<(HeaderMap, Json<Vec<SearchResultItem>>), ApiError> {
+    let query = SearchQuery::new(&payload.query)
+        .filter_types(payload.filter_types.as_deref())
+        .limit(payload.limit.unwrap_or(5))
+        .include_archived(payload.include_archived.unwrap_or(false));
+    let outcome = state
         .services
         .knowledge_search
-        .search(
-            &user.account_id,
-            &payload.query,
-            payload.filter_types.as_deref(),
-            limit,
-        )
+        .search(&user.account_id, query)
         .await
         .map_err(ApiError::from)?;
 
-    Ok(Json(items.into_iter().map(Into::into).collect()))
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        SEARCH_MODE_HEADER,
+        HeaderValue::from_static(outcome.mode.as_str()),
+    );
+    Ok((
+        headers,
+        Json(outcome.items.into_iter().map(Into::into).collect()),
+    ))
 }
 
 #[cfg(test)]
@@ -390,5 +407,92 @@ mod tests {
         // 6. Verify deleted
         let res = get_note(auth_user.clone(), State(state.clone()), Path(created.id)).await;
         assert!(res.is_err());
+    }
+
+    struct DownEmbedder;
+
+    #[async_trait::async_trait]
+    impl crate::infrastructure::inference::embedding::EmbeddingProvider for DownEmbedder {
+        async fn embed(
+            &self,
+            _texts: &[String],
+        ) -> Result<Vec<Vec<f32>>, crate::infrastructure::inference::embedding::EmbeddingError>
+        {
+            Err(crate::infrastructure::inference::embedding::EmbeddingError::NotConfigured)
+        }
+    }
+
+    async fn search_state(
+        embedder: Arc<dyn crate::infrastructure::inference::embedding::EmbeddingProvider>,
+    ) -> (ApiState, AuthUser) {
+        let pool = test_pool().await;
+        run_migrations_unlocked(&pool).await;
+        let alice = AccountId::generate();
+        seed_account(&pool, &alice).await;
+        let services = crate::application::AppServices::new(&pool).with_embedder(embedder);
+        let mut state = ApiState::new(
+            crate::db::Database { pool: pool.clone() },
+            None,
+            String::new(),
+            reqwest::Client::new(),
+        );
+        state.services = services;
+        (state, AuthUser::for_account(alice))
+    }
+
+    fn search_request(query: &str) -> Json<KnowledgeSearchRequest> {
+        Json(KnowledgeSearchRequest {
+            query: query.to_string(),
+            filter_types: None,
+            limit: None,
+            include_archived: None,
+        })
+    }
+
+    #[tokio::test]
+    async fn search_reports_hybrid_mode_in_a_header() {
+        let (state, user) = search_state(Arc::new(
+            crate::infrastructure::inference::embedding::MockEmbeddingProvider::new(384),
+        ))
+        .await;
+        state
+            .services
+            .notes
+            .create(
+                &user.account_id,
+                NewNote::new("Lifetimes", "borrow checker lifetimes"),
+            )
+            .await
+            .unwrap();
+
+        let (headers, Json(items)) =
+            search_knowledge(user, State(state), search_request("lifetimes"))
+                .await
+                .expect("search");
+        assert_eq!(headers.get(SEARCH_MODE_HEADER).unwrap(), "hybrid");
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0].item_type, "note");
+        assert_eq!(items[0].title, "Lifetimes");
+    }
+
+    #[tokio::test]
+    async fn search_survives_a_down_embedder_and_says_so() {
+        let (state, user) = search_state(Arc::new(DownEmbedder)).await;
+        state
+            .services
+            .notes
+            .create(
+                &user.account_id,
+                NewNote::new("Lifetimes", "borrow checker lifetimes"),
+            )
+            .await
+            .unwrap();
+
+        let (headers, Json(items)) =
+            search_knowledge(user, State(state), search_request("lifetimes"))
+                .await
+                .expect("an embedder outage is not an error");
+        assert_eq!(headers.get(SEARCH_MODE_HEADER).unwrap(), "lexical");
+        assert_eq!(items.len(), 1);
     }
 }

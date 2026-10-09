@@ -2692,6 +2692,8 @@ export interface components {
         };
         KnowledgeSearchRequest: {
             filter_types?: string[] | null;
+            /** @description Include archived notes and bookmarks (default false). */
+            include_archived?: boolean | null;
             /** Format: int64 */
             limit?: number | null;
             query: string;
@@ -6271,6 +6273,8 @@ export interface operations {
         responses: {
             200: {
                 headers: {
+                    /** @description `hybrid`, or `lexical` when the embedder was unavailable and only keyword results are returned */
+                    "X-Search-Mode"?: string;
                     [name: string]: unknown;
                 };
                 content: {

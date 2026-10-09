@@ -56,6 +56,31 @@ pub fn distance_to_similarity(distance: f32) -> f32 {
     1.0 - (clamped / 2.0)
 }
 
+/// The embedding model chunks are tagged with until the configured model is
+/// wired through (it is the column default in migration 0013).
+pub const LEGACY_EMBEDDING_MODEL: &str = "bge-small-en-v1.5";
+
+/// What a search returned and how it was produced.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SearchOutcome {
+    pub items: Vec<SearchResultItem>,
+    pub mode: SearchMode,
+}
+
+/// Whether `text` contains Han, kana or Hangul. The `simple` text-search
+/// configuration cannot split these scripts into words, so such queries must
+/// also be matched by trigram similarity.
+pub fn contains_cjk(text: &str) -> bool {
+    text.chars().any(|c| {
+        matches!(c,
+            '\u{3040}'..='\u{30FF}'
+            | '\u{3400}'..='\u{4DBF}'
+            | '\u{4E00}'..='\u{9FFF}'
+            | '\u{AC00}'..='\u{D7AF}'
+            | '\u{F900}'..='\u{FAFF}')
+    })
+}
+
 /// Identifies one searchable item across the four knowledge item types.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ItemKey {
@@ -260,6 +285,16 @@ mod tests {
     #[test]
     fn rrf_of_two_empty_lists_is_empty() {
         assert!(rrf(&[], &[], 60).is_empty());
+    }
+
+    #[test]
+    fn detects_cjk_scripts() {
+        assert!(contains_cjk("猫"));
+        assert!(contains_cjk("rust 与 tokio"));
+        assert!(contains_cjk("ひらがな"));
+        assert!(contains_cjk("한국어"));
+        assert!(!contains_cjk("plain ascii and accents é"));
+        assert!(!contains_cjk(""));
     }
 
     #[test]

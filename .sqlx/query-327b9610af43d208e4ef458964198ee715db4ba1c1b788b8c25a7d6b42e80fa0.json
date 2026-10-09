@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE knowledge_embeddings SET embedding_model = 'older-model' WHERE item_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "327b9610af43d208e4ef458964198ee715db4ba1c1b788b8c25a7d6b42e80fa0"
+}

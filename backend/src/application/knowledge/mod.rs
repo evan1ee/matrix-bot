@@ -5,9 +5,11 @@
 
 pub mod markdown;
 mod notes;
+mod retrieval;
 mod search;
 
 pub use notes::NoteService;
+pub use retrieval::SearchQuery;
 pub use search::SearchService;
 
 use crate::application::AppError;

@@ -1,0 +1,63 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH nearest AS (\n            SELECT ke.item_type, ke.item_id, ke.content_snippet,\n                   ke.embedding <=> $2 AS distance\n            FROM knowledge_embeddings ke\n            LEFT JOIN notes n\n                ON ke.item_type = 'note' AND n.id = ke.item_id AND n.owner_id = ke.owner_id\n            LEFT JOIN bookmarks b\n                ON ke.item_type = 'bookmark' AND b.id = ke.item_id AND b.owner_id = ke.owner_id\n            WHERE ke.owner_id = $1\n              AND ke.embedding_model = $3\n              AND ke.item_type = ANY($4)\n              AND ($5 OR NOT COALESCE(n.is_archived, b.is_archived, FALSE))\n            ORDER BY ke.embedding <=> $2\n            LIMIT $6\n        ),\n        best AS (\n            SELECT DISTINCT ON (item_type, item_id)\n                   item_type, item_id, content_snippet, distance\n            FROM nearest\n            ORDER BY item_type, item_id, distance\n        )\n        SELECT item_type AS \"item_type!\", item_id AS \"item_id!\", content_snippet AS \"content_snippet!\"\n        FROM best\n        ORDER BY distance, item_id\n        LIMIT $7\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "item_type!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "knowledge_embeddings",
+            "name": "item_type"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "item_id!",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "knowledge_embeddings",
+            "name": "item_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "content_snippet!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "knowledge_embeddings",
+            "name": "content_snippet"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        {
+          "Custom": {
+            "name": "vector",
+            "kind": "Simple"
+          }
+        },
+        "Text",
+        "TextArray",
+        "Bool",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "65866f19b18217e3e3aba049d18930bd26a3d926d0d228033ae6199419a6f506"
+}

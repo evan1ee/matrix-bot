@@ -6,11 +6,12 @@
 use async_trait::async_trait;
 use tracing::error;
 
+use crate::application::knowledge::SearchQuery;
 use crate::application::AppServices;
 use crate::db::Database;
 use crate::domain::accounts::AccountId;
 use crate::domain::knowledge::note::NewNote;
-use crate::domain::knowledge::search::KnowledgeItemType;
+use crate::domain::knowledge::search::{KnowledgeItemType, SearchMode};
 use crate::interface::channels::message::Reply;
 use crate::interface::chat::{error_reply, BotModule, CommandContext, CommandHelp};
 use crate::utils::html::html_escape;
@@ -284,21 +285,21 @@ async fn handle_search(services: &AppServices, owner: &AccountId, query: &str) -
     }
     match services
         .knowledge_search
-        .search(owner, query, None, 3)
+        .search(owner, SearchQuery::new(query).limit(3))
         .await
     {
-        Ok(results) if results.is_empty() => {
+        Ok(outcome) if outcome.items.is_empty() => {
             format!(
                 "<p>🔍 <i>No knowledge items found matching &quot;{}&quot;.</i></p>",
                 html_escape(query)
             )
         }
-        Ok(results) => {
+        Ok(outcome) => {
             let mut html = format!(
                 "<p>🔍 <b>Search Results</b> for <i>&quot;{}&quot;</i>:</p><ol>",
                 html_escape(query)
             );
-            for item in results {
+            for item in outcome.items {
                 let badge = match item.item_type {
                     KnowledgeItemType::Note => "📝 Note",
                     KnowledgeItemType::Bookmark => "🔖 Bookmark",
@@ -315,6 +316,9 @@ async fn handle_search(services: &AppServices, owner: &AccountId, query: &str) -
                 ));
             }
             html.push_str("</ol>");
+            if outcome.mode == SearchMode::Lexical {
+                html.push_str("<p><i>(keyword results only)</i></p>");
+            }
             html
         }
         Err(err) => error_reply(err).html_body().to_string(),
@@ -535,15 +539,14 @@ mod tests {
             .expect("reply");
         assert!(reply_tag.html_body().contains("Clean Architecture"));
 
-        // 5. Search before embedding returns no match message
+        // 5. A new note is searchable by keyword before it has been embedded
         let ctx_search = mock_context("search", "Separation", alice);
         let reply_search = module
             .handle_command(&ctx_search, &services, &db)
             .await
             .expect("reply");
-        assert!(reply_search
-            .html_body()
-            .contains("No knowledge items found"));
+        assert!(reply_search.html_body().contains("Search Results"));
+        assert!(!reply_search.html_body().contains("keyword results only"));
 
         // After embedding the note, search returns results
         let notes = services.notes.list(&alice, None, false, 10).await.unwrap();

@@ -4,7 +4,9 @@
 //! and `knowledge_embeddings` tables, including HNSW vector hybrid search.
 
 pub mod notes;
+pub mod retrieval;
 pub mod search;
 
 pub use notes::*;
+pub use retrieval::*;
 pub use search::*;

@@ -4,7 +4,7 @@ use pgvector::Vector;
 use sqlx::PgExecutor;
 
 use crate::domain::accounts::AccountId;
-use crate::domain::knowledge::search::{KnowledgeItemType, SearchResultItem};
+use crate::domain::knowledge::search::KnowledgeItemType;
 
 pub async fn upsert_embedding_chunk(
     executor: impl PgExecutor<'_>,
@@ -60,75 +60,6 @@ pub async fn delete_embeddings_for_item(
     .await?;
 
     Ok(res.rows_affected())
-}
-
-#[derive(Debug, sqlx::FromRow)]
-struct SearchResultRow {
-    item_type: String,
-    item_id: i64,
-    content_snippet: String,
-    title: Option<String>,
-    source_ref: Option<String>,
-    combined_score: Option<f32>,
-}
-
-pub async fn search_hybrid(
-    executor: impl PgExecutor<'_>,
-    owner: &AccountId,
-    query_embedding: &[f32],
-    query_text: &str,
-    filter_types: Option<&[String]>,
-    limit: i64,
-) -> Result<Vec<SearchResultItem>, sqlx::Error> {
-    let vec = Vector::from(query_embedding.to_vec());
-    let rows = sqlx::query_as!(
-        SearchResultRow,
-        r#"
-        SELECT
-            ke.item_type,
-            ke.item_id,
-            ke.content_snippet,
-            COALESCE(n.title, b.title, f.title, l.log_date, ke.item_type) AS title,
-            COALESCE(n.source_ref, b.url) AS source_ref,
-            (
-                0.7 * (1.0 - (ke.embedding <=> $2) / 2.0) +
-                0.3 * LEAST(1.0::FLOAT8, ts_rank_cd(to_tsvector('english', ke.content_snippet), plainto_tsquery('english', $3)))
-            )::FLOAT4 AS combined_score
-        FROM knowledge_embeddings ke
-        LEFT JOIN notes n
-            ON ke.item_type = 'note' AND ke.item_id = n.id AND ke.owner_id = n.owner_id
-        LEFT JOIN bookmarks b
-            ON ke.item_type = 'bookmark' AND ke.item_id = b.id AND ke.owner_id = b.owner_id
-        LEFT JOIN footprints f
-            ON ke.item_type = 'footprint' AND ke.item_id = f.id AND ke.owner_id = f.owner_id
-        LEFT JOIN life_day_logs l
-            ON ke.item_type = 'journal' AND ke.item_id = l.id AND ke.owner_id = l.owner_id
-        WHERE ke.owner_id = $1
-          AND ($4::TEXT[] IS NULL OR ke.item_type = ANY($4))
-        ORDER BY combined_score DESC
-        LIMIT $5
-        "#,
-        owner.as_uuid(),
-        vec as Vector,
-        query_text,
-        filter_types,
-        limit
-    )
-    .fetch_all(executor)
-    .await?;
-
-    Ok(rows
-        .into_iter()
-        .map(|r| SearchResultItem {
-            item_type: KnowledgeItemType::from_str_opt(&r.item_type)
-                .unwrap_or(KnowledgeItemType::Note),
-            item_id: r.item_id,
-            title: r.title.unwrap_or_else(|| r.item_type.clone()),
-            content_snippet: r.content_snippet,
-            similarity_score: r.combined_score.unwrap_or(0.0),
-            source_ref: r.source_ref,
-        })
-        .collect())
 }
 
 /// Retrieves textual content for a given knowledge item to be chunked and embedded.
@@ -330,65 +261,32 @@ mod tests {
     use crate::infrastructure::postgres::repositories::knowledge::notes::insert_test_note;
 
     #[tokio::test]
-    async fn test_knowledge_embeddings_and_hybrid_search() {
+    async fn embedding_chunks_upsert_and_delete_per_item() {
         let pool = test_pool().await;
         run_migrations_unlocked(&pool).await;
 
         let alice = AccountId::generate();
         seed_account(&pool, &alice).await;
+        let note = insert_test_note(&pool, &alice, "Rust Async Guide", "Tokio runtimes", &[])
+            .await
+            .expect("insert note");
 
-        let note = insert_test_note(
-            &pool,
-            &alice,
-            "Rust Async Guide",
-            "Tokio runtimes and cooperative scheduling in Rust",
-            &["rust".to_string(), "async".to_string()],
-        )
-        .await
-        .expect("insert note");
-
-        // Upsert dummy 384-dimensional embedding chunk
         let mut embedding = vec![0.0f32; 384];
         embedding[0] = 1.0;
-        upsert_embedding_chunk(
-            &pool,
-            &alice,
-            "note",
-            note.id.0,
-            0,
-            "Tokio runtimes and cooperative scheduling in Rust",
-            &embedding,
-        )
-        .await
-        .expect("upsert embedding");
+        for chunk in 0..2 {
+            upsert_embedding_chunk(&pool, &alice, "note", note.id.0, chunk, "chunk", &embedding)
+                .await
+                .expect("upsert embedding");
+        }
+        // Upserting the same chunk again replaces it rather than adding one.
+        upsert_embedding_chunk(&pool, &alice, "note", note.id.0, 0, "again", &embedding)
+            .await
+            .expect("upsert embedding");
 
-        // Hybrid search with matching embedding and matching text
-        let results = search_hybrid(
-            &pool,
-            &alice,
-            &embedding,
-            "Tokio cooperative",
-            Some(&["note".to_string()]),
-            5,
-        )
-        .await
-        .expect("hybrid search");
-
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].item_id, note.id.0);
-        assert_eq!(results[0].title, "Rust Async Guide");
-        assert_eq!(results[0].item_type, KnowledgeItemType::Note);
-        assert!(
-            results[0].similarity_score > 0.6,
-            "expected > 0.6, got {}",
-            results[0].similarity_score
-        );
-
-        // Clean up embeddings
         let affected = delete_embeddings_for_item(&pool, &alice, "note", note.id.0)
             .await
             .expect("delete embeddings");
-        assert_eq!(affected, 1);
+        assert_eq!(affected, 2);
     }
 
     #[tokio::test]

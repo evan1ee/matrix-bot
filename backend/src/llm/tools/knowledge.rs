@@ -2,6 +2,7 @@
 
 use serde_json::json;
 
+use crate::application::knowledge::SearchQuery;
 use crate::application::AppServices;
 use crate::domain::accounts::AccountId;
 use crate::domain::knowledge::note::NewNote;
@@ -30,13 +31,23 @@ pub async fn execute_tool(
                     });
                 let limit = args.get("limit").and_then(|v| v.as_i64()).unwrap_or(5);
 
-                let results = services
+                let outcome = services
                     .knowledge_search
-                    .search(owner_id, query, filter_types.as_deref(), limit)
+                    .search(
+                        owner_id,
+                        SearchQuery::new(query)
+                            .filter_types(filter_types.as_deref())
+                            .limit(limit),
+                    )
                     .await
                     .map_err(|e| e.to_string())?;
 
-                serde_json::to_string(&results).map_err(|e| e.to_string())
+                // `mode` tells the model whether semantic ranking took part.
+                serde_json::to_string(&serde_json::json!({
+                    "mode": outcome.mode.as_str(),
+                    "results": outcome.items,
+                }))
+                .map_err(|e| e.to_string())
             }
             .await,
         ),

@@ -122,7 +122,7 @@ Spec: `docs/superpowers/specs/2026-10-08-second-brain-refactor-design.md`. Plan:
 | 1 | Markdown module + domain split | Done |
 | 2 | Migrations 0012/0013 + derived write path | Done |
 | 3 | Backfill derived fields | Done |
-| 4 | Search rewrite (lexical + vector + RRF) | Pending |
+| 4 | Search rewrite (lexical + vector + RRF) | Done |
 | 5 | Indexing: skip-on-hash, model tagging | Pending |
 | 6 | Real e5 inference | Pending |
 | 7 | API contract + frontend | Pending |

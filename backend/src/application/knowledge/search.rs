@@ -1,77 +1,55 @@
-//! Cross-domain hybrid search and the embedding of knowledge items.
+//! Embedding of knowledge items and the `SearchService` they feed. Querying
+//! lives in `retrieval.rs`.
+
+use std::sync::Arc;
+use std::time::Duration;
 
 use sqlx::PgPool;
-use std::sync::Arc;
 
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
 use crate::domain::jobs::NewJob;
-use crate::domain::knowledge::search::{chunk_text, KnowledgeItemType, SearchResultItem};
+use crate::domain::knowledge::search::{chunk_text, KnowledgeItemType, LEGACY_EMBEDDING_MODEL};
 use crate::infrastructure::inference::embedding::EmbeddingProvider;
 use crate::infrastructure::postgres::repositories;
 
-/// Service executing cross-domain hybrid semantic and BM25 searches.
+/// How long a query waits for the embedder before search degrades to keywords.
+const DEFAULT_EMBED_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// Service executing cross-domain hybrid semantic and keyword searches.
 #[derive(Clone)]
 pub struct SearchService {
-    pool: PgPool,
-    embedder: Arc<dyn EmbeddingProvider>,
+    pub(super) pool: PgPool,
+    pub(super) embedder: Arc<dyn EmbeddingProvider>,
+    /// Only chunks produced by this model take part in vector search.
+    pub(super) model: String,
+    pub(super) embed_timeout: Duration,
 }
 
 impl SearchService {
     pub fn new(pool: PgPool, embedder: Arc<dyn EmbeddingProvider>) -> Self {
-        Self { pool, embedder }
+        Self {
+            pool,
+            embedder,
+            model: LEGACY_EMBEDDING_MODEL.to_string(),
+            embed_timeout: DEFAULT_EMBED_TIMEOUT,
+        }
     }
 
     pub fn with_embedder(&self, embedder: Arc<dyn EmbeddingProvider>) -> Self {
         Self {
-            pool: self.pool.clone(),
             embedder,
+            ..self.clone()
         }
     }
 
-    /// Searches across indexed personal knowledge items for `owner`.
-    pub async fn search(
-        &self,
-        owner: &AccountId,
-        query: &str,
-        filter_types: Option<&[String]>,
-        limit: i64,
-    ) -> Result<Vec<SearchResultItem>, AppError> {
-        let trimmed = query.trim();
-        if trimmed.is_empty() {
-            return Ok(Vec::new());
+    /// Overrides the embed timeout; tests use it to exercise the slow path.
+    #[cfg(test)]
+    pub(super) fn with_embed_timeout(&self, embed_timeout: Duration) -> Self {
+        Self {
+            embed_timeout,
+            ..self.clone()
         }
-
-        let limit = limit.clamp(1, 50);
-
-        let vectors = self
-            .embedder
-            .embed(&[trimmed.to_string()])
-            .await
-            .map_err(|e| AppError::External {
-                service: "embeddings",
-                source: anyhow::anyhow!("{e}"),
-            })?;
-
-        let query_vector = vectors
-            .into_iter()
-            .next()
-            .ok_or_else(|| AppError::External {
-                service: "embeddings",
-                source: anyhow::anyhow!("no embedding vector returned"),
-            })?;
-
-        let results = repositories::knowledge::search_hybrid(
-            &self.pool,
-            owner,
-            &query_vector,
-            trimmed,
-            filter_types,
-            limit,
-        )
-        .await?;
-
-        Ok(results)
     }
 
     /// Chunks, computes embeddings, and persists knowledge chunks for an item.
@@ -167,68 +145,5 @@ impl SearchService {
 impl Default for SearchService {
     fn default() -> Self {
         panic!("SearchService must be initialized with a PgPool");
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::application::knowledge::NoteService;
-    use crate::db::migrate::run_migrations_unlocked;
-    use crate::db::pool::{seed_account, test_pool};
-    use crate::domain::knowledge::note::NewNote;
-    use crate::infrastructure::inference::embedding::MockEmbeddingProvider;
-
-    #[tokio::test]
-    async fn test_search_service_with_mock_embedder() {
-        let pool = test_pool().await;
-        run_migrations_unlocked(&pool).await;
-
-        let alice = AccountId::generate();
-        seed_account(&pool, &alice).await;
-
-        let note_svc = NoteService::new(pool.clone());
-        let embedder = Arc::new(MockEmbeddingProvider::new(384));
-        let search_svc = SearchService::new(pool.clone(), embedder.clone());
-
-        let note = note_svc
-            .create(
-                &alice,
-                NewNote::new(
-                    "Neural Networks",
-                    "Backpropagation and gradient descent explained",
-                ),
-            )
-            .await
-            .expect("create note");
-
-        // Manually index embedding chunk with mock embedder
-        let emb = embedder
-            .embed(&["Backpropagation and gradient descent explained".to_string()])
-            .await
-            .expect("mock embed")[0]
-            .clone();
-
-        repositories::knowledge::upsert_embedding_chunk(
-            &pool,
-            &alice,
-            "note",
-            note.id.0,
-            0,
-            "Backpropagation and gradient descent explained",
-            &emb,
-        )
-        .await
-        .expect("upsert embedding");
-
-        // Search
-        let results = search_svc
-            .search(&alice, "Backpropagation gradient", None, 5)
-            .await
-            .expect("search results");
-
-        assert!(!results.is_empty());
-        assert_eq!(results[0].item_id, note.id.0);
-        assert_eq!(results[0].title, "Neural Networks");
     }
 }

@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT n.id\n        FROM notes n, websearch_to_tsquery('simple', $2) q\n        WHERE n.owner_id = $1\n          AND n.search_vector @@ q\n          AND ($3 OR NOT n.is_archived)\n        ORDER BY ts_rank_cd(n.search_vector, q) DESC, n.id DESC\n        LIMIT $4\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "notes",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Bool",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "02d41d76a805e3acdbbd46d3e93c92c8b89258b2feb8ebc0e8aa3ea74ef84d19"
+}
