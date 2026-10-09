@@ -500,6 +500,25 @@ pub async fn insert_test_note(
     .await
 }
 
+/// Inserts a note the way it existed before the derived columns: only the
+/// body, so every derived column is NULL. For backfill tests.
+#[cfg(test)]
+pub async fn insert_legacy_note(
+    executor: impl PgExecutor<'_>,
+    owner: &AccountId,
+    title: &str,
+    content: &str,
+) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar!(
+        "INSERT INTO notes (owner_id, title, content) VALUES ($1, $2, $3) RETURNING id",
+        owner.as_uuid(),
+        title,
+        content
+    )
+    .fetch_one(executor)
+    .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

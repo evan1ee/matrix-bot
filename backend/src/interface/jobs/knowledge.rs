@@ -201,13 +201,16 @@ mod tests {
         run_migrations_unlocked(&pool).await;
         let alice = AccountId::generate();
         seed_account(&pool, &alice).await;
-        let id = sqlx::query_scalar!(
-            "INSERT INTO notes (owner_id, title, content) VALUES ($1, 'Old', 'legacy body') RETURNING id",
-            alice.as_uuid()
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+        let id = repositories::knowledge::insert_legacy_note(&pool, &alice, "Old", "legacy body")
+            .await
+            .unwrap();
+        assert_eq!(
+            repositories::knowledge::list_notes_missing_derived(&pool, 10)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
 
         let handler = KnowledgeBackfillHandler::new(AppServices::new(&pool));
         handler
@@ -215,15 +218,17 @@ mod tests {
             .await
             .expect("backfill run");
 
-        let row = sqlx::query!(
-            "SELECT content_hash, search_text, excerpt FROM notes WHERE id = $1",
-            id
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-        assert!(row.content_hash.is_some());
-        assert_eq!(row.search_text.as_deref(), Some("legacy body"));
-        assert_eq!(row.excerpt.as_deref(), Some("legacy body"));
+        assert!(
+            repositories::knowledge::list_notes_missing_derived(&pool, 10)
+                .await
+                .unwrap()
+                .is_empty(),
+            "every note has its derived columns after the run"
+        );
+        let note = repositories::knowledge::get_note_by_id(&pool, id, &alice)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(note.excerpt, "legacy body");
     }
 }
