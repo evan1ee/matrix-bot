@@ -72,7 +72,7 @@ impl JobHandler for KnowledgeBackfillHandler {
     async fn run(&self, _ctx: &JobContext, _payload: serde_json::Value) -> Result<(), JobError> {
         self.services
             .knowledge_search
-            .backfill_embeddings(50)
+            .backfill_embeddings(100)
             .await
             .map_err(JobError::from)?;
         Ok(())

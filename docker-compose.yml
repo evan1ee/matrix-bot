@@ -50,6 +50,10 @@ services:
       - TTS_BASE_URL=${TTS_BASE_URL-http://inference:8090/v1}
       - TTS_API_KEY=${TTS_API_KEY:-}
       - TTS_MODEL=${TTS_MODEL:-kokoro}
+      # Notes search. Unset falls back to the bundled inference server; an empty value
+      # keeps search keyword-only. Changing the model re-embeds everything.
+      - EMBEDDING_BASE_URL=${EMBEDDING_BASE_URL-http://inference:8090}
+      - EMBEDDING_MODEL=${EMBEDDING_MODEL:-multilingual-e5-small}
       - TTS_VOICE=${TTS_VOICE:-0}
       - TTS_DIALECT=${TTS_DIALECT:-openai}
     volumes:

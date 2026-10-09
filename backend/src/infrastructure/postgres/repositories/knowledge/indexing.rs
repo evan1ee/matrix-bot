@@ -234,11 +234,13 @@ pub struct UnindexedItem {
 /// - a bookmark, journal entry or footprint with no chunks,
 /// - any item with a chunk produced by a different model.
 ///
-/// Archived notes and bookmarks are left alone until unarchived.
+/// Archived notes and bookmarks are left alone until unarchived. Ordered by
+/// (owner, type, id) so `offset` pages are stable.
 pub async fn list_items_needing_index(
     executor: impl PgExecutor<'_>,
     model: &str,
     limit: i64,
+    offset: i64,
 ) -> Result<Vec<UnindexedItem>, sqlx::Error> {
     let rows = sqlx::query!(
         r#"
@@ -279,10 +281,12 @@ pub async fn list_items_needing_index(
             ) needing
             ORDER BY owner_id, item_type, item_id, src
         ) wanted
-        LIMIT $2
+        ORDER BY owner_id, item_type, item_id
+        LIMIT $2 OFFSET $3
         "#,
         model,
-        limit
+        limit,
+        offset
     )
     .fetch_all(executor)
     .await?;

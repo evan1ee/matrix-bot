@@ -430,18 +430,15 @@ impl Config {
     pub fn embedding_provider(
         &self,
     ) -> std::sync::Arc<dyn crate::infrastructure::inference::embedding::EmbeddingProvider> {
-        if let Some(ref base_url) = self.embedding_base_url {
-            std::sync::Arc::new(
-                crate::infrastructure::inference::embedding::LocalOnnxEmbeddingClient::new(
-                    Some(base_url.clone()),
-                    Some(self.embedding_model.clone()),
-                ),
-            )
-        } else {
-            std::sync::Arc::new(
-                crate::infrastructure::inference::embedding::MockEmbeddingProvider::default(),
-            )
-        }
+        // With no base URL the client reports itself unavailable, so indexing
+        // stores nothing and search stays keyword-only. A mock here would tag
+        // meaningless vectors with the real model name and never replace them.
+        std::sync::Arc::new(
+            crate::infrastructure::inference::embedding::LocalOnnxEmbeddingClient::new(
+                self.embedding_base_url.clone(),
+                Some(self.embedding_model.clone()),
+            ),
+        )
     }
 }
 

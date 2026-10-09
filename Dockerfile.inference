@@ -61,7 +61,8 @@ USER app
 ENV INFERENCE_PORT=8090 \
     OCR_MODEL_DIR=/app/data/ocr_models \
     VOICE_MODEL_DIR=/app/data/voice_models \
-    TTS_MODEL_DIR=/app/data/tts_models/kokoro-multi-lang-v1_1 \n    EMBEDDING_MODEL_DIR=/app/data/embedding_models/multilingual-e5-small
+    TTS_MODEL_DIR=/app/data/tts_models/kokoro-multi-lang-v1_1 \
+    EMBEDDING_MODEL_DIR=/app/data/embedding_models/multilingual-e5-small
 
 EXPOSE 8090
 VOLUME ["/app/data"]

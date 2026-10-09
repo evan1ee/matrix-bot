@@ -18,6 +18,10 @@ use crate::infrastructure::postgres::repositories;
 
 const CHUNK_CHARS: usize = 500;
 const CHUNK_OVERLAP: usize = 100;
+/// Chunks per embedder request; the inference service refuses more than 128.
+const EMBED_BATCH: usize = 64;
+/// Pages one backfill run scans, so a huge backlog cannot hold a worker.
+const MAX_BACKFILL_PAGES: i64 = 50;
 
 fn external(err: impl std::fmt::Display) -> AppError {
     AppError::External {
@@ -39,6 +43,11 @@ impl SearchService {
         item_type: KnowledgeItemType,
         item_id: i64,
     ) -> Result<IndexOutcome, AppError> {
+        // Without an embedder there is nothing true to store; leave the item
+        // unindexed so it is picked up once one is configured.
+        if !self.embedder.is_available() {
+            return Ok(IndexOutcome::Skipped);
+        }
         match item_type {
             KnowledgeItemType::Note => self.embed_note(owner, item_id).await,
             other => self.embed_text_item(owner, other, item_id).await,
@@ -161,7 +170,12 @@ impl SearchService {
     async fn embed_passages(&self, chunks: &[String]) -> Result<Vec<Vec<f32>>, AppError> {
         let prefix = embedding_prefixes(&self.model).passage;
         let inputs: Vec<String> = chunks.iter().map(|c| format!("{prefix}{c}")).collect();
-        let embeddings = self.embedder.embed(&inputs).await.map_err(external)?;
+        // A 100,000-character note is hundreds of chunks; the inference service
+        // bounds a request, so send them in slices.
+        let mut embeddings = Vec::with_capacity(inputs.len());
+        for slice in inputs.chunks(EMBED_BATCH) {
+            embeddings.extend(self.embedder.embed(slice).await.map_err(external)?);
+        }
         if embeddings.len() != chunks.len() {
             return Err(external(format!(
                 "expected {} embeddings, got {}",
@@ -176,24 +190,43 @@ impl SearchService {
     /// missing or out of date for the configured model. Each job is keyed by the
     /// version it embeds, so it is neither dropped because an earlier version's
     /// job finished nor repeated while it is pending.
-    pub async fn backfill_embeddings(&self, batch_size: i64) -> Result<usize, AppError> {
-        let items =
-            repositories::knowledge::list_items_needing_index(&self.pool, &self.model, batch_size)
-                .await?;
+    ///
+    /// Items that already have a job for their version (queued, or failed and
+    /// not yet purged) are not queued again, so the scan pages past them
+    /// instead of re-reading the same head of the list every run. Returns how
+    /// many jobs it queued; does nothing without an embedder.
+    pub async fn backfill_embeddings(&self, page_size: i64) -> Result<usize, AppError> {
+        if !self.embedder.is_available() {
+            return Ok(0);
+        }
+        let page_size = page_size.max(1);
         let mut enqueued = 0;
-        for item in items {
-            let job = NewJob::knowledge_embed_item_versioned(
-                item.owner_id,
-                item.item_type,
-                item.item_id,
-                &item.version,
+        for page in 0..MAX_BACKFILL_PAGES {
+            let items = repositories::knowledge::list_items_needing_index(
+                &self.pool,
+                &self.model,
+                page_size,
+                page * page_size,
             )
-            .with_priority(-1);
-            if repositories::jobs::enqueue(&self.pool, &job)
-                .await?
-                .is_some()
-            {
-                enqueued += 1;
+            .await?;
+            let last_page = (items.len() as i64) < page_size;
+            for item in items {
+                let job = NewJob::knowledge_embed_item_versioned(
+                    item.owner_id,
+                    item.item_type,
+                    item.item_id,
+                    &item.version,
+                )
+                .with_priority(-1);
+                if repositories::jobs::enqueue(&self.pool, &job)
+                    .await?
+                    .is_some()
+                {
+                    enqueued += 1;
+                }
+            }
+            if last_page {
+                break;
             }
         }
         Ok(enqueued)
@@ -231,7 +264,7 @@ mod tests {
     use crate::domain::jobs::KnowledgeEmbedPayload;
     use crate::domain::knowledge::note::{NewNote, NotePatch};
     use crate::infrastructure::inference::embedding::{
-        EmbeddingError, EmbeddingProvider, MockEmbeddingProvider,
+        EmbeddingError, EmbeddingProvider, LocalOnnxEmbeddingClient, MockEmbeddingProvider,
     };
     use crate::infrastructure::postgres::repositories::knowledge::{self as repo, ChunkRecord};
 
@@ -688,5 +721,95 @@ mod tests {
             .unwrap();
         assert_eq!(f.search.enqueue_backfill(at(10, 40)).await.unwrap(), 0);
         assert_eq!(f.search.enqueue_backfill(at(11, 0)).await.unwrap(), 1);
+    }
+
+    /// Accepts at most `limit` inputs per call, like the inference service.
+    struct BatchLimited {
+        inner: MockEmbeddingProvider,
+        limit: usize,
+    }
+
+    #[async_trait]
+    impl EmbeddingProvider for BatchLimited {
+        async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, EmbeddingError> {
+            if texts.len() > self.limit {
+                return Err(EmbeddingError::Upstream {
+                    status: 400,
+                    message: format!("At most {} inputs per request", self.limit),
+                });
+            }
+            self.inner.embed(texts).await
+        }
+    }
+
+    #[tokio::test]
+    async fn a_note_with_more_chunks_than_one_request_allows_is_still_embedded() {
+        let f = fixture().await;
+        let search = SearchService::new(
+            f.pool.clone(),
+            Arc::new(BatchLimited {
+                inner: MockEmbeddingProvider::new(384),
+                limit: EMBED_BATCH,
+            }),
+        )
+        .with_model("model-a");
+        // Within the 100,000-character cap, but far more than EMBED_BATCH chunks.
+        let body = "A sentence about tokio and async runtimes. ".repeat(1_400);
+        let id = f.note("Long", &body).await;
+
+        let outcome = search
+            .embed_item(&f.alice, KnowledgeItemType::Note, id)
+            .await
+            .unwrap();
+
+        assert_eq!(outcome, IndexOutcome::Indexed);
+        assert!(f.chunks(id).await.len() > EMBED_BATCH);
+    }
+
+    #[tokio::test]
+    async fn an_unconfigured_embedder_indexes_nothing_and_queues_nothing() {
+        let f = fixture().await;
+        let id = f.note("Rust", "a note").await;
+        f.clear_jobs().await;
+        let search = SearchService::new(
+            f.pool.clone(),
+            Arc::new(LocalOnnxEmbeddingClient::new(None, None)),
+        )
+        .with_model("model-a");
+
+        assert_eq!(search.backfill_embeddings(10).await.unwrap(), 0);
+        let outcome = search
+            .embed_item(&f.alice, KnowledgeItemType::Note, id)
+            .await
+            .unwrap();
+
+        assert_eq!(outcome, IndexOutcome::Skipped);
+        assert!(f.chunks(id).await.is_empty(), "no fake vectors are stored");
+        let indexed =
+            sqlx::query_scalar!("SELECT indexed_content_hash FROM notes WHERE id = $1", id)
+                .fetch_one(&f.pool)
+                .await
+                .unwrap();
+        assert_eq!(indexed, None, "the note still counts as needing an index");
+        // Once an embedder exists the same note is picked up.
+        assert_eq!(f.search.backfill_embeddings(10).await.unwrap(), 1);
+    }
+
+    #[tokio::test]
+    async fn the_backfill_queues_new_work_past_items_that_already_have_jobs() {
+        let f = fixture().await;
+        for n in 0..2 {
+            f.note("Old", &format!("old {n}")).await;
+        }
+        f.clear_jobs().await;
+        assert_eq!(f.search.backfill_embeddings(2).await.unwrap(), 2);
+        // The two oldest items keep their (say, failed) jobs, so a fixed first
+        // page of two would never reach the new ones.
+        for n in 0..3 {
+            f.note("New", &format!("new {n}")).await;
+        }
+
+        assert_eq!(f.search.backfill_embeddings(2).await.unwrap(), 3);
+        assert_eq!(f.search.backfill_embeddings(2).await.unwrap(), 0);
     }
 }

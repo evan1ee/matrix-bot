@@ -32,6 +32,12 @@ pub trait EmbeddingProvider: Send + Sync {
     fn dimension(&self) -> usize {
         384
     }
+    /// Whether this provider can produce real vectors at all. `false` means
+    /// nothing is configured: indexing then stores nothing and search stays
+    /// keyword-only, rather than recording vectors that mean nothing.
+    fn is_available(&self) -> bool {
+        true
+    }
 }
 
 /// Request payload matching OpenAI / local ONNX /v1/embeddings format.
@@ -85,6 +91,10 @@ impl LocalOnnxEmbeddingClient {
 
 #[async_trait]
 impl EmbeddingProvider for LocalOnnxEmbeddingClient {
+    fn is_available(&self) -> bool {
+        self.is_configured()
+    }
+
     async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, EmbeddingError> {
         if texts.is_empty() {
             return Err(EmbeddingError::EmptyInput);

@@ -247,6 +247,11 @@ impl SearchService {
         types: &[String],
         include_archived: bool,
     ) -> Result<Option<Vec<VectorHit>>, AppError> {
+        // No embedder configured is a standing condition, not a failure worth
+        // a warning per search.
+        if !self.embedder.is_available() {
+            return Ok(None);
+        }
         let started = Instant::now();
         // Asymmetric retrieval models embed a query differently from a stored
         // passage; the prefix is for the embedder only.
