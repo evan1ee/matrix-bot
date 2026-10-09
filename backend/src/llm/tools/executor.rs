@@ -97,7 +97,9 @@ pub async fn execute(
     }
 
     // 9. Try knowledge tools
-    if let Some(res) = knowledge::execute_tool(services, owner_id, name, &parsed_args).await {
+    if let Some(res) =
+        knowledge::execute_tool(services, owner_id, room_id, name, &parsed_args).await
+    {
         return res;
     }
 

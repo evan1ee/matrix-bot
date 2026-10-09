@@ -314,5 +314,5 @@ The Second Brain subsystem (`domain/knowledge/`, `application/knowledge/`, `infr
   - Photo quote capture: images sent with `/note` caption are run through OCR, cleaned, and stored as quote notes with image source references.
 - **Hybrid Search (`repositories/knowledge/search.rs`):** Combines vector cosine similarity with PostgreSQL trigram / text search across notes and bookmarks, deduplicating and ranking results by composite relevance score.
 - **REST API & Web UI (`frontend/src/modules/knowledge/`):** Axum endpoints at `/api/v1/notes` and `/api/v1/knowledge/search`. React SPA module with live markdown preview, tag filter chips, instant search panel, and keyboard shortcuts (`Escape`, `Cmd/Ctrl+Enter`).
-- **AI & MCP Tools (`llm/tools/knowledge.rs`):** Exposes `knowledge_search`, `knowledge_create_note`, and `knowledge_list_tags` to autonomous agent planning loops and external MCP clients (Cursor / Claude Desktop).
+- **AI & MCP Tools (`llm/tools/knowledge.rs`):** Exposes `knowledge_search`, `knowledge_create_note`, `knowledge_get_note`, and `knowledge_list_tags` to autonomous agent planning loops and external MCP clients (Cursor / Claude Desktop).
 

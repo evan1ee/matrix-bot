@@ -55,7 +55,7 @@ mod tests {
     #[tokio::test]
     async fn test_tool_definitions() {
         let defs = ToolRegistry::get_tool_definitions();
-        assert_eq!(defs.len(), 51);
+        assert_eq!(defs.len(), 52);
         let names: Vec<_> = defs.iter().map(|d| d.function.name.as_str()).collect();
         assert!(names.contains(&"get_my_tasks"));
         assert!(names.contains(&"add_todo"));
@@ -99,6 +99,7 @@ mod tests {
         assert!(names.contains(&"delete_bookmark"));
         assert!(names.contains(&"knowledge_search"));
         assert!(names.contains(&"knowledge_create_note"));
+        assert!(names.contains(&"knowledge_get_note"));
         assert!(names.contains(&"knowledge_list_tags"));
         assert!(names.contains(&"get_my_webhooks"));
         assert!(names.contains(&"get_webhook_logs"));

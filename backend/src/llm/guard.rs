@@ -20,6 +20,8 @@ const OUTSIDE_CONTENT_TOOLS: &[&str] = &[
     "web_search",
     "get_webhook_logs",
     "knowledge_search",
+    // A note body is whatever the user pasted or captured, web clippings included.
+    "knowledge_get_note",
     // Bookmark titles and descriptions are fetched from the web.
     "get_my_bookmarks",
 ];
@@ -83,6 +85,7 @@ mod tests {
             "web_search",
             "get_webhook_logs",
             "knowledge_search",
+            "knowledge_get_note",
             "get_my_bookmarks",
         ] {
             assert!(returns_outside_content(tool), "{tool}");

@@ -63,5 +63,6 @@ mod tests {
         assert!(tools.iter().any(|t| t.name == "add_todo"));
         assert!(tools.iter().any(|t| t.name == "get_my_tasks"));
         assert!(tools.iter().any(|t| t.name == "record_finance_entry"));
+        assert!(tools.iter().any(|t| t.name == "knowledge_get_note"));
     }
 }
