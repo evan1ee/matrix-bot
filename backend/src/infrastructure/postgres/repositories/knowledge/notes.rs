@@ -341,6 +341,74 @@ pub async fn list_note_documents(
     rows.into_iter().map(NoteDocument::try_from).collect()
 }
 
+/// A note whose derived columns have not been filled yet.
+pub struct MissingDerived {
+    pub id: i64,
+    pub owner_id: AccountId,
+    pub content: String,
+}
+
+/// Notes (across owners) missing any derived column, oldest first. Locks the
+/// rows it returns and skips rows another worker holds, so concurrent backfills
+/// take disjoint batches and a concurrent edit waits until the batch commits.
+pub async fn list_notes_missing_derived(
+    executor: impl PgExecutor<'_>,
+    limit: i64,
+) -> Result<Vec<MissingDerived>, sqlx::Error> {
+    let rows = sqlx::query!(
+        r#"
+        SELECT id, owner_id, content
+        FROM notes
+        WHERE content_hash IS NULL OR search_text IS NULL OR excerpt IS NULL
+        ORDER BY id
+        LIMIT $1
+        FOR UPDATE SKIP LOCKED
+        "#,
+        limit
+    )
+    .fetch_all(executor)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| MissingDerived {
+            id: r.id,
+            owner_id: AccountId::from_uuid(r.owner_id),
+            content: r.content,
+        })
+        .collect())
+}
+
+/// Fills the derived columns of a note that still lacks any of them. Guarded so
+/// a row that was written (and therefore derived) since it was listed is never
+/// overwritten with stale values. Returns whether the row was filled.
+pub async fn set_derived_fields(
+    executor: impl PgExecutor<'_>,
+    id: i64,
+    owner: &AccountId,
+    content_hash: &ContentHash,
+    search_text: &str,
+    excerpt: &str,
+) -> Result<bool, sqlx::Error> {
+    let res = sqlx::query!(
+        r#"
+        UPDATE notes
+        SET content_hash = $3, search_text = $4, excerpt = $5
+        WHERE id = $1 AND owner_id = $2
+          AND (content_hash IS NULL OR search_text IS NULL OR excerpt IS NULL)
+        "#,
+        id,
+        owner.as_uuid(),
+        content_hash.as_str(),
+        search_text,
+        excerpt
+    )
+    .execute(executor)
+    .await?;
+
+    Ok(res.rows_affected() > 0)
+}
+
 pub async fn archive_note(
     executor: impl PgExecutor<'_>,
     id: i64,
@@ -642,5 +710,61 @@ mod tests {
             matched, 1,
             "FTS indexes title + search_text, not raw Markdown"
         );
+    }
+
+    async fn insert_legacy(pool: &crate::db::DbPool, owner: &AccountId, body: &str) -> i64 {
+        sqlx::query_scalar!(
+            r#"INSERT INTO notes (owner_id, title, content) VALUES ($1, 'Legacy', $2)
+               RETURNING id"#,
+            owner.as_uuid(),
+            body
+        )
+        .fetch_one(pool)
+        .await
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn missing_derived_lists_only_incomplete_rows_and_filling_is_guarded() {
+        let pool = test_pool().await;
+        run_migrations_unlocked(&pool).await;
+        let alice = AccountId::generate();
+        seed_account(&pool, &alice).await;
+        let legacy = insert_legacy(&pool, &alice, "abc").await;
+        let complete = insert_test_note(&pool, &alice, "Done", "body", &[])
+            .await
+            .unwrap();
+
+        let missing = list_notes_missing_derived(&pool, 10).await.unwrap();
+        let ids: Vec<i64> = missing.iter().map(|m| m.id).collect();
+        assert_eq!(ids, vec![legacy], "a derived row is not listed");
+        assert_eq!(missing[0].content, "abc");
+        assert_eq!(missing[0].owner_id, alice);
+
+        let hash = ContentHash::from_hex(ABC_HASH).unwrap();
+        assert!(
+            set_derived_fields(&pool, legacy, &alice, &hash, "abc", "abc")
+                .await
+                .unwrap()
+        );
+        // Filling again is refused: the row is no longer incomplete.
+        assert!(
+            !set_derived_fields(&pool, legacy, &alice, &hash, "other", "other")
+                .await
+                .unwrap()
+        );
+        // And never across owners.
+        let bob = AccountId::generate();
+        seed_account(&pool, &bob).await;
+        let legacy_2 = insert_legacy(&pool, &alice, "xyz").await;
+        assert!(!set_derived_fields(&pool, legacy_2, &bob, &hash, "x", "x")
+            .await
+            .unwrap());
+        assert_ne!(complete.id.0, legacy);
+        assert!(list_notes_missing_derived(&pool, 10)
+            .await
+            .unwrap()
+            .iter()
+            .all(|m| m.id == legacy_2));
     }
 }

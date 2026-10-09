@@ -121,7 +121,7 @@ Spec: `docs/superpowers/specs/2026-10-08-second-brain-refactor-design.md`. Plan:
 | 0 | Relabel "Second Brain" to "Notes" (UI, chat help, tool descriptions) | Done |
 | 1 | Markdown module + domain split | Done |
 | 2 | Migrations 0012/0013 + derived write path | Done |
-| 3 | Backfill derived fields | Pending |
+| 3 | Backfill derived fields | Done |
 | 4 | Search rewrite (lexical + vector + RRF) | Pending |
 | 5 | Indexing: skip-on-hash, model tagging | Pending |
 | 6 | Real e5 inference | Pending |
@@ -130,6 +130,12 @@ Spec: `docs/superpowers/specs/2026-10-08-second-brain-refactor-design.md`. Plan:
 | 9 | Export / import | Pending |
 | 10 | Migration 0014 | Pending |
 | 11 | Cleanup + docs | Pending |
+
+Runbook (task 3): the `knowledge.backfill_embeddings` job now fills the derived note columns first. Before migration 0014 (task 10) this must return 0 in every environment:
+
+```sql
+SELECT count(*) FROM notes WHERE content_hash IS NULL OR search_text IS NULL OR excerpt IS NULL;
+```
 
 Local test DB note: `CREATE EXTENSION vector` / `pg_trgm` race between parallel tests on a fresh server and land in a test schema. Create both once in `public` (`CREATE EXTENSION vector SCHEMA public; CREATE EXTENSION pg_trgm SCHEMA public;`) before the first `cargo test`.
 
