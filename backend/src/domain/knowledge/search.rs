@@ -59,6 +59,9 @@ pub fn distance_to_similarity(distance: f32) -> f32 {
 /// The embedding model used when none is configured. Mixed English and Chinese
 /// notes need a multilingual model; the old English-only default produced
 /// near-meaningless vectors for Chinese.
+/// Width of `knowledge_embeddings.embedding` (`vector(384)`).
+pub const EMBEDDING_DIMENSIONS: usize = 384;
+
 pub const DEFAULT_EMBEDDING_MODEL: &str = "multilingual-e5-small";
 
 /// Text prepended before embedding, which asymmetric retrieval models require:

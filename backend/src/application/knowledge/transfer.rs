@@ -110,9 +110,13 @@ impl NoteService {
                 Err(other) => return Err(other),
             }
         }
+        // The channel is "web": an import is not a capture from the file's
+        // original channel, but its reference is kept.
         let new = NewNote::new(parsed.title, parsed.markdown)
             .note_type(note_type.unwrap_or_default())
-            .tags(parsed.tags);
+            .source("web", parsed.source_ref)
+            .tags(parsed.tags)
+            .archived(parsed.archived.unwrap_or(false));
         self.create(owner, new).await?;
         Ok(Outcome::Created)
     }
@@ -128,7 +132,10 @@ impl NoteService {
         let same = current.markdown == parsed.markdown
             && current.note.title == parsed.title.trim()
             && current.note.tags == tags
-            && note_type.is_none_or(|t| t == current.note.note_type);
+            && note_type.is_none_or(|t| t == current.note.note_type)
+            && parsed
+                .archived
+                .is_none_or(|a| a == current.note.is_archived);
         if same {
             return Ok(Outcome::Unchanged);
         }
@@ -137,6 +144,7 @@ impl NoteService {
             markdown: Some(parsed.markdown),
             tags: Some(parsed.tags),
             note_type,
+            is_archived: parsed.archived,
             ..NotePatch::default()
         };
         self.update(owner, current.note.id.0, patch).await?;
@@ -267,7 +275,9 @@ mod tests {
             );
             assert_eq!(a.content_hash, b.content_hash, "{} body differs", a.title);
             assert_ne!(a.id, b.id);
+            assert_eq!(a.is_archived, b.is_archived, "{} archived state", a.title);
         }
+        assert!(copy.iter().any(|n| n.title == "Archived" && n.is_archived));
     }
 
     #[tokio::test]

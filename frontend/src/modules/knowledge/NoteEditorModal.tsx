@@ -100,13 +100,12 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
   const handleSubmit = async () => {
     if (awaitingNote) return;
     const trimmedTitle = title.trim();
-    const trimmedContent = content.trim();
 
     if (!trimmedTitle) {
       setError('Title cannot be empty');
       return;
     }
-    if (!trimmedContent) {
+    if (!content.trim()) {
       setError('Content cannot be empty');
       return;
     }
@@ -120,7 +119,9 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
     try {
       await onSave({
         title: trimmedTitle,
-        content: trimmedContent,
+        // Sent as typed: trimming would change the stored hash (and trigger a
+        // re-embed) for a note whose Markdown legitimately ends in a newline.
+        content,
         noteType,
         tags,
         expectedContentHash: baseHash,

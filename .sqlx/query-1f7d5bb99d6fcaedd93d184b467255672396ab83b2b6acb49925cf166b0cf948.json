@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT n.id\n        FROM notes n\n        WHERE n.owner_id = $1\n          AND ($3 OR NOT n.is_archived)\n          AND ((n.title || ' ' || n.search_text) ILIKE $5\n               OR $2 <% (n.title || ' ' || n.search_text))\n        ORDER BY ((n.title || ' ' || n.search_text) ILIKE $5) DESC,\n                 word_similarity($2, n.title || ' ' || n.search_text) DESC,\n                 n.id DESC\n        LIMIT $4\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "notes",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Bool",
+        "Int8",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "1f7d5bb99d6fcaedd93d184b467255672396ab83b2b6acb49925cf166b0cf948"
+}

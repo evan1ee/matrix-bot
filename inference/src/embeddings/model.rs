@@ -125,9 +125,11 @@ impl EmbeddingModel {
         }
 
         let outputs = self.session.run(inputs).map_err(|e| infer(&e))?;
-        let (out_shape, hidden) = outputs[0]
-            .try_extract_tensor::<f32>()
-            .map_err(|e| infer(&e))?;
+        let first = outputs
+            .values()
+            .next()
+            .ok_or_else(|| EmbedError::Inference("model returned no outputs".to_string()))?;
+        let (out_shape, hidden) = first.try_extract_tensor::<f32>().map_err(|e| infer(&e))?;
         let expected_len = batch * seq * EMBEDDING_DIM;
         if out_shape.len() != 3
             || out_shape[2] != EMBEDDING_DIM as i64

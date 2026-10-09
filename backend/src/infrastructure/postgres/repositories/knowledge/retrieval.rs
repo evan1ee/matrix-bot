@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 
 use pgvector::Vector;
-use sqlx::PgExecutor;
+use sqlx::{PgExecutor, PgPool};
 
 use crate::domain::accounts::AccountId;
 use crate::domain::knowledge::search::{ItemKey, KnowledgeItemType};
@@ -90,23 +90,35 @@ pub(super) fn like_pattern(query: &str) -> String {
     pattern
 }
 
+/// Word similarity at or above which a typo or partial word counts as a match.
+const WORD_SIMILARITY_THRESHOLD: &str = "0.3";
+
 /// Notes containing `query` as a substring, or a word similar to it, best
 /// first (substring matches before fuzzy ones).
 ///
 /// The substring match is what finds Chinese, Japanese and Korean text: the
 /// `simple` configuration keeps a run of those characters as one token, and
 /// trigram similarity cannot match the middle of such a run because trigrams
-/// are padded at word edges. The `pg_trgm` GIN index accelerates the `ILIKE`
-/// for queries of three or more characters. `word_similarity` adds tolerance
-/// for typos and partial words in other scripts.
+/// are padded at word edges. Both predicates are written as operators the
+/// `pg_trgm` GIN index can serve (`ILIKE`, and `<%` for word similarity, whose
+/// cut-off is the transaction-local `pg_trgm.word_similarity_threshold`), so a
+/// large vault is not scanned row by row. The `ILIKE` side only benefits from
+/// the index for queries of three or more characters.
 pub async fn search_notes_trigram(
-    executor: impl PgExecutor<'_>,
+    pool: &PgPool,
     owner: &AccountId,
     query: &str,
     include_archived: bool,
     limit: i64,
 ) -> Result<Vec<ItemKey>, sqlx::Error> {
     let pattern = like_pattern(query);
+    let mut tx = pool.begin().await?;
+    sqlx::query!(
+        "SELECT set_config('pg_trgm.word_similarity_threshold', $1, true)",
+        WORD_SIMILARITY_THRESHOLD
+    )
+    .fetch_one(&mut *tx)
+    .await?;
     let rows = sqlx::query!(
         r#"
         SELECT n.id
@@ -114,7 +126,7 @@ pub async fn search_notes_trigram(
         WHERE n.owner_id = $1
           AND ($3 OR NOT n.is_archived)
           AND ((n.title || ' ' || n.search_text) ILIKE $5
-               OR word_similarity($2, n.title || ' ' || n.search_text) > 0.3)
+               OR $2 <% (n.title || ' ' || n.search_text))
         ORDER BY ((n.title || ' ' || n.search_text) ILIKE $5) DESC,
                  word_similarity($2, n.title || ' ' || n.search_text) DESC,
                  n.id DESC
@@ -126,8 +138,9 @@ pub async fn search_notes_trigram(
         limit,
         pattern
     )
-    .fetch_all(executor)
+    .fetch_all(&mut *tx)
     .await?;
+    tx.commit().await?;
 
     Ok(rows
         .into_iter()

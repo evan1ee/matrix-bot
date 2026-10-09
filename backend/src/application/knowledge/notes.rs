@@ -29,6 +29,7 @@ struct Change {
     markdown: String,
     tags: Vec<String>,
     note_type: NoteType,
+    is_archived: bool,
 }
 
 /// Service managing user notes lifecycle and transactional outbox events.
@@ -72,7 +73,7 @@ impl NoteService {
         let derived = markdown::derive(&markdown);
 
         let mut tx = self.pool.begin().await?;
-        let note = repositories::knowledge::insert_note(
+        let mut note = repositories::knowledge::insert_note(
             &mut *tx,
             owner,
             &new.source_channel,
@@ -80,6 +81,12 @@ impl NoteService {
             &fields(&title, &markdown, new.note_type, &tags, &derived),
         )
         .await?;
+        if new.is_archived {
+            repositories::knowledge::archive_note(&mut *tx, note.id.0, owner, true).await?;
+            note = repositories::knowledge::get_note_by_id(&mut *tx, note.id.0, owner)
+                .await?
+                .ok_or_else(not_found)?;
+        }
 
         outbox::publish(&mut tx, &SystemEvent::NoteCreated(note.clone())).await?;
         enqueue_embedding(&mut tx, owner, &note).await?;
@@ -121,6 +128,7 @@ impl NoteService {
                 .map(|tags| normalize_tags(&tags))
                 .unwrap_or_else(|| current.note.tags.clone()),
             note_type: patch.note_type.unwrap_or(current.note.note_type),
+            is_archived: patch.is_archived.unwrap_or(current.note.is_archived),
         };
         let note = apply(&mut tx, owner, current, change).await?;
         tx.commit().await?;
@@ -148,6 +156,7 @@ impl NoteService {
             markdown: validate_content(&merged)?,
             tags: current.note.tags.clone(),
             note_type: current.note.note_type,
+            is_archived: current.note.is_archived,
         };
         let note = apply(&mut tx, owner, current, change).await?;
         tx.commit().await?;
@@ -295,11 +304,12 @@ async fn apply(
         && !title_changed
         && change.tags == current.note.tags
         && change.note_type == current.note.note_type
+        && change.is_archived == current.note.is_archived
     {
         return Ok(current.note);
     }
 
-    let note = repositories::knowledge::update_note(
+    let mut note = repositories::knowledge::update_note(
         &mut **tx,
         current.note.id.0,
         owner,
@@ -313,6 +323,15 @@ async fn apply(
     )
     .await?
     .ok_or_else(not_found)?;
+    // Archiving rides the same transaction and the same event as the edit, so
+    // a failure cannot leave the edit applied and the archive not.
+    if change.is_archived != current.note.is_archived {
+        repositories::knowledge::archive_note(&mut **tx, note.id.0, owner, change.is_archived)
+            .await?;
+        note = repositories::knowledge::get_note_by_id(&mut **tx, note.id.0, owner)
+            .await?
+            .ok_or_else(not_found)?;
+    }
 
     outbox::publish(tx, &SystemEvent::NoteUpdated(note.clone())).await?;
     if body_changed || title_changed {
@@ -829,6 +848,77 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(after_rename.indexed_content_hash, None);
+    }
+
+    #[tokio::test]
+    async fn a_patch_can_archive_and_edit_in_one_transaction_with_one_event() {
+        let pool = test_pool().await;
+        let (svc, alice) = setup(&pool).await;
+        let note = svc
+            .create(&alice, NewNote::new("Draft", "body"))
+            .await
+            .unwrap();
+        sqlx::query!("DELETE FROM outbox_events")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let updated = svc
+            .update(
+                &alice,
+                note.id.0,
+                NotePatch {
+                    title: Some("Final".to_string()),
+                    is_archived: Some(true),
+                    ..NotePatch::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(updated.is_archived);
+        assert_eq!(updated.title, "Final");
+        assert_eq!(event_types(&pool).await, vec!["NoteUpdated"]);
+
+        // Archiving alone also works, and restoring it is a patch too.
+        let restored = svc
+            .update(
+                &alice,
+                note.id.0,
+                NotePatch {
+                    is_archived: Some(false),
+                    ..NotePatch::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert!(!restored.is_archived);
+    }
+
+    #[tokio::test]
+    async fn a_stale_hash_refuses_the_archive_too() {
+        let pool = test_pool().await;
+        let (svc, alice) = setup(&pool).await;
+        let note = svc
+            .create(&alice, NewNote::new("Draft", "body"))
+            .await
+            .unwrap();
+
+        let err = svc
+            .update(
+                &alice,
+                note.id.0,
+                NotePatch {
+                    is_archived: Some(true),
+                    expected: ExpectedHash::Exactly(markdown::content_hash("other")),
+                    ..NotePatch::default()
+                },
+            )
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, AppError::Conflict(_)), "{err:?}");
+        assert!(!svc.get(&alice, note.id.0).await.unwrap().note.is_archived);
     }
 
     async fn titles(svc: &NoteService, owner: &AccountId, search: &str) -> Vec<String> {

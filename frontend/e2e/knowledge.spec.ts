@@ -199,6 +199,18 @@ test.describe('Notes', () => {
     expect(note.content).toBe('Merged by hand');
   });
 
+  test('saves the Markdown exactly as typed, trailing newline included', async ({ app, api }) => {
+    const note = api.seedNote({ title: 'Imported file', content: 'First line\n' });
+
+    await gotoKnowledge(app);
+    await app.getByTestId(`note-card-${note.id}`).getByRole('button', { name: 'Edit note' }).click();
+    await app.getByLabel('Content').fill('First line\nSecond line\n');
+    await app.getByRole('button', { name: 'Update Note' }).click();
+
+    await expect(app.getByRole('heading', { name: 'Edit Note' })).not.toBeVisible();
+    expect(note.content).toBe('First line\nSecond line\n');
+  });
+
   test('saves the chosen note type', async ({ app, api }) => {
     await gotoKnowledge(app);
 

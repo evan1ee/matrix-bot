@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM outbox_events",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "e43e44a04e4d541eb2bb8e1f7124fcdb7fb69e7d7defceeeb5f4c701a68ab2a8"
+}

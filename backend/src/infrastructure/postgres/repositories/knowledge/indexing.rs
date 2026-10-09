@@ -15,8 +15,7 @@ use crate::domain::knowledge::search::KnowledgeItemType;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NoteIndexInput {
     pub title: String,
-    /// Markdown-stripped text (falls back to the raw body for a note the
-    /// derived-field backfill has not reached).
+    /// Markdown-stripped text (`notes.search_text`).
     pub text: String,
     pub content_hash: ContentHash,
     /// The hash the stored chunks were built from, if any.

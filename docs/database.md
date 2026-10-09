@@ -143,7 +143,7 @@ Migration `0011_knowledge_base` introduces the personal knowledge base and vecto
 
 `0012` rewrites `format` to `markdown` (guarded, data only), `0013` adds the columns, `pg_trgm` and the indexes, and `0014` makes `content_hash`, `search_text` and `excerpt` NOT NULL and rebuilds the generated column and trigram index over `search_text` alone. `0014` aborts naming up to 20 note ids if any column is still NULL, which means the database held notes written before `0013` and the backfill (removed in this release) never filled them: deploy commit `0f01833` first (runbook in `docs/superpowers/HANDOFF.md`).
 
-`pg_trgm` and `vector` come from the `pgvector/pgvector` image's contrib set; the trigram GIN index covers `title || ' ' || search_text`, which is the exact expression the `ILIKE` and `word_similarity` queries use, so a query must keep that expression to use it.
+`pg_trgm` and `vector` come from the `pgvector/pgvector` image's contrib set; the trigram GIN index covers `title || ' ' || search_text`, which is the exact expression the `ILIKE` and `<%` (word similarity, threshold 0.3 set per transaction) predicates use, so a query must keep that expression to use the index; both branches are served by it.
 
 **Rebuild invariant.** Embeddings are derived data. Deleting every row of `knowledge_embeddings` and clearing `notes.indexed_content_hash` loses nothing: `knowledge.backfill_embeddings` re-queues every item and the chunks come back identical (a test pins this). The same path re-tags everything after an `EMBEDDING_MODEL` change.
 

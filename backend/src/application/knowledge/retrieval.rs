@@ -15,7 +15,7 @@ use crate::application::AppError;
 use crate::domain::accounts::AccountId;
 use crate::domain::knowledge::search::{
     contains_cjk, embedding_prefixes, rrf, ItemKey, KnowledgeItemType, SearchMode, SearchOutcome,
-    SearchResultItem,
+    SearchResultItem, EMBEDDING_DIMENSIONS,
 };
 use crate::infrastructure::postgres::repositories::knowledge::{self as knowledge_repo, VectorHit};
 
@@ -28,6 +28,9 @@ const RRF_K: u32 = 60;
 const TRIGRAM_BELOW: usize = 3;
 /// Hard cap on how many results a caller can request.
 const MAX_RESULTS: i64 = 50;
+/// Longest query accepted: it is matched against every note the owner has and
+/// sent to the embedder, so it is bounded like every other user string.
+pub const MAX_QUERY_CHARS: usize = 500;
 
 /// What to search for and how to scope it.
 #[derive(Debug, Clone)]
@@ -121,6 +124,11 @@ impl SearchService {
         query: SearchQuery,
     ) -> Result<SearchOutcome, AppError> {
         let text = query.text.trim();
+        if text.chars().count() > MAX_QUERY_CHARS {
+            return Err(AppError::Validation(format!(
+                "search query must be at most {MAX_QUERY_CHARS} characters"
+            )));
+        }
         let types = resolve_types(query.filter_types.as_deref());
         if text.is_empty() || types.is_empty() {
             return Ok(SearchOutcome {
@@ -277,7 +285,13 @@ impl SearchService {
                 return Ok(None);
             }
             Ok(Ok(vectors)) => match vectors.into_iter().next() {
-                Some(vector) => vector,
+                // A vector of another size would make the distance query fail
+                // with a database error; treat it as an embedder fault.
+                Some(vector) if vector.len() == EMBEDDING_DIMENSIONS => vector,
+                Some(_) => {
+                    degraded("dimension");
+                    return Ok(None);
+                }
                 None => {
                     degraded("empty_response");
                     return Ok(None);
@@ -405,6 +419,41 @@ mod tests {
                 .await
                 .unwrap()
         }
+    }
+
+    #[tokio::test]
+    async fn a_query_longer_than_the_cap_is_a_validation_error() {
+        let f = fixture().await;
+        let long = "a".repeat(MAX_QUERY_CHARS + 1);
+
+        let err = f
+            .search
+            .search(&f.alice, SearchQuery::new(long))
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, AppError::Validation(_)), "{err:?}");
+        let at_the_cap = "a".repeat(MAX_QUERY_CHARS);
+        assert!(f
+            .search
+            .search(&f.alice, SearchQuery::new(at_the_cap))
+            .await
+            .is_ok());
+    }
+
+    #[tokio::test]
+    async fn a_query_vector_of_the_wrong_size_degrades_to_keywords_instead_of_failing() {
+        let f = fixture().await;
+        f.note("Rust", "walrus notes").await;
+        let search = SearchService::new(f.pool.clone(), Arc::new(MockEmbeddingProvider::new(8)));
+
+        let outcome = search
+            .search(&f.alice, SearchQuery::new("walrus").limit(10))
+            .await
+            .expect("a wrong-size vector must not be a 500");
+
+        assert_eq!(outcome.mode, SearchMode::Lexical);
+        assert_eq!(outcome.items.len(), 1);
     }
 
     #[test]

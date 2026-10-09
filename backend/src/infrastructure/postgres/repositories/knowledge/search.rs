@@ -8,6 +8,9 @@ use crate::domain::accounts::AccountId;
 /// Stores one chunk, replacing the chunk at the same index. `model` records
 /// which embedding model produced the vector, so chunks from a model that is no
 /// longer configured can be found and rebuilt.
+// Allowed: eight positional arguments, one per column the row stores; a
+// parameter struct would only restate the same fields at the sole production
+// call site. Scope: this function. Remove if a second writer of chunk rows appears.
 #[allow(clippy::too_many_arguments)]
 pub async fn upsert_embedding_chunk(
     executor: impl PgExecutor<'_>,

@@ -16,6 +16,9 @@ pub struct ParsedNote {
     pub tags: Vec<String>,
     /// As written in the file; the importer decides whether it is a known type.
     pub note_type: Option<String>,
+    /// `None` when the file does not say, which leaves an existing note's state alone.
+    pub archived: Option<bool>,
+    pub source_ref: Option<String>,
 }
 
 /// Longest slug in an exported file name, in characters.
@@ -32,18 +35,45 @@ struct Frontmatter {
     note_type: Option<String>,
     title: Option<String>,
     tags: Option<Vec<String>>,
+    archived: Option<bool>,
+    source_ref: Option<String>,
 }
 
 pub fn render_note_file(doc: &NoteDocument) -> String {
     let note = &doc.note;
     let tags: Vec<String> = note.tags.iter().map(|tag| quote(tag)).collect();
+    // `source_ref` is the only optional key, so the key order stays fixed.
+    let source_ref = note
+        .source_ref
+        .as_deref()
+        .map(|r| {
+            format!(
+                "source_ref: {}
+",
+                quote(r)
+            )
+        })
+        .unwrap_or_default();
     format!(
-        "---\nid: {}\ntype: {}\ntitle: {}\ntags: [{}]\nsource: {}\ncreated_at: {}\nupdated_at: {}\n---\n\n{}",
+        "---
+id: {}
+type: {}
+title: {}
+tags: [{}]
+source: {}
+{}archived: {}
+created_at: {}
+updated_at: {}
+---
+
+{}",
         note.id,
         note.note_type,
         quote(&note.title),
         tags.join(", "),
         note.source_channel,
+        source_ref,
+        note.is_archived,
         note.created_at.to_rfc3339_opts(SecondsFormat::Secs, true),
         note.updated_at.to_rfc3339_opts(SecondsFormat::Secs, true),
         doc.markdown,
@@ -69,9 +99,16 @@ pub fn parse_note_file(file_name: &str, text: &str) -> ParsedNote {
         Some((front, body)) => (Some(front), body),
         None => (None, text),
     };
-    let (id, note_type, tags, title) = match front {
-        Some(f) => (f.id, f.note_type, f.tags.unwrap_or_default(), f.title),
-        None => (None, None, Vec::new(), None),
+    let (id, note_type, tags, title, archived, source_ref) = match front {
+        Some(f) => (
+            f.id,
+            f.note_type,
+            f.tags.unwrap_or_default(),
+            f.title,
+            f.archived,
+            f.source_ref,
+        ),
+        None => (None, None, Vec::new(), None, None, None),
     };
     let title = title
         .map(|t| t.trim().to_string())
@@ -84,6 +121,8 @@ pub fn parse_note_file(file_name: &str, text: &str) -> ParsedNote {
         markdown: body.to_string(),
         tags,
         note_type,
+        archived,
+        source_ref,
     }
 }
 
@@ -200,7 +239,7 @@ mod tests {
         ));
         assert_eq!(
             file,
-            "---\nid: 42\ntype: decision\ntitle: \"Use Postgres\"\ntags: [\"a\", \"b\"]\nsource: web\n\
+            "---\nid: 42\ntype: decision\ntitle: \"Use Postgres\"\ntags: [\"a\", \"b\"]\nsource: web\narchived: false\n\
              created_at: 2026-10-08T02:00:00Z\nupdated_at: 2026-10-08T02:00:00Z\n---\n\n# Why\n\nBoring."
         );
     }
@@ -229,6 +268,25 @@ mod tests {
             assert_eq!(parsed.id, Some(42));
             assert_eq!(parsed.note_type.as_deref(), Some("idea"));
         }
+    }
+
+    #[test]
+    fn archived_state_and_source_ref_round_trip() {
+        let mut original = doc("Kept", "body", &[], NoteType::Note);
+        original.note.is_archived = true;
+        original.note.source_ref = Some("mxc://x/\"y\"".to_string());
+
+        let parsed = parse_note_file("a.md", &render_note_file(&original));
+
+        assert_eq!(parsed.archived, Some(true));
+        assert_eq!(parsed.source_ref.as_deref(), Some("mxc://x/\"y\""));
+        let plain = parse_note_file(
+            "b.md",
+            &render_note_file(&doc("T", "b", &[], NoteType::Note)),
+        );
+        assert_eq!(plain.archived, Some(false));
+        assert_eq!(plain.source_ref, None);
+        assert_eq!(parse_note_file("c.md", "# only a heading").archived, None);
     }
 
     #[test]

@@ -113,6 +113,7 @@ impl UpdateNoteInput {
             markdown: self.content,
             tags: self.tags,
             note_type: self.note_type.as_deref().map(str::parse).transpose()?,
+            is_archived: self.is_archived,
             expected: match self.expected_content_hash {
                 Some(hash) => ExpectedHash::Exactly(ContentHash::from_hex(&hash)?),
                 None => ExpectedHash::Any,
@@ -302,7 +303,6 @@ pub async fn update_note(
     Path(id): Path<i64>,
     Json(payload): Json<UpdateNoteInput>,
 ) -> Result<Json<Note>, ApiError> {
-    let archived = payload.is_archived;
     let patch = payload
         .into_patch()
         .map_err(crate::application::AppError::from)?;
@@ -311,12 +311,6 @@ pub async fn update_note(
         .update(&user.account_id, id, patch)
         .await
         .map_err(ApiError::from)?;
-    if let Some(archived) = archived {
-        notes
-            .archive_note(&user.account_id, id, archived)
-            .await
-            .map_err(ApiError::from)?;
-    }
     let document = notes
         .get(&user.account_id, id)
         .await

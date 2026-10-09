@@ -135,6 +135,8 @@ pub struct NewNote {
     pub source_channel: String,
     pub source_ref: Option<String>,
     pub tags: Vec<String>,
+    /// Created already archived (an import of an archived note).
+    pub is_archived: bool,
 }
 
 impl NewNote {
@@ -147,6 +149,7 @@ impl NewNote {
             source_channel: "web".to_string(),
             source_ref: None,
             tags: Vec::new(),
+            is_archived: false,
         }
     }
 
@@ -163,6 +166,11 @@ impl NewNote {
 
     pub fn tags(mut self, tags: Vec<String>) -> Self {
         self.tags = tags;
+        self
+    }
+
+    pub fn archived(mut self, is_archived: bool) -> Self {
+        self.is_archived = is_archived;
         self
     }
 }
@@ -192,6 +200,7 @@ pub struct NotePatch {
     pub markdown: Option<String>,
     pub tags: Option<Vec<String>>,
     pub note_type: Option<NoteType>,
+    pub is_archived: Option<bool>,
     pub expected: ExpectedHash,
 }
 

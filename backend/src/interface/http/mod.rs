@@ -97,6 +97,22 @@ pub async fn bind(config: &Config) -> anyhow::Result<TcpListener> {
     Ok(listener)
 }
 
+/// The CORS policy for the allowlisted origins. Response headers the SPA reads
+/// (`X-Search-Mode` for the degraded-search notice, `Content-Disposition` for
+/// the export file name) are exposed, otherwise a cross-origin page cannot see
+/// them.
+fn cors_layer(allowed_origins: Vec<HeaderValue>) -> CorsLayer {
+    CorsLayer::new()
+        .allow_origin(allowed_origins)
+        .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
+        .allow_headers([header::CONTENT_TYPE])
+        .expose_headers([
+            header::CONTENT_DISPOSITION,
+            header::HeaderName::from_static(knowledge::SEARCH_MODE_HEADER),
+        ])
+        .allow_credentials(true)
+}
+
 /// Serves the API on `listener` until `shutdown` is cancelled.
 ///
 /// Returns the server task so the composition root can bound its shutdown;
@@ -154,11 +170,7 @@ pub fn start_api_server(
         info!("CORS: allowing origins {:?}", allowed_origins);
     }
 
-    let cors = CorsLayer::new()
-        .allow_origin(allowed_origins)
-        .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
-        .allow_headers([header::CONTENT_TYPE])
-        .allow_credentials(true);
+    let cors = cors_layer(allowed_origins);
 
     let api_routes = api_routes();
 
@@ -391,6 +403,41 @@ mod api_host_tests {
         assert!(parse_api_host("not-an-ip").is_err());
         assert!(parse_api_host("").is_err());
         assert!(parse_api_host("localhost").is_err());
+    }
+}
+
+#[cfg(test)]
+mod cors_tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn a_cross_origin_page_may_read_the_search_mode_and_file_name_headers() {
+        let origin = HeaderValue::from_static("https://app.example.com");
+        let app = Router::new()
+            .route("/x", get(|| async { "ok" }))
+            .layer(cors_layer(vec![origin.clone()]));
+
+        let response = app
+            .oneshot(
+                Request::get("/x")
+                    .header(header::ORIGIN, origin)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        let exposed = response
+            .headers()
+            .get(header::ACCESS_CONTROL_EXPOSE_HEADERS)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        assert!(exposed.contains("x-search-mode"), "{exposed}");
+        assert!(exposed.contains("content-disposition"), "{exposed}");
     }
 }
 

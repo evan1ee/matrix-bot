@@ -121,13 +121,16 @@ export function useDeleteNote() {
   });
 }
 
+/** The server allows archive requests up to 180 s; the client must not give up first. */
+const ARCHIVE_TIMEOUT_MS = 200_000;
+
 /**
  * Downloads every note as a zip of Markdown files. Needs a recently verified
  * session, so a stale one is asked for a passkey and the download retried.
  */
 export function useExportNotes() {
   return useSensitiveAction<void, void>(async () => {
-    const { blob, headers } = await fetchApiBlob('/notes/export');
+    const { blob, headers } = await fetchApiBlob('/notes/export', { timeoutMs: ARCHIVE_TIMEOUT_MS });
     saveBlob(blob, filenameFromDisposition(headers.get('content-disposition')) ?? 'notes.zip');
   });
 }
@@ -138,7 +141,11 @@ export function useImportNotes() {
     (file) => {
       const form = new FormData();
       form.append('file', file);
-      return fetchApi<ImportReport>('/notes/import', { method: 'POST', body: form });
+      return fetchApi<ImportReport>('/notes/import', {
+        method: 'POST',
+        body: form,
+        timeoutMs: ARCHIVE_TIMEOUT_MS,
+      });
     },
     [['notes'], ['notes-tags']]
   );
