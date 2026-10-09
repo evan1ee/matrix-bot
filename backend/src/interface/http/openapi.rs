@@ -332,6 +332,7 @@ use crate::interface::http::{
             bookmarks::BookmarkStats,
             bookmarks::DomainCount,
             knowledge::Note,
+            knowledge::NoteSummary,
             knowledge::CreateNoteInput,
             knowledge::UpdateNoteInput,
             knowledge::KnowledgeSearchRequest,

@@ -122,13 +122,13 @@ Personal notes and semantic search endpoints are mounted under `/api/v1`:
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| `GET` | `/api/v1/notes` | Session / Bearer | List notes with optional `?archived=bool`, `?tag=string`, `?search=string` |
-| `POST` | `/api/v1/notes` | Session / Bearer | Create note (`CreateNoteInput: { title, content, format?, tags? }`) |
+| `GET` | `/api/v1/notes` | Session / Bearer | List `NoteSummary` items (metadata and an `excerpt`; never `content`) with optional `?archived=bool`, `?tag=string`, `?limit=n` |
+| `POST` | `/api/v1/notes` | Session / Bearer | Create note (`CreateNoteInput: { title, content, note_type?, tags?, format? }`); `format` is accepted and ignored, an unknown `note_type` is a 400. Returns `Note` |
 | `GET` | `/api/v1/notes/tags` | Session / Bearer | List all unique tags used across notes |
-| `GET` | `/api/v1/notes/:id` | Session / Bearer | Fetch note details by ID |
-| `PUT` | `/api/v1/notes/:id` | Session / Bearer | Update note (`UpdateNoteInput: { title?, content?, format?, tags?, is_archived? }`) |
+| `GET` | `/api/v1/notes/:id` | Session / Bearer | Fetch one `Note`: the summary fields plus `content` (Markdown) and `format` (always `"markdown"`) |
+| `PUT` | `/api/v1/notes/:id` | Session / Bearer | Update note (`UpdateNoteInput: { title?, content?, note_type?, tags?, is_archived?, expected_content_hash? }`). When `expected_content_hash` (the `content_hash` the editor loaded) no longer matches the stored body the update is refused with 409 `{"error":"note changed since it was loaded","code":409}`; omit it for last-writer-wins. A malformed hash is a 400 |
 | `DELETE` | `/api/v1/notes/:id` | Session / Bearer | Permanently delete note (204 No Content) |
-| `POST` | `/api/v1/knowledge/search` | Session / Bearer | Hybrid search (`KnowledgeSearchRequest: { query, filter_types?, limit? }`) returning `Vec<SearchResultItem>` |
+| `POST` | `/api/v1/knowledge/search` | Session / Bearer | Hybrid search (`KnowledgeSearchRequest: { query, filter_types?, limit?, include_archived? }`) returning `Vec<SearchResultItem>`. The `X-Search-Mode` response header is `hybrid`, or `lexical` when the embedder was unavailable and only keyword results are returned; the body stays a bare array |
 
 Mutations publish `NoteCreated`, `NoteUpdated`, or `NoteDeleted` outbox events with valid `owner_id()`. Background durable jobs (`knowledge.embed`) chunk and embed note content asynchronously for vector search.
 

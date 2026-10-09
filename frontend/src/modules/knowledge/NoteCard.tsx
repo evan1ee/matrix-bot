@@ -1,12 +1,12 @@
 import React from 'react';
-import { Edit2, Archive, ArchiveRestore, Trash2, FileText, Quote, AlignLeft } from 'lucide-react';
-import type { Note } from './types';
+import { Edit2, Archive, ArchiveRestore, Trash2, FileText } from 'lucide-react';
+import type { NoteSummary } from './types';
 
 interface NoteCardProps {
-  note: Note;
-  onEdit: (note: Note) => void;
-  onDelete: (note: Note) => void;
-  onToggleArchive: (note: Note) => void;
+  note: NoteSummary;
+  onEdit: (note: NoteSummary) => void;
+  onDelete: (note: NoteSummary) => void;
+  onToggleArchive: (note: NoteSummary) => void;
   onSelectTag?: (tag: string) => void;
 }
 
@@ -17,17 +17,6 @@ export const NoteCard: React.FC<NoteCardProps> = ({
   onToggleArchive,
   onSelectTag,
 }) => {
-  const formatIcon = () => {
-    switch (note.format) {
-      case 'quote':
-        return <Quote className="w-3.5 h-3.5 text-neutral-400" />;
-      case 'plain':
-        return <AlignLeft className="w-3.5 h-3.5 text-neutral-400" />;
-      default:
-        return <FileText className="w-3.5 h-3.5 text-neutral-400" />;
-    }
-  };
-
   const formattedDate = new Date(note.updated_at).toLocaleDateString(undefined, {
     month: 'short',
     day: 'numeric',
@@ -39,12 +28,12 @@ export const NoteCard: React.FC<NoteCardProps> = ({
       className="group relative flex flex-col justify-between rounded-xl bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 hover:border-neutral-400 dark:hover:border-neutral-600 transition-colors p-5 space-y-3 shadow-xs"
     >
       <div className="space-y-2">
-        {/* Top Header: Format & Action Buttons */}
+        {/* Top Header: Type & Action Buttons */}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-1.5 text-neutral-500">
-            {formatIcon()}
+            <FileText className="w-3.5 h-3.5 text-neutral-400" />
             <span className="text-[11px] font-mono uppercase tracking-wider text-neutral-400">
-              {note.format}
+              {note.note_type}
             </span>
             {note.source_channel && (
               <>
@@ -96,9 +85,9 @@ export const NoteCard: React.FC<NoteCardProps> = ({
           {note.title}
         </h3>
 
-        {/* Content Snippet */}
+        {/* Excerpt */}
         <p className="text-xs text-neutral-600 dark:text-neutral-400 line-clamp-3 leading-relaxed font-sans">
-          {note.content}
+          {note.excerpt}
         </p>
       </div>
 

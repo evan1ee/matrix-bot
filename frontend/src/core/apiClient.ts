@@ -17,14 +17,15 @@ export class ApiHttpError extends Error {
 }
 
 /**
- * Calls the API with the session cookie attached.
+ * Calls the API with the session cookie attached, and returns the response
+ * headers alongside the body (a few endpoints signal state in a header).
  *
  * There is no token to read or store any more. The session lives in an
  * HttpOnly cookie the browser sends automatically, which is why `credentials:
  * 'include'` is the whole of the auth logic here — and why an XSS on this page
  * cannot read the credential out and use it elsewhere.
  */
-export async function fetchApi<T>(
+export async function fetchApiResponse<T>(
   endpoint: string,
   options: RequestInit & {
     /**
@@ -36,7 +37,7 @@ export async function fetchApi<T>(
      */
     timeoutMs?: number;
   } = {}
-): Promise<T> {
+): Promise<{ data: T; headers: Headers }> {
   const { timeoutMs = 90_000, suppressAuthEvent, signal: callerSignal, ...fetchOptions } = options;
 
   const controller = new AbortController();
@@ -74,7 +75,7 @@ export async function fetchApi<T>(
   }
 
   if (response.status === 204) {
-    return {} as T;
+    return { data: {} as T, headers: response.headers };
   }
 
   let data: any;
@@ -100,5 +101,13 @@ export async function fetchApi<T>(
     throw new ApiHttpError(data.error || `HTTP error! Status: ${response.status}`, response.status, data);
   }
 
-  return data as T;
+  return { data: data as T, headers: response.headers };
+}
+
+/** [`fetchApiResponse`] for callers that only need the body. */
+export async function fetchApi<T>(
+  endpoint: string,
+  options: Parameters<typeof fetchApiResponse>[1] = {}
+): Promise<T> {
+  return (await fetchApiResponse<T>(endpoint, options)).data;
 }

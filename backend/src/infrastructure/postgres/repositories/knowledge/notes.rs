@@ -308,43 +308,6 @@ pub async fn list_notes(
     rows.into_iter().map(Note::try_from).collect()
 }
 
-/// Like [`list_notes`] but with bodies.
-///
-/// Temporary: the REST list still returns `content` until the API contract
-/// changes (notes refactor task 7), which deletes this function.
-pub async fn list_note_documents(
-    executor: impl PgExecutor<'_>,
-    owner: &AccountId,
-    tag_filter: Option<&str>,
-    include_archived: bool,
-    limit: i64,
-) -> Result<Vec<NoteDocument>, sqlx::Error> {
-    let rows = sqlx::query_as!(
-        NoteDocumentRow,
-        r#"
-        SELECT
-            id, owner_id, title, content, note_type, source_channel, source_ref, tags,
-            COALESCE(excerpt, left(content, 200)) AS "excerpt!",
-            COALESCE(content_hash, encode(sha256(convert_to(content, 'UTF8')), 'hex')) AS "content_hash!",
-            is_archived, created_at, updated_at, indexed_at
-        FROM notes
-        WHERE owner_id = $1
-          AND ($2::TEXT IS NULL OR $2 = ANY(tags))
-          AND ($3::BOOLEAN OR is_archived = FALSE)
-        ORDER BY updated_at DESC
-        LIMIT $4
-        "#,
-        owner.as_uuid(),
-        tag_filter,
-        include_archived,
-        limit
-    )
-    .fetch_all(executor)
-    .await?;
-
-    rows.into_iter().map(NoteDocument::try_from).collect()
-}
-
 /// A note whose derived columns have not been filled yet.
 pub struct MissingDerived {
     pub id: i64,

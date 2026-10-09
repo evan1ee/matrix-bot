@@ -2379,7 +2379,10 @@ export interface components {
         };
         CreateNoteInput: {
             content: string;
+            /** @description Accepted and ignored: notes are Markdown. */
             format?: string | null;
+            /** @description One of `note` (default), `idea`, `fact`, `observation`, `decision`. */
+            note_type?: string | null;
             tags?: string[] | null;
             title: string;
         };
@@ -2870,13 +2873,28 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
-        Note: {
+        /** @description A single note: the summary fields plus the Markdown body. */
+        Note: components["schemas"]["NoteSummary"] & {
             content: string;
-            created_at: string;
+            /** @description Always `"markdown"`; kept so single-note readers keep working. */
             format: string;
+        };
+        /** @description A note without its body, as listed. The excerpt is what a list renders. */
+        NoteSummary: {
+            /**
+             * @description SHA-256 of the Markdown body; send it back as `expected_content_hash`
+             *     when saving so a stale editor cannot overwrite a newer write.
+             */
+            content_hash: string;
+            created_at: string;
+            excerpt: string;
             /** Format: int64 */
             id: number;
+            /** @description When the embeddings were last built from `content_hash`. */
+            indexed_at?: string | null;
             is_archived: boolean;
+            /** @description One of `note`, `idea`, `fact`, `observation`, `decision`. */
+            note_type: string;
             owner_id: string;
             source_channel: string;
             source_ref?: string | null;
@@ -3528,8 +3546,15 @@ export interface components {
         };
         UpdateNoteInput: {
             content?: string | null;
+            /**
+             * @description The `content_hash` of the note as the editor loaded it. When it no
+             *     longer matches the stored body the update is refused with 409.
+             */
+            expected_content_hash?: string | null;
+            /** @description Accepted and ignored: notes are Markdown. */
             format?: string | null;
             is_archived?: boolean | null;
+            note_type?: string | null;
             tags?: string[] | null;
             title?: string | null;
         };
@@ -6942,7 +6967,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Note"][];
+                    "application/json": components["schemas"]["NoteSummary"][];
                 };
             };
         };
@@ -7041,6 +7066,27 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Note"];
                 };
+            };
+            /** @description Unknown note type or malformed content hash */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Note not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The note changed since it was loaded */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

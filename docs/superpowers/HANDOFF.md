@@ -125,7 +125,7 @@ Spec: `docs/superpowers/specs/2026-10-08-second-brain-refactor-design.md`. Plan:
 | 4 | Search rewrite (lexical + vector + RRF) | Done |
 | 5 | Indexing: skip-on-hash, model tagging | Done |
 | 6 | Real e5 inference | Done (code + real-model tests; operator deploy pending, Track 1) |
-| 7 | API contract + frontend | Pending |
+| 7 | API contract + frontend | Done |
 | 8 | LLM / MCP tools | Pending |
 | 9 | Export / import | Pending |
 | 10 | Migration 0014 | Pending |

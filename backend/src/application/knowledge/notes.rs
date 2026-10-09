@@ -160,28 +160,6 @@ impl NoteService {
         )
     }
 
-    /// Like [`Self::list`] but with bodies.
-    ///
-    /// Temporary: the REST list still returns `content` until the API
-    /// contract changes (notes refactor task 7), which deletes this method.
-    pub async fn list_documents(
-        &self,
-        owner: &AccountId,
-        tag: Option<&str>,
-        include_archived: bool,
-        limit: i64,
-    ) -> Result<Vec<NoteDocument>, AppError> {
-        let limit = limit.clamp(1, 100);
-        Ok(repositories::knowledge::list_note_documents(
-            &self.pool,
-            owner,
-            tag,
-            include_archived,
-            limit,
-        )
-        .await?)
-    }
-
     /// Fills the derived columns (hash, plain text, excerpt) of up to `batch`
     /// notes written before those columns existed, in one transaction, and
     /// returns how many it filled. Idempotent: a filled note is never listed

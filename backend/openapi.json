@@ -4407,7 +4407,7 @@
                 "schema": {
                   "type": "array",
                   "items": {
-                    "$ref": "#/components/schemas/Note"
+                    "$ref": "#/components/schemas/NoteSummary"
                   }
                 }
               }
@@ -4558,6 +4558,15 @@
                 }
               }
             }
+          },
+          "400": {
+            "description": "Unknown note type or malformed content hash"
+          },
+          "404": {
+            "description": "Note not found"
+          },
+          "409": {
+            "description": "The note changed since it was loaded"
           }
         },
         "security": [
@@ -8410,6 +8419,12 @@
           },
           "format": {
             "type": "string",
+            "description": "Accepted and ignored: notes are Markdown.",
+            "nullable": true
+          },
+          "note_type": {
+            "type": "string",
+            "description": "One of `note` (default), `idea`, `fact`, `observation`, `decision`.",
             "nullable": true
           },
           "tags": {
@@ -9889,35 +9904,71 @@
         }
       },
       "Note": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/NoteSummary"
+          },
+          {
+            "type": "object",
+            "required": [
+              "content",
+              "format"
+            ],
+            "properties": {
+              "content": {
+                "type": "string"
+              },
+              "format": {
+                "type": "string",
+                "description": "Always `\"markdown\"`; kept so single-note readers keep working."
+              }
+            }
+          }
+        ],
+        "description": "A single note: the summary fields plus the Markdown body."
+      },
+      "NoteSummary": {
         "type": "object",
+        "description": "A note without its body, as listed. The excerpt is what a list renders.",
         "required": [
           "id",
           "owner_id",
           "title",
-          "content",
-          "format",
+          "note_type",
+          "excerpt",
           "source_channel",
           "tags",
+          "content_hash",
           "is_archived",
           "created_at",
           "updated_at"
         ],
         "properties": {
-          "content": {
-            "type": "string"
+          "content_hash": {
+            "type": "string",
+            "description": "SHA-256 of the Markdown body; send it back as `expected_content_hash`\nwhen saving so a stale editor cannot overwrite a newer write."
           },
           "created_at": {
             "type": "string"
           },
-          "format": {
+          "excerpt": {
             "type": "string"
           },
           "id": {
             "type": "integer",
             "format": "int64"
           },
+          "indexed_at": {
+            "type": "string",
+            "description": "When the embeddings were last built from `content_hash`.",
+            "nullable": true
+          },
           "is_archived": {
             "type": "boolean"
+          },
+          "note_type": {
+            "type": "string",
+            "description": "One of `note`, `idea`, `fact`, `observation`, `decision`."
           },
           "owner_id": {
             "type": "string"
@@ -11720,12 +11771,22 @@
             "type": "string",
             "nullable": true
           },
+          "expected_content_hash": {
+            "type": "string",
+            "description": "The `content_hash` of the note as the editor loaded it. When it no\nlonger matches the stored body the update is refused with 409.",
+            "nullable": true
+          },
           "format": {
             "type": "string",
+            "description": "Accepted and ignored: notes are Markdown.",
             "nullable": true
           },
           "is_archived": {
             "type": "boolean",
+            "nullable": true
+          },
+          "note_type": {
+            "type": "string",
             "nullable": true
           },
           "tags": {

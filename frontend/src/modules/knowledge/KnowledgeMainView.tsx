@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import { Plus, Search, Archive, ArchiveRestore, Sparkles, BookOpen } from 'lucide-react';
-import { useNotes, useNoteTags, useCreateNote, useUpdateNote, useDeleteNote } from './api';
+import { useNotes, useNote, useNoteTags, useCreateNote, useUpdateNote, useDeleteNote } from './api';
 import { NoteCard } from './NoteCard';
 import { NoteEditorModal } from './NoteEditorModal';
+import type { NoteEditorSave } from './NoteEditorModal';
 import { KnowledgeSearchPanel } from './KnowledgeSearchPanel';
 import { TagFilterChips } from './TagFilterChips';
 import { ConfirmModal } from '../../components/ConfirmModal';
-import type { Note, SearchResultItem } from './types';
+import type { NoteSummary, SearchResultItem } from './types';
 
 export const KnowledgeMainView: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'active' | 'archived'>('active');
@@ -15,8 +16,11 @@ export const KnowledgeMainView: React.FC = () => {
   const [showHybridSearch, setShowHybridSearch] = useState(false);
 
   const [isEditorOpen, setIsEditorOpen] = useState(false);
-  const [editingNote, setEditingNote] = useState<Note | null>(null);
-  const [noteToDelete, setNoteToDelete] = useState<Note | null>(null);
+  // The editor opens by id: the list only has excerpts, so the body is fetched.
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [noteToDelete, setNoteToDelete] = useState<NoteSummary | null>(null);
+
+  const editedNote = useNote(editingId);
 
   const { data: tags = [] } = useNoteTags();
   const { data: notes = [], isLoading } = useNotes({
@@ -30,42 +34,46 @@ export const KnowledgeMainView: React.FC = () => {
   const deleteMutation = useDeleteNote();
 
   const handleOpenCreate = () => {
-    setEditingNote(null);
+    setEditingId(null);
     setIsEditorOpen(true);
   };
 
-  const handleOpenEdit = (note: Note) => {
-    setEditingNote(note);
+  const handleOpenEdit = (note: Pick<NoteSummary, 'id'>) => {
+    setEditingId(note.id);
     setIsEditorOpen(true);
   };
 
-  const handleSaveNote = async (data: {
-    title: string;
-    content: string;
-    format: string;
-    tags: string[];
-  }) => {
-    if (editingNote) {
+  const handleCloseEditor = () => {
+    setIsEditorOpen(false);
+    setEditingId(null);
+  };
+
+  const handleSaveNote = async (data: NoteEditorSave) => {
+    if (editingId !== null) {
       await updateMutation.mutateAsync({
-        id: editingNote.id,
+        id: editingId,
         input: {
           title: data.title,
           content: data.content,
-          format: data.format,
+          note_type: data.noteType,
           tags: data.tags,
+          // The hash the draft started from, so a stale editor gets a 409.
+          expected_content_hash: data.expectedContentHash,
         },
       });
     } else {
       await createMutation.mutateAsync({
         title: data.title,
         content: data.content,
-        format: data.format,
+        note_type: data.noteType,
         tags: data.tags,
       });
     }
   };
 
-  const handleToggleArchive = async (note: Note) => {
+  const handleReloadNote = async () => (await editedNote.refetch()).data ?? null;
+
+  const handleToggleArchive = async (note: NoteSummary) => {
     await updateMutation.mutateAsync({
       id: note.id,
       input: {
@@ -83,10 +91,7 @@ export const KnowledgeMainView: React.FC = () => {
 
   const handleSelectSearchResult = (item: SearchResultItem) => {
     if (item.item_type === 'note') {
-      const match = notes.find((n) => n.id === item.item_id);
-      if (match) {
-        handleOpenEdit(match);
-      }
+      handleOpenEdit({ id: item.item_id });
     }
   };
 
@@ -222,9 +227,12 @@ export const KnowledgeMainView: React.FC = () => {
       {/* Editor Modal */}
       <NoteEditorModal
         isOpen={isEditorOpen}
-        onClose={() => setIsEditorOpen(false)}
+        onClose={handleCloseEditor}
         onSave={handleSaveNote}
-        initialNote={editingNote}
+        initialNote={editingId !== null ? editedNote.data ?? null : null}
+        isLoading={editingId !== null && editedNote.isLoading}
+        loadError={editingId !== null && editedNote.isError ? 'Could not load this note.' : null}
+        onReload={handleReloadNote}
         isSaving={createMutation.isPending || updateMutation.isPending}
       />
 

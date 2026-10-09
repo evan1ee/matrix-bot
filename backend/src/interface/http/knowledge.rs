@@ -9,45 +9,74 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::application::knowledge::SearchQuery;
-use crate::domain::knowledge::note::{ExpectedHash, NewNote, NoteDocument, NotePatch};
+use crate::domain::knowledge::error::KnowledgeError;
+use crate::domain::knowledge::note::{
+    ContentHash, ExpectedHash, NewNote, NoteDocument, NotePatch, NoteType,
+};
 use crate::interface::http::auth::{ApiState, AuthUser};
 use crate::interface::http::error::ApiError;
 
 /// Response header telling a client whether a search used semantic ranking.
 pub const SEARCH_MODE_HEADER: &str = "x-search-mode";
 
+/// A note without its body, as listed. The excerpt is what a list renders.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
-pub struct Note {
+pub struct NoteSummary {
     pub id: i64,
     pub owner_id: String,
     pub title: String,
-    pub content: String,
-    pub format: String,
+    /// One of `note`, `idea`, `fact`, `observation`, `decision`.
+    pub note_type: String,
+    pub excerpt: String,
     pub source_channel: String,
     pub source_ref: Option<String>,
     pub tags: Vec<String>,
+    /// SHA-256 of the Markdown body; send it back as `expected_content_hash`
+    /// when saving so a stale editor cannot overwrite a newer write.
+    pub content_hash: String,
     pub is_archived: bool,
     pub created_at: String,
     pub updated_at: String,
+    /// When the embeddings were last built from `content_hash`.
+    pub indexed_at: Option<String>,
 }
 
-// The wire shape is unchanged for now (notes refactor task 7 splits it into a
-// summary and a document); `format` is always Markdown.
-impl From<NoteDocument> for Note {
-    fn from(doc: NoteDocument) -> Self {
-        let n = doc.note;
+/// A single note: the summary fields plus the Markdown body.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+pub struct Note {
+    #[serde(flatten)]
+    pub summary: NoteSummary,
+    pub content: String,
+    /// Always `"markdown"`; kept so single-note readers keep working.
+    pub format: String,
+}
+
+impl From<&crate::domain::knowledge::note::Note> for NoteSummary {
+    fn from(n: &crate::domain::knowledge::note::Note) -> Self {
         Self {
             id: n.id.0,
             owner_id: n.owner_id.to_string(),
-            title: n.title,
-            content: doc.markdown,
-            format: "markdown".to_string(),
-            source_channel: n.source_channel,
-            source_ref: n.source_ref,
-            tags: n.tags,
+            title: n.title.clone(),
+            note_type: n.note_type.as_str().to_string(),
+            excerpt: n.excerpt.clone(),
+            source_channel: n.source_channel.clone(),
+            source_ref: n.source_ref.clone(),
+            tags: n.tags.clone(),
+            content_hash: n.content_hash.to_string(),
             is_archived: n.is_archived,
             created_at: n.created_at.to_rfc3339(),
             updated_at: n.updated_at.to_rfc3339(),
+            indexed_at: n.indexed_at.map(|at| at.to_rfc3339()),
+        }
+    }
+}
+
+impl From<NoteDocument> for Note {
+    fn from(doc: NoteDocument) -> Self {
+        Self {
+            summary: NoteSummary::from(&doc.note),
+            content: doc.markdown,
+            format: "markdown".to_string(),
         }
     }
 }
@@ -56,7 +85,10 @@ impl From<NoteDocument> for Note {
 pub struct CreateNoteInput {
     pub title: String,
     pub content: String,
+    /// Accepted and ignored: notes are Markdown.
     pub format: Option<String>,
+    /// One of `note` (default), `idea`, `fact`, `observation`, `decision`.
+    pub note_type: Option<String>,
     pub tags: Option<Vec<String>>,
 }
 
@@ -64,9 +96,29 @@ pub struct CreateNoteInput {
 pub struct UpdateNoteInput {
     pub title: Option<String>,
     pub content: Option<String>,
+    /// Accepted and ignored: notes are Markdown.
     pub format: Option<String>,
+    pub note_type: Option<String>,
     pub tags: Option<Vec<String>>,
     pub is_archived: Option<bool>,
+    /// The `content_hash` of the note as the editor loaded it. When it no
+    /// longer matches the stored body the update is refused with 409.
+    pub expected_content_hash: Option<String>,
+}
+
+impl UpdateNoteInput {
+    fn into_patch(self) -> Result<NotePatch, KnowledgeError> {
+        Ok(NotePatch {
+            title: self.title,
+            markdown: self.content,
+            tags: self.tags,
+            note_type: self.note_type.as_deref().map(str::parse).transpose()?,
+            expected: match self.expected_content_hash {
+                Some(hash) => ExpectedHash::Exactly(ContentHash::from_hex(&hash)?),
+                None => ExpectedHash::Any,
+            },
+        })
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, ToSchema, Default)]
@@ -117,18 +169,18 @@ impl From<crate::domain::knowledge::search::SearchResultItem> for SearchResultIt
         ("archived" = Option<bool>, Query, description = "Filter by archived state"),
         ("limit" = Option<i64>, Query, description = "Max results (1-100)")
     ),
-    responses((status = 200, body = Vec<Note>)),
+    responses((status = 200, body = Vec<NoteSummary>)),
     security(("session_cookie" = []))
 )]
 pub async fn list_notes(
     user: AuthUser,
     State(state): State<ApiState>,
     Query(query): Query<NoteQuery>,
-) -> Result<Json<Vec<Note>>, ApiError> {
+) -> Result<Json<Vec<NoteSummary>>, ApiError> {
     let notes = state
         .services
         .notes
-        .list_documents(
+        .list(
             &user.account_id,
             query.tag.as_deref(),
             query.archived.unwrap_or(false),
@@ -137,7 +189,7 @@ pub async fn list_notes(
         .await
         .map_err(ApiError::from)?;
 
-    Ok(Json(notes.into_iter().map(Into::into).collect()))
+    Ok(Json(notes.iter().map(NoteSummary::from).collect()))
 }
 
 #[utoipa::path(
@@ -201,7 +253,15 @@ pub async fn create_note(
     Json(payload): Json<CreateNoteInput>,
 ) -> Result<(StatusCode, Json<Note>), ApiError> {
     // `format` is accepted for compatibility and ignored: notes are Markdown.
-    let new = NewNote::new(payload.title, payload.content).tags(payload.tags.unwrap_or_default());
+    let note_type = match payload.note_type.as_deref() {
+        Some(raw) => raw
+            .parse::<NoteType>()
+            .map_err(crate::application::AppError::from)?,
+        None => NoteType::default(),
+    };
+    let new = NewNote::new(payload.title, payload.content)
+        .note_type(note_type)
+        .tags(payload.tags.unwrap_or_default());
     let created = state
         .services
         .notes
@@ -224,7 +284,12 @@ pub async fn create_note(
     path = "/api/v1/notes/{id}",
     params(("id" = i64, Path, description = "Note ID")),
     request_body = UpdateNoteInput,
-    responses((status = 200, body = Note)),
+    responses(
+        (status = 200, body = Note),
+        (status = 400, description = "Unknown note type or malformed content hash"),
+        (status = 404, description = "Note not found"),
+        (status = 409, description = "The note changed since it was loaded")
+    ),
     security(("session_cookie" = []))
 )]
 pub async fn update_note(
@@ -233,19 +298,16 @@ pub async fn update_note(
     Path(id): Path<i64>,
     Json(payload): Json<UpdateNoteInput>,
 ) -> Result<Json<Note>, ApiError> {
-    let patch = NotePatch {
-        title: payload.title,
-        markdown: payload.content,
-        tags: payload.tags,
-        note_type: None,
-        expected: ExpectedHash::Any,
-    };
+    let archived = payload.is_archived;
+    let patch = payload
+        .into_patch()
+        .map_err(crate::application::AppError::from)?;
     let notes = &state.services.notes;
     notes
         .update(&user.account_id, id, patch)
         .await
         .map_err(ApiError::from)?;
-    if let Some(archived) = payload.is_archived {
+    if let Some(archived) = archived {
         notes
             .archive_note(&user.account_id, id, archived)
             .await
@@ -359,20 +421,25 @@ mod tests {
                 title: "Rust Ownership".to_string(),
                 content: "Affine type system and borrow checker".to_string(),
                 format: Some("markdown".to_string()),
+                note_type: None,
                 tags: Some(vec!["rust".to_string(), "systems".to_string()]),
             }),
         )
         .await
         .expect("create note");
         assert_eq!(status, StatusCode::CREATED);
-        assert_eq!(created.title, "Rust Ownership");
-        assert_eq!(created.tags, vec!["rust", "systems"]);
+        assert_eq!(created.summary.title, "Rust Ownership");
+        assert_eq!(created.summary.tags, vec!["rust", "systems"]);
 
         // 2. Get note by ID
-        let Json(fetched) = get_note(auth_user.clone(), State(state.clone()), Path(created.id))
-            .await
-            .expect("get note");
-        assert_eq!(fetched.id, created.id);
+        let Json(fetched) = get_note(
+            auth_user.clone(),
+            State(state.clone()),
+            Path(created.summary.id),
+        )
+        .await
+        .expect("get note");
+        assert_eq!(fetched.summary.id, created.summary.id);
 
         // 3. List tags
         let Json(tags) = list_tags(auth_user.clone(), State(state.clone()))
@@ -385,28 +452,239 @@ mod tests {
         let Json(updated) = update_note(
             auth_user.clone(),
             State(state.clone()),
-            Path(created.id),
+            Path(created.summary.id),
             Json(UpdateNoteInput {
                 title: Some("Rust Ownership 2.0".to_string()),
-                content: None,
-                format: None,
-                tags: None,
-                is_archived: None,
+                ..Default::default()
             }),
         )
         .await
         .expect("update note");
-        assert_eq!(updated.title, "Rust Ownership 2.0");
+        assert_eq!(updated.summary.title, "Rust Ownership 2.0");
 
         // 5. Delete note
-        let status = delete_note(auth_user.clone(), State(state.clone()), Path(created.id))
-            .await
-            .expect("delete note");
+        let status = delete_note(
+            auth_user.clone(),
+            State(state.clone()),
+            Path(created.summary.id),
+        )
+        .await
+        .expect("delete note");
         assert_eq!(status, StatusCode::NO_CONTENT);
 
         // 6. Verify deleted
-        let res = get_note(auth_user.clone(), State(state.clone()), Path(created.id)).await;
+        let res = get_note(
+            auth_user.clone(),
+            State(state.clone()),
+            Path(created.summary.id),
+        )
+        .await;
         assert!(res.is_err());
+    }
+
+    fn create_input(title: &str, content: &str, note_type: Option<&str>) -> Json<CreateNoteInput> {
+        Json(CreateNoteInput {
+            title: title.to_string(),
+            content: content.to_string(),
+            format: None,
+            note_type: note_type.map(str::to_string),
+            tags: None,
+        })
+    }
+
+    fn edit(content: &str, hash: Option<&str>) -> Json<UpdateNoteInput> {
+        Json(UpdateNoteInput {
+            content: Some(content.to_string()),
+            expected_content_hash: hash.map(str::to_string),
+            ..Default::default()
+        })
+    }
+
+    async fn mock_state() -> (ApiState, AuthUser) {
+        search_state(Arc::new(
+            crate::infrastructure::inference::embedding::MockEmbeddingProvider::new(384),
+        ))
+        .await
+    }
+
+    async fn created_note(state: &ApiState, user: &AuthUser, content: &str) -> Note {
+        let (_, Json(note)) = create_note(
+            user.clone(),
+            State(state.clone()),
+            create_input("Plan", content, None),
+        )
+        .await
+        .expect("create");
+        note
+    }
+
+    #[tokio::test]
+    async fn the_list_returns_summaries_without_the_body() {
+        let (state, user) = mock_state().await;
+        let _created = create_note(
+            user.clone(),
+            State(state.clone()),
+            create_input("Ownership", "# Heading\n\nBorrow **checker** rules", None),
+        )
+        .await
+        .expect("create");
+
+        let Json(items) = list_notes(user, State(state), Query(NoteQuery::default()))
+            .await
+            .expect("list");
+        let value = serde_json::to_value(&items).unwrap();
+        let first = &value[0];
+        assert!(
+            first.get("content").is_none(),
+            "list leaked the body: {first}"
+        );
+        assert!(
+            first.get("format").is_none(),
+            "list carries format: {first}"
+        );
+        assert_eq!(first["excerpt"], "Heading Borrow checker rules");
+        assert_eq!(first["note_type"], "note");
+        assert_eq!(first["content_hash"].as_str().unwrap().len(), 64);
+    }
+
+    #[tokio::test]
+    async fn a_single_note_carries_its_body_and_markdown_format() {
+        let (state, user) = mock_state().await;
+        let created = created_note(&state, &user, "Borrow **checker**").await;
+
+        let Json(note) = get_note(user, State(state), Path(created.summary.id))
+            .await
+            .expect("get");
+        assert_eq!(note.content, "Borrow **checker**");
+        assert_eq!(note.format, "markdown");
+        assert_eq!(note.summary.content_hash, created.summary.content_hash);
+        let value = serde_json::to_value(&note).unwrap();
+        assert!(
+            value.get("content_hash").is_some() && value.get("summary").is_none(),
+            "the summary fields sit at the top level of a note: {value}"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_stale_content_hash_is_a_409_and_changes_nothing() {
+        let (state, user) = mock_state().await;
+        let created = created_note(&state, &user, "v1").await;
+        let loaded = created.summary.content_hash.clone();
+
+        let Json(second) = update_note(
+            user.clone(),
+            State(state.clone()),
+            Path(created.summary.id),
+            edit("v2", Some(&loaded)),
+        )
+        .await
+        .expect("an edit made from the current hash");
+        assert_ne!(second.summary.content_hash, loaded);
+
+        let err = update_note(
+            user.clone(),
+            State(state.clone()),
+            Path(created.summary.id),
+            edit("v3", Some(&loaded)),
+        )
+        .await
+        .expect_err("an edit made from a stale hash");
+        assert_eq!(err.status, StatusCode::CONFLICT);
+        assert_eq!(err.message, "note changed since it was loaded");
+
+        let Json(stored) = get_note(user, State(state), Path(created.summary.id))
+            .await
+            .unwrap();
+        assert_eq!(stored.content, "v2");
+    }
+
+    #[tokio::test]
+    async fn an_update_without_a_hash_is_last_writer_wins() {
+        let (state, user) = mock_state().await;
+        let created = created_note(&state, &user, "v1").await;
+        let Json(updated) = update_note(
+            user,
+            State(state),
+            Path(created.summary.id),
+            edit("v2", None),
+        )
+        .await
+        .expect("no expectation, no conflict");
+        assert_eq!(updated.content, "v2");
+    }
+
+    #[tokio::test]
+    async fn a_malformed_content_hash_is_a_400() {
+        let (state, user) = mock_state().await;
+        let created = created_note(&state, &user, "v1").await;
+        let err = update_note(
+            user,
+            State(state),
+            Path(created.summary.id),
+            edit("v2", Some("not-a-hash")),
+        )
+        .await
+        .expect_err("malformed hash");
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn note_type_round_trips_through_create_and_update() {
+        let (state, user) = mock_state().await;
+        let (_, Json(created)) = create_note(
+            user.clone(),
+            State(state.clone()),
+            create_input("Cache it", "Use a read-through cache", Some("idea")),
+        )
+        .await
+        .expect("create typed");
+        assert_eq!(created.summary.note_type, "idea");
+
+        let Json(updated) = update_note(
+            user.clone(),
+            State(state.clone()),
+            Path(created.summary.id),
+            Json(UpdateNoteInput {
+                note_type: Some("decision".to_string()),
+                ..Default::default()
+            }),
+        )
+        .await
+        .expect("retype");
+        assert_eq!(updated.summary.note_type, "decision");
+        assert_eq!(updated.content, "Use a read-through cache");
+
+        let Json(fetched) = get_note(user, State(state), Path(created.summary.id))
+            .await
+            .unwrap();
+        assert_eq!(fetched.summary.note_type, "decision");
+    }
+
+    #[tokio::test]
+    async fn an_unknown_note_type_is_a_400_on_create_and_update() {
+        let (state, user) = mock_state().await;
+        let err = create_note(
+            user.clone(),
+            State(state.clone()),
+            create_input("Plan", "v1", Some("memo")),
+        )
+        .await
+        .expect_err("unknown type on create");
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+
+        let created = created_note(&state, &user, "v1").await;
+        let err = update_note(
+            user,
+            State(state),
+            Path(created.summary.id),
+            Json(UpdateNoteInput {
+                note_type: Some("memo".to_string()),
+                ..Default::default()
+            }),
+        )
+        .await
+        .expect_err("unknown type on update");
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
     }
 
     struct DownEmbedder;

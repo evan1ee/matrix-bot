@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { Page, Route } from '@playwright/test';
 
 /**
@@ -236,13 +237,34 @@ export interface FakeNote {
   owner_id: string;
   title: string;
   content: string;
-  format: string;
+  note_type: string;
   source_channel: string;
   source_ref: string | null;
   tags: string[];
   is_archived: boolean;
   created_at: string;
   updated_at: string;
+}
+
+/** The note's body hash, as the server computes it (SHA-256 of the Markdown). */
+function noteHash(content: string): string {
+  return createHash('sha256').update(content, 'utf8').digest('hex');
+}
+
+/** What `GET /notes` returns for one note: metadata and an excerpt, no body. */
+function noteSummary(n: FakeNote) {
+  const { content, ...rest } = n;
+  return {
+    ...rest,
+    excerpt: content.replace(/\s+/g, ' ').trim().slice(0, 200),
+    content_hash: noteHash(content),
+    indexed_at: null,
+  };
+}
+
+/** What `GET /notes/:id` returns: the summary plus the body. */
+function noteDocument(n: FakeNote) {
+  return { ...noteSummary(n), content: n.content, format: 'markdown' };
 }
 
 export interface FakeAgentRun {
@@ -359,6 +381,8 @@ export class FakeApi {
   nextAiConvId = 1;
   nextAiMsgId = 1;
   notes: FakeNote[] = [];
+  /** The `X-Search-Mode` header `POST /knowledge/search` answers with. */
+  searchMode: 'hybrid' | 'lexical' = 'hybrid';
   nextNoteId = 1;
   rooms: FakeRoom[] = [
     { room_id: '!general:mbm.one', name: 'General' },
@@ -655,7 +679,7 @@ export class FakeApi {
       owner_id: partial.owner_id ?? OWNER,
       title: partial.title ?? 'Test Note',
       content: partial.content ?? 'Note content',
-      format: partial.format ?? 'markdown',
+      note_type: partial.note_type ?? 'note',
       source_channel: partial.source_channel ?? 'web',
       source_ref: partial.source_ref ?? null,
       tags: partial.tags ?? [],
@@ -3077,7 +3101,7 @@ export class FakeApi {
             n.content.toLowerCase().includes(searchParam)
         );
       }
-      return json(route, 200, list);
+      return json(route, 200, list.map(noteSummary));
     }
 
     if (path === '/notes' && method === 'POST') {
@@ -3087,10 +3111,10 @@ export class FakeApi {
       const note = this.seedNote({
         title: body.title.trim(),
         content: body.content.trim(),
-        format: body.format || 'markdown',
+        note_type: body.note_type || 'note',
         tags: Array.isArray(body.tags) ? body.tags : [],
       });
-      return json(route, 201, note);
+      return json(route, 201, noteDocument(note));
     }
 
     const noteIdMatch = path.match(/^\/notes\/(\d+)$/);
@@ -3098,20 +3122,23 @@ export class FakeApi {
       const id = Number(noteIdMatch[1]);
       const note = this.notes.find((n) => n.id === id);
       if (!note) return json(route, 404, { error: 'Note not found', code: 404 });
-      return json(route, 200, note);
+      return json(route, 200, noteDocument(note));
     }
 
     if (noteIdMatch && method === 'PUT') {
       const id = Number(noteIdMatch[1]);
       const note = this.notes.find((n) => n.id === id);
       if (!note) return json(route, 404, { error: 'Note not found', code: 404 });
+      if (body?.expected_content_hash && body.expected_content_hash !== noteHash(note.content)) {
+        return json(route, 409, { error: 'note changed since it was loaded', code: 409 });
+      }
       if (body?.title !== undefined) note.title = body.title;
       if (body?.content !== undefined) note.content = body.content;
-      if (body?.format !== undefined) note.format = body.format;
+      if (body?.note_type !== undefined) note.note_type = body.note_type;
       if (body?.tags !== undefined) note.tags = body.tags;
       if (body?.is_archived !== undefined) note.is_archived = body.is_archived;
       note.updated_at = new Date().toISOString();
-      return json(route, 200, note);
+      return json(route, 200, noteDocument(note));
     }
 
     if (noteIdMatch && method === 'DELETE') {
@@ -3138,7 +3165,12 @@ export class FakeApi {
           similarity_score: 0.92,
           source_ref: n.source_ref,
         }));
-      return json(route, 200, results);
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        headers: { 'x-search-mode': this.searchMode },
+        body: JSON.stringify(results),
+      });
     }
 
     // --- ocr scan ---

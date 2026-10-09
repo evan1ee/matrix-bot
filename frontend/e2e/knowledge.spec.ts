@@ -125,4 +125,94 @@ test.describe('Notes', () => {
     await app.keyboard.press('Escape');
     await expect(app.getByRole('heading', { name: 'New Note' })).not.toBeVisible();
   });
+
+  test('lists an excerpt and fetches the body only when a note is opened', async ({ app, api }) => {
+    const note = api.seedNote({
+      title: 'Long note',
+      content: `Opening words. ${'filler '.repeat(60)}TAILMARKER`,
+    });
+    const documentFetches: string[] = [];
+    app.on('request', (req) => {
+      if (new RegExp(`/api/v1/notes/${note.id}$`).test(req.url()) && req.method() === 'GET') {
+        documentFetches.push(req.url());
+      }
+    });
+
+    await gotoKnowledge(app);
+
+    const card = app.getByTestId(`note-card-${note.id}`);
+    await expect(card.getByText(/Opening words\./)).toBeVisible();
+    await expect(card.getByText('TAILMARKER')).toHaveCount(0);
+    expect(documentFetches).toHaveLength(0);
+
+    await card.getByRole('button', { name: 'Edit note' }).click();
+    await expect(app.getByLabel('Content')).toHaveValue(/TAILMARKER$/);
+    expect(documentFetches).toHaveLength(1);
+  });
+
+  test('keeps the draft and offers a reload when the note changed elsewhere', async ({ app, api }) => {
+    const note = api.seedNote({ title: 'Shared plan', content: 'Version one' });
+
+    await gotoKnowledge(app);
+    await app.getByTestId(`note-card-${note.id}`).getByRole('button', { name: 'Edit note' }).click();
+    await expect(app.getByLabel('Content')).toHaveValue('Version one');
+
+    await app.getByLabel('Content').fill('My unsaved draft');
+    // Another device saves while this editor is open.
+    note.content = 'Version two, from elsewhere';
+
+    await app.getByRole('button', { name: 'Update Note' }).click();
+
+    await expect(app.getByText('This note changed elsewhere — reload')).toBeVisible();
+    await expect(app.getByRole('heading', { name: 'Edit Note' })).toBeVisible();
+    await expect(app.getByLabel('Content')).toHaveValue('My unsaved draft');
+    expect(note.content).toBe('Version two, from elsewhere');
+
+    await app.getByRole('button', { name: 'Reload' }).click();
+    await expect(app.getByLabel('Content')).toHaveValue('Version two, from elsewhere');
+    await expect(app.getByText('This note changed elsewhere — reload')).toHaveCount(0);
+
+    await app.getByLabel('Content').fill('Merged by hand');
+    await app.getByRole('button', { name: 'Update Note' }).click();
+    await expect(app.getByRole('heading', { name: 'Edit Note' })).not.toBeVisible();
+    expect(note.content).toBe('Merged by hand');
+  });
+
+  test('saves the chosen note type', async ({ app, api }) => {
+    await gotoKnowledge(app);
+
+    await app.getByTestId('create-note-button').click();
+    await app.getByPlaceholder(/Note title or core insight/i).fill('Cache reads');
+    await app.getByLabel('Type').selectOption('idea');
+    await app.getByPlaceholder(/Write your note in markdown/i).fill('A read-through cache would cut latency.');
+    await app.getByRole('button', { name: 'Create Note' }).click();
+
+    await expect(app.getByRole('heading', { name: 'New Note' })).not.toBeVisible();
+    expect(api.notes.find((n) => n.title === 'Cache reads')?.note_type).toBe('idea');
+    await expect(app.getByTestId(/^note-card-\d+/).first().getByText('idea', { exact: true })).toBeVisible();
+  });
+
+  test('says so when search fell back to keyword results', async ({ app, api }) => {
+    api.seedNote({ title: 'Transformer Attention', content: 'Scaled dot-product attention' });
+    api.searchMode = 'lexical';
+
+    await gotoKnowledge(app);
+    await app.getByRole('button', { name: 'AI Search' }).click();
+    await app.getByPlaceholder(/Semantic & hybrid search across notes/i).fill('attention');
+
+    await expect(app.getByText('Transformer Attention')).toBeVisible();
+    await expect(app.getByTestId('search-lexical-notice')).toBeVisible();
+    await expect(app.getByTestId('search-lexical-notice')).toContainText(/keyword/i);
+  });
+
+  test('shows no keyword notice when search is hybrid', async ({ app, api }) => {
+    api.seedNote({ title: 'Transformer Attention', content: 'Scaled dot-product attention' });
+
+    await gotoKnowledge(app);
+    await app.getByRole('button', { name: 'AI Search' }).click();
+    await app.getByPlaceholder(/Semantic & hybrid search across notes/i).fill('attention');
+
+    await expect(app.getByText('Transformer Attention')).toBeVisible();
+    await expect(app.getByTestId('search-lexical-notice')).toHaveCount(0);
+  });
 });

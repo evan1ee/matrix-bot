@@ -14,11 +14,9 @@ export const KnowledgeSearchPanel: React.FC<KnowledgeSearchPanelProps> = ({
   const [selectedType, setSelectedType] = useState<string>('all');
 
   const filterTypes = selectedType === 'all' ? undefined : [selectedType];
-  const { data: results = [], isLoading, isFetching } = useKnowledgeSearch(
-    query,
-    filterTypes,
-    8
-  );
+  const { data, isLoading, isFetching } = useKnowledgeSearch(query, filterTypes, 8);
+  const results = data?.items ?? [];
+  const isLexical = data?.mode === 'lexical';
 
   return (
     <div className="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-4 shadow-xs space-y-3">
@@ -66,7 +64,16 @@ export const KnowledgeSearchPanel: React.FC<KnowledgeSearchPanelProps> = ({
               <Sparkles className="w-3.5 h-3.5" />
               {isFetching ? 'Searching embeddings...' : `${results.length} results`}
             </span>
-            <span className="font-mono text-[10px]">hybrid vector + text</span>
+            {isLexical ? (
+              <span
+                data-testid="search-lexical-notice"
+                className="font-mono text-[10px] text-amber-600 dark:text-amber-400"
+              >
+                Keyword results only — semantic search is unavailable
+              </span>
+            ) : (
+              <span className="font-mono text-[10px]">hybrid vector + text</span>
+            )}
           </div>
 
           {isLoading ? (
