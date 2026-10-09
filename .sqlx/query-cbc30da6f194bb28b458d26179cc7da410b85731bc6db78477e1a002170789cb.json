@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id, owner_id, title, content, note_type, source_channel, source_ref, tags,\n            COALESCE(excerpt, left(content, 200)) AS \"excerpt!\",\n            COALESCE(content_hash, encode(sha256(convert_to(content, 'UTF8')), 'hex')) AS \"content_hash!\",\n            is_archived, created_at, updated_at, indexed_at\n        FROM notes\n        WHERE id = $1 AND owner_id = $2\n        FOR UPDATE\n        ",
+  "query": "\n        SELECT\n            id, owner_id, title, content, note_type, source_channel, source_ref, tags,\n            excerpt, content_hash,\n            is_archived, created_at, updated_at, indexed_at\n        FROM notes\n        WHERE id = $1 AND owner_id = $2\n        FOR UPDATE\n        ",
   "describe": {
     "columns": [
       {
@@ -93,15 +93,25 @@
       },
       {
         "ordinal": 8,
-        "name": "excerpt!",
+        "name": "excerpt",
         "type_info": "Text",
-        "origin": "Expression"
+        "origin": {
+          "Table": {
+            "table": "notes",
+            "name": "excerpt"
+          }
+        }
       },
       {
         "ordinal": 9,
-        "name": "content_hash!",
+        "name": "content_hash",
         "type_info": "Text",
-        "origin": "Expression"
+        "origin": {
+          "Table": {
+            "table": "notes",
+            "name": "content_hash"
+          }
+        }
       },
       {
         "ordinal": 10,
@@ -163,13 +173,13 @@
       false,
       true,
       false,
-      null,
-      null,
+      false,
+      false,
       false,
       false,
       false,
       true
     ]
   },
-  "hash": "d8298ee63a8e49adc9996efbb8cad32b5833934d08255a8e2ab6ceff48453d69"
+  "hash": "cbc30da6f194bb28b458d26179cc7da410b85731bc6db78477e1a002170789cb"
 }

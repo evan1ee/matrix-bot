@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        UPDATE notes\n        SET\n            -- The title is part of every embedded chunk, so a renamed note's\n            -- embeddings are stale even though its body hash is unchanged.\n            indexed_content_hash = CASE WHEN title IS DISTINCT FROM $3 THEN NULL\n                                        ELSE indexed_content_hash END,\n            title = $3,\n            content = $4,\n            note_type = $5,\n            tags = $6,\n            content_hash = $7,\n            search_text = $8,\n            excerpt = $9,\n            updated_at = NOW()\n        WHERE id = $1 AND owner_id = $2\n        RETURNING\n            id, owner_id, title, note_type, source_channel, source_ref, tags,\n            COALESCE(excerpt, left(content, 200)) AS \"excerpt!\",\n            COALESCE(content_hash, encode(sha256(convert_to(content, 'UTF8')), 'hex')) AS \"content_hash!\",\n            is_archived, created_at, updated_at, indexed_at\n        ",
+  "query": "\n        UPDATE notes\n        SET\n            -- The title is part of every embedded chunk, so a renamed note's\n            -- embeddings are stale even though its body hash is unchanged.\n            indexed_content_hash = CASE WHEN title IS DISTINCT FROM $3 THEN NULL\n                                        ELSE indexed_content_hash END,\n            title = $3,\n            content = $4,\n            note_type = $5,\n            tags = $6,\n            content_hash = $7,\n            search_text = $8,\n            excerpt = $9,\n            updated_at = NOW()\n        WHERE id = $1 AND owner_id = $2\n        RETURNING\n            id, owner_id, title, note_type, source_channel, source_ref, tags,\n            excerpt, content_hash,\n            is_archived, created_at, updated_at, indexed_at\n        ",
   "describe": {
     "columns": [
       {
@@ -82,15 +82,25 @@
       },
       {
         "ordinal": 7,
-        "name": "excerpt!",
+        "name": "excerpt",
         "type_info": "Text",
-        "origin": "Expression"
+        "origin": {
+          "Table": {
+            "table": "notes",
+            "name": "excerpt"
+          }
+        }
       },
       {
         "ordinal": 8,
-        "name": "content_hash!",
+        "name": "content_hash",
         "type_info": "Text",
-        "origin": "Expression"
+        "origin": {
+          "Table": {
+            "table": "notes",
+            "name": "content_hash"
+          }
+        }
       },
       {
         "ordinal": 9,
@@ -158,13 +168,13 @@
       false,
       true,
       false,
-      null,
-      null,
+      false,
+      false,
       false,
       false,
       false,
       true
     ]
   },
-  "hash": "303b455b8e1d29787c2c00600ae3366d272f73c3d29b2638a4cb556abb744a13"
+  "hash": "ba93dc7ad815592c77280a27a6468130f9478c0122469c224adc490d5b62ee3b"
 }

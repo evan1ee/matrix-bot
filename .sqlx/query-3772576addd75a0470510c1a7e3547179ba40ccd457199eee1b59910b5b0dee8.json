@@ -1,0 +1,45 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT owner_id AS \"owner_id!\", item_type AS \"item_type!\", item_id AS \"item_id!\",\n               version AS \"version!\"\n        FROM (\n            SELECT DISTINCT ON (owner_id, item_type, item_id)\n                   owner_id, item_type, item_id, version\n            FROM (\n                SELECT n.owner_id, 'note'::TEXT AS item_type, n.id AS item_id,\n                       $1::TEXT || ':' || (extract(epoch FROM n.updated_at) * 1000000)::BIGINT::TEXT AS version,\n                       0 AS src\n                FROM notes n\n                WHERE NOT n.is_archived\n                  AND n.indexed_content_hash IS DISTINCT FROM n.content_hash\n                UNION ALL\n                SELECT b.owner_id, 'bookmark'::TEXT, b.id, $1::TEXT, 1\n                FROM bookmarks b\n                LEFT JOIN knowledge_embeddings ke\n                    ON ke.owner_id = b.owner_id AND ke.item_type = 'bookmark' AND ke.item_id = b.id\n                WHERE ke.item_id IS NULL AND NOT b.is_archived\n                UNION ALL\n                SELECT l.owner_id, 'journal'::TEXT, l.id, $1::TEXT, 1\n                FROM life_day_logs l\n                LEFT JOIN knowledge_embeddings ke\n                    ON ke.owner_id = l.owner_id AND ke.item_type = 'journal' AND ke.item_id = l.id\n                WHERE ke.item_id IS NULL\n                UNION ALL\n                SELECT f.owner_id, 'footprint'::TEXT, f.id, $1::TEXT, 1\n                FROM footprints f\n                LEFT JOIN knowledge_embeddings ke\n                    ON ke.owner_id = f.owner_id AND ke.item_type = 'footprint' AND ke.item_id = f.id\n                WHERE ke.item_id IS NULL\n                UNION ALL\n                SELECT DISTINCT ke.owner_id, ke.item_type, ke.item_id, $1::TEXT, 2\n                FROM knowledge_embeddings ke\n                WHERE ke.embedding_model <> $1\n            ) needing\n            ORDER BY owner_id, item_type, item_id, src\n        ) wanted\n        LIMIT $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "owner_id!",
+        "type_info": "Uuid",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "item_type!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "item_id!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "version!",
+        "type_info": "Text",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "3772576addd75a0470510c1a7e3547179ba40ccd457199eee1b59910b5b0dee8"
+}

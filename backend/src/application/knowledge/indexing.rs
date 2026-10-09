@@ -1,8 +1,8 @@
 //! Embedding of knowledge items and the backfill that keeps them current.
 //!
-//! Embeddings are derived data: dropping every chunk, or the derived note
-//! columns, loses nothing, because a backfill pass rebuilds them from
-//! `notes.content` and the other item tables.
+//! Embeddings are derived data: dropping every chunk and the notes' indexed
+//! markers loses nothing, because a backfill pass rebuilds them from the notes
+//! and the other item tables.
 
 use chrono::{DateTime, Utc};
 
@@ -531,7 +531,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dropping_every_embedding_and_derived_column_loses_nothing() {
+    async fn dropping_every_embedding_loses_nothing() {
         let f = fixture().await;
         let long_body = "A sentence about tokio and async runtimes. ".repeat(40);
         let first = f.note("Long", &long_body).await;
@@ -559,22 +559,18 @@ mod tests {
         assert!(before_first.len() > 1, "the long note spans several chunks");
         assert!(!before_bookmark.is_empty());
 
-        // Lose every derived byte.
+        // Lose every embedding byte; the note columns are NOT NULL and stay.
         sqlx::query!("DELETE FROM knowledge_embeddings")
             .execute(&f.pool)
             .await
             .unwrap();
-        sqlx::query!(
-            "UPDATE notes SET content_hash = NULL, search_text = NULL, excerpt = NULL,
-                              indexed_content_hash = NULL, indexed_at = NULL"
-        )
-        .execute(&f.pool)
-        .await
-        .unwrap();
+        sqlx::query!("UPDATE notes SET indexed_content_hash = NULL, indexed_at = NULL")
+            .execute(&f.pool)
+            .await
+            .unwrap();
         f.clear_jobs().await;
 
         // Rebuild from the notes and the bookmark alone.
-        assert_eq!(f.notes.backfill_derived_fields(100).await.unwrap(), 2);
         assert_eq!(f.search.backfill_embeddings(100).await.unwrap(), 3);
         assert_eq!(f.drain_embed_jobs(&f.search).await, 3);
 

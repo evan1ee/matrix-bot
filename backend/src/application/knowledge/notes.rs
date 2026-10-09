@@ -185,35 +185,6 @@ impl NoteService {
         .await?)
     }
 
-    /// Fills the derived columns (hash, plain text, excerpt) of up to `batch`
-    /// notes written before those columns existed, in one transaction, and
-    /// returns how many it filled. Idempotent: a filled note is never listed
-    /// again, and a note edited meanwhile keeps its fresh values.
-    pub async fn backfill_derived_fields(&self, batch: i64) -> Result<usize, AppError> {
-        let mut tx = self.pool.begin().await?;
-        let rows =
-            repositories::knowledge::list_notes_missing_derived(&mut *tx, batch.clamp(1, 1000))
-                .await?;
-        let mut filled = 0;
-        for row in rows {
-            let derived = markdown::derive(&row.content);
-            let set = repositories::knowledge::set_derived_fields(
-                &mut *tx,
-                row.id,
-                &row.owner_id,
-                &derived.content_hash,
-                &derived.search_text,
-                &derived.excerpt,
-            )
-            .await?;
-            if set {
-                filled += 1;
-            }
-        }
-        tx.commit().await?;
-        Ok(filled)
-    }
-
     /// Lists all unique tags used across an account's notes.
     pub async fn list_tags(&self, owner: &AccountId) -> Result<Vec<String>, AppError> {
         let tags = repositories::knowledge::list_all_tags(&self.pool, owner).await?;
@@ -488,11 +459,11 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            row.content_hash.as_deref(),
-            Some(markdown::content_hash("# Heading\n\nSome **bold** text").as_str())
+            row.content_hash,
+            markdown::content_hash("# Heading\n\nSome **bold** text").as_str()
         );
-        assert_eq!(row.search_text.as_deref(), Some("Heading\nSome bold text"));
-        assert_eq!(row.excerpt.as_deref(), Some("Heading Some bold text"));
+        assert_eq!(row.search_text, "Heading\nSome bold text");
+        assert_eq!(row.excerpt, "Heading Some bold text");
         assert_eq!(note.excerpt, "Heading Some bold text");
     }
 
@@ -858,119 +829,6 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(after_rename.indexed_content_hash, None);
-    }
-
-    async fn insert_legacy(pool: &PgPool, owner: &AccountId, title: &str, body: &str) -> i64 {
-        sqlx::query_scalar!(
-            "INSERT INTO notes (owner_id, title, content) VALUES ($1, $2, $3) RETURNING id",
-            owner.as_uuid(),
-            title,
-            body
-        )
-        .fetch_one(pool)
-        .await
-        .unwrap()
-    }
-
-    type Derived3 = (Option<String>, Option<String>, Option<String>);
-
-    async fn derived_columns(pool: &PgPool, id: i64) -> Derived3 {
-        let row = sqlx::query!(
-            "SELECT content_hash, search_text, excerpt FROM notes WHERE id = $1",
-            id
-        )
-        .fetch_one(pool)
-        .await
-        .unwrap();
-        (row.content_hash, row.search_text, row.excerpt)
-    }
-
-    #[tokio::test]
-    async fn backfill_fills_notes_that_lack_derived_columns_and_is_idempotent() {
-        let pool = test_pool().await;
-        let (svc, alice) = setup(&pool).await;
-        let body = "# Heading\n\nsome **text**";
-        let id = insert_legacy(&pool, &alice, "Old", body).await;
-        let updated_before = sqlx::query_scalar!("SELECT updated_at FROM notes WHERE id = $1", id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-
-        assert_eq!(svc.backfill_derived_fields(500).await.unwrap(), 1);
-
-        let derived = markdown::derive(body);
-        assert_eq!(
-            derived_columns(&pool, id).await,
-            (
-                Some(derived.content_hash.as_str().to_string()),
-                Some(derived.search_text.clone()),
-                Some(derived.excerpt.clone())
-            )
-        );
-        let updated_after = sqlx::query_scalar!("SELECT updated_at FROM notes WHERE id = $1", id)
-            .fetch_one(&pool)
-            .await
-            .unwrap();
-        assert_eq!(updated_before, updated_after, "backfill is not a user edit");
-        assert!(
-            event_types(&pool).await.is_empty(),
-            "and publishes no event"
-        );
-
-        assert_eq!(svc.backfill_derived_fields(500).await.unwrap(), 0);
-    }
-
-    #[tokio::test]
-    async fn backfill_respects_the_batch_size() {
-        let pool = test_pool().await;
-        let (svc, alice) = setup(&pool).await;
-        for n in 0..3 {
-            insert_legacy(&pool, &alice, "Old", &format!("body {n}")).await;
-        }
-        assert_eq!(svc.backfill_derived_fields(2).await.unwrap(), 2);
-        assert_eq!(svc.backfill_derived_fields(2).await.unwrap(), 1);
-        assert_eq!(svc.backfill_derived_fields(2).await.unwrap(), 0);
-    }
-
-    #[tokio::test]
-    async fn backfill_never_overwrites_a_note_edited_after_it_was_listed() {
-        let pool = test_pool().await;
-        let (svc, alice) = setup(&pool).await;
-        let id = insert_legacy(&pool, &alice, "Old", "stale body").await;
-
-        // The backfill listed the note with its stale body...
-        let stale = repositories::knowledge::list_notes_missing_derived(&pool, 10)
-            .await
-            .unwrap();
-        assert_eq!(stale.len(), 1);
-        // ...then the user edited it, which derives the columns from the new body.
-        svc.update(
-            &alice,
-            id,
-            NotePatch {
-                markdown: Some("fresh body".to_string()),
-                ..NotePatch::default()
-            },
-        )
-        .await
-        .unwrap();
-
-        let stale_derived = markdown::derive(&stale[0].content);
-        let filled = repositories::knowledge::set_derived_fields(
-            &pool,
-            id,
-            &alice,
-            &stale_derived.content_hash,
-            &stale_derived.search_text,
-            &stale_derived.excerpt,
-        )
-        .await
-        .unwrap();
-        assert!(!filled, "the guard refuses to overwrite a derived row");
-        assert_eq!(
-            derived_columns(&pool, id).await.1.as_deref(),
-            Some("fresh body")
-        );
     }
 
     async fn titles(svc: &NoteService, owner: &AccountId, search: &str) -> Vec<String> {

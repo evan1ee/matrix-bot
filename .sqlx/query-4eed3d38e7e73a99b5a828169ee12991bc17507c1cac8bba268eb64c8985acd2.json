@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO notes (\n            owner_id, title, content, note_type, source_channel, source_ref, tags,\n            content_hash, search_text, excerpt\n        )\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)\n        RETURNING\n            id, owner_id, title, note_type, source_channel, source_ref, tags,\n            COALESCE(excerpt, left(content, 200)) AS \"excerpt!\",\n            COALESCE(content_hash, encode(sha256(convert_to(content, 'UTF8')), 'hex')) AS \"content_hash!\",\n            is_archived, created_at, updated_at, indexed_at\n        ",
+  "query": "\n        SELECT\n            id, owner_id, title, content, note_type, source_channel, source_ref, tags,\n            excerpt, content_hash,\n            is_archived, created_at, updated_at, indexed_at\n        FROM notes\n        WHERE id = $1 AND owner_id = $2\n        ",
   "describe": {
     "columns": [
       {
@@ -38,6 +38,17 @@
       },
       {
         "ordinal": 3,
+        "name": "content",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "notes",
+            "name": "content"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
         "name": "note_type",
         "type_info": "Text",
         "origin": {
@@ -48,7 +59,7 @@
         }
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "source_channel",
         "type_info": "Text",
         "origin": {
@@ -59,7 +70,7 @@
         }
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "source_ref",
         "type_info": "Text",
         "origin": {
@@ -70,7 +81,7 @@
         }
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "tags",
         "type_info": "TextArray",
         "origin": {
@@ -81,19 +92,29 @@
         }
       },
       {
-        "ordinal": 7,
-        "name": "excerpt!",
-        "type_info": "Text",
-        "origin": "Expression"
-      },
-      {
         "ordinal": 8,
-        "name": "content_hash!",
+        "name": "excerpt",
         "type_info": "Text",
-        "origin": "Expression"
+        "origin": {
+          "Table": {
+            "table": "notes",
+            "name": "excerpt"
+          }
+        }
       },
       {
         "ordinal": 9,
+        "name": "content_hash",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "notes",
+            "name": "content_hash"
+          }
+        }
+      },
+      {
+        "ordinal": 10,
         "name": "is_archived",
         "type_info": "Bool",
         "origin": {
@@ -104,7 +125,7 @@
         }
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "created_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -115,7 +136,7 @@
         }
       },
       {
-        "ordinal": 11,
+        "ordinal": 12,
         "name": "updated_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -126,7 +147,7 @@
         }
       },
       {
-        "ordinal": 12,
+        "ordinal": 13,
         "name": "indexed_at",
         "type_info": "Timestamptz",
         "origin": {
@@ -139,16 +160,8 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "TextArray",
-        "Text",
-        "Text",
-        "Text"
+        "Int8",
+        "Uuid"
       ]
     },
     "nullable": [
@@ -157,15 +170,16 @@
       false,
       false,
       false,
+      false,
       true,
       false,
-      null,
-      null,
+      false,
+      false,
       false,
       false,
       false,
       true
     ]
   },
-  "hash": "681858c29cd5fb58588a08718e7410272c1947137f508bc9c00b4a857a5c57ce"
+  "hash": "4eed3d38e7e73a99b5a828169ee12991bc17507c1cac8bba268eb64c8985acd2"
 }

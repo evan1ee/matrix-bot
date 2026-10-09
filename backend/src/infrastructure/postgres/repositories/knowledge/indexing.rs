@@ -32,8 +32,8 @@ pub async fn get_note_for_indexing(
         r#"
         SELECT
             title,
-            COALESCE(search_text, content) AS "text!",
-            COALESCE(content_hash, encode(sha256(convert_to(content, 'UTF8')), 'hex')) AS "content_hash!",
+            search_text AS "text",
+            content_hash,
             indexed_content_hash
         FROM notes
         WHERE id = $1 AND owner_id = $2
@@ -98,7 +98,7 @@ pub async fn mark_note_indexed(
         UPDATE notes
         SET indexed_content_hash = $4, indexed_at = NOW()
         WHERE id = $1 AND owner_id = $2 AND title = $3
-          AND COALESCE(content_hash, encode(sha256(convert_to(content, 'UTF8')), 'hex')) = $4
+          AND content_hash = $4
         "#,
         id,
         owner.as_uuid(),
@@ -260,8 +260,7 @@ pub async fn list_items_needing_index(
                        0 AS src
                 FROM notes n
                 WHERE NOT n.is_archived
-                  AND n.indexed_content_hash IS DISTINCT FROM
-                      COALESCE(n.content_hash, encode(sha256(convert_to(n.content, 'UTF8')), 'hex'))
+                  AND n.indexed_content_hash IS DISTINCT FROM n.content_hash
                 UNION ALL
                 SELECT b.owner_id, 'bookmark'::TEXT, b.id, $1::TEXT, 1
                 FROM bookmarks b

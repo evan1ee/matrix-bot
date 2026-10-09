@@ -379,7 +379,7 @@ mod tests {
         .unwrap();
         sqlx::query!("INSERT INTO bot_message_targets (event_id, room_id, entity_type, entity_id, owner_id, title) VALUES ('ev1', '!r:x', 'todo', 1, $1, 'a todo')", from.as_uuid()).execute(&pool).await.unwrap();
         sqlx::query!(
-            "INSERT INTO notes (owner_id, title, content) VALUES ($1, 'a note', 'body')",
+            "INSERT INTO notes (owner_id, title, content, content_hash, search_text, excerpt)              VALUES ($1, 'a note', 'body', 'h', 'body', 'body')",
             from.as_uuid()
         )
         .execute(&pool)

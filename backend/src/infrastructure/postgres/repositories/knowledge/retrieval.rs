@@ -113,10 +113,10 @@ pub async fn search_notes_trigram(
         FROM notes n
         WHERE n.owner_id = $1
           AND ($3 OR NOT n.is_archived)
-          AND ((n.title || ' ' || COALESCE(n.search_text, n.content)) ILIKE $5
-               OR word_similarity($2, n.title || ' ' || COALESCE(n.search_text, n.content)) > 0.3)
-        ORDER BY ((n.title || ' ' || COALESCE(n.search_text, n.content)) ILIKE $5) DESC,
-                 word_similarity($2, n.title || ' ' || COALESCE(n.search_text, n.content)) DESC,
+          AND ((n.title || ' ' || n.search_text) ILIKE $5
+               OR word_similarity($2, n.title || ' ' || n.search_text) > 0.3)
+        ORDER BY ((n.title || ' ' || n.search_text) ILIKE $5) DESC,
+                 word_similarity($2, n.title || ' ' || n.search_text) DESC,
                  n.id DESC
         LIMIT $4
         "#,
@@ -270,7 +270,7 @@ pub async fn hydrate(
             k.item_id AS "item_id!",
             COALESCE(n.title, b.title, f.title, l.log_date, k.item_type) AS "title!",
             COALESCE(n.source_ref, b.url) AS source_ref,
-            CASE WHEN n.id IS NOT NULL THEN COALESCE(n.excerpt, left(n.content, 200)) END AS excerpt,
+            CASE WHEN n.id IS NOT NULL THEN n.excerpt END AS excerpt,
             (n.id IS NOT NULL OR b.id IS NOT NULL OR f.id IS NOT NULL OR l.id IS NOT NULL) AS "found!"
         FROM unnest($2::TEXT[], $3::BIGINT[]) AS k(item_type, item_id)
         LEFT JOIN notes n
@@ -313,7 +313,7 @@ mod tests {
     use crate::db::DbPool;
     use crate::domain::knowledge::search::DEFAULT_EMBEDDING_MODEL;
     use crate::infrastructure::postgres::repositories::knowledge::{
-        archive_note, insert_legacy_note, insert_test_note, upsert_embedding_chunk,
+        archive_note, insert_test_note, upsert_embedding_chunk,
     };
 
     const ALL: [&str; 4] = ["note", "bookmark", "journal", "footprint"];
@@ -450,20 +450,6 @@ mod tests {
                 .unwrap(),
             vec![note_key(tomato.id.0)]
         );
-    }
-
-    #[tokio::test]
-    async fn full_text_ignores_markdown_syntax_in_legacy_and_derived_rows() {
-        let (pool, alice) = setup().await;
-        // A legacy row has no search_text yet; the generated vector falls back
-        // to the raw body, so it is still findable.
-        let id = insert_legacy_note(&pool, &alice, "Old", "a legacy walrus")
-            .await
-            .unwrap();
-        let found = search_notes_fts(&pool, &alice, "walrus", false, 10)
-            .await
-            .unwrap();
-        assert_eq!(found, vec![note_key(id)]);
     }
 
     #[tokio::test]

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO notes (owner_id, title, content) VALUES ($1, 'Bare', 'abc')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "63f313bfb17ebe68b8f240aafc88da374451703b007447d08c2f5c00f814ddf6"
+}

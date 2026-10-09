@@ -128,14 +128,18 @@ Spec: `docs/superpowers/specs/2026-10-08-second-brain-refactor-design.md`. Plan:
 | 7 | API contract + frontend | Done |
 | 8 | LLM / MCP tools | Done |
 | 9 | Export / import | Done |
-| 10 | Migration 0014 | Pending |
+| 10 | Migration 0014 | Done |
 | 11 | Cleanup + docs | Pending |
 
-Runbook (task 3): the `knowledge.backfill_embeddings` job now fills the derived note columns first. Before migration 0014 (task 10) this must return 0 in every environment:
+Runbook (task 10): migration `0014` makes `content_hash`, `search_text` and `excerpt` NOT NULL and aborts, naming up to 20 note ids, if any row still lacks one. The derived-column backfill (`backfill_derived_fields`, its job step and repository helpers) shipped in task 3 and is removed in the same commit as 0014, so **the release before 0014 must have run `knowledge.backfill_embeddings`**. Check each environment before deploying 0014:
 
 ```sql
 SELECT count(*) FROM notes WHERE content_hash IS NULL OR search_text IS NULL OR excerpt IS NULL;
 ```
+
+Expected 0 (the user confirmed this for production). If 0014 refuses to boot, deploy the previous release, let the job run, and retry. Rehearse on a production copy with `cargo test -p matrix-bot migrates_a_real_database -- --ignored` (user-gated; not run here).
+
+Ruling (task 10): the task 3 backfill machinery (`backfill_derived_fields`, `list_notes_missing_derived`, `set_derived_fields`, the job step, `insert_legacy_note`) is deleted with 0014 rather than kept — once the columns are NOT NULL it can never match a row, and AGENTS prefers deletion to dead compatibility code. Cost if wrong: an environment that skipped the backfill cannot boot 0014 and must run the previous release first (see the runbook). The rebuild-invariant test now drops embeddings and the `indexed_*` markers only; the derived note columns are schema-guaranteed.
 
 Ruling (task 8): `knowledge_create_note` took `source_channel` "ai", which the `notes.source_channel` CHECK rejects, so the tool always failed; the channel now comes from the tool call's room id (`mcp`, the platform, or `web`). `knowledge_get_note` returns at most 8,000 characters and flags `truncated` — the chat path has no shared tool-output cap, and the agent engine's 2,000-character prompt cap would have made the tool useless. Cost if wrong: raise `GET_NOTE_MAX_CHARS` in `llm/tools/knowledge.rs`.
 

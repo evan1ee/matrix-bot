@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE notes\n        SET indexed_content_hash = $4, indexed_at = NOW()\n        WHERE id = $1 AND owner_id = $2 AND title = $3\n          AND content_hash = $4\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4a2e3c11652d636dfb5e90999a8c0a6933425ca2722f5abe48cefb86a0cbec34"
+}

@@ -107,11 +107,6 @@ impl TryFrom<NoteDocumentRow> for NoteDocument {
     }
 }
 
-// Until every row has its derived columns (the backfill job fills them and a
-// later migration makes them NOT NULL), `excerpt` and `content_hash` fall back
-// to values computed from `content`. `sha256` here is byte-for-byte the hash
-// the service stores: SHA-256 of the UTF-8 body, lowercase hex.
-
 pub async fn insert_note(
     executor: impl PgExecutor<'_>,
     owner: &AccountId,
@@ -129,8 +124,7 @@ pub async fn insert_note(
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
         RETURNING
             id, owner_id, title, note_type, source_channel, source_ref, tags,
-            COALESCE(excerpt, left(content, 200)) AS "excerpt!",
-            COALESCE(content_hash, encode(sha256(convert_to(content, 'UTF8')), 'hex')) AS "content_hash!",
+            excerpt, content_hash,
             is_archived, created_at, updated_at, indexed_at
         "#,
         owner.as_uuid(),
@@ -176,8 +170,7 @@ pub async fn update_note(
         WHERE id = $1 AND owner_id = $2
         RETURNING
             id, owner_id, title, note_type, source_channel, source_ref, tags,
-            COALESCE(excerpt, left(content, 200)) AS "excerpt!",
-            COALESCE(content_hash, encode(sha256(convert_to(content, 'UTF8')), 'hex')) AS "content_hash!",
+            excerpt, content_hash,
             is_archived, created_at, updated_at, indexed_at
         "#,
         id,
@@ -206,8 +199,7 @@ pub async fn get_note_by_id(
         r#"
         SELECT
             id, owner_id, title, note_type, source_channel, source_ref, tags,
-            COALESCE(excerpt, left(content, 200)) AS "excerpt!",
-            COALESCE(content_hash, encode(sha256(convert_to(content, 'UTF8')), 'hex')) AS "content_hash!",
+            excerpt, content_hash,
             is_archived, created_at, updated_at, indexed_at
         FROM notes
         WHERE id = $1 AND owner_id = $2
@@ -231,8 +223,7 @@ pub async fn get_note_document(
         r#"
         SELECT
             id, owner_id, title, content, note_type, source_channel, source_ref, tags,
-            COALESCE(excerpt, left(content, 200)) AS "excerpt!",
-            COALESCE(content_hash, encode(sha256(convert_to(content, 'UTF8')), 'hex')) AS "content_hash!",
+            excerpt, content_hash,
             is_archived, created_at, updated_at, indexed_at
         FROM notes
         WHERE id = $1 AND owner_id = $2
@@ -259,8 +250,7 @@ pub async fn list_documents(
         r#"
         SELECT
             id, owner_id, title, content, note_type, source_channel, source_ref, tags,
-            COALESCE(excerpt, left(content, 200)) AS "excerpt!",
-            COALESCE(content_hash, encode(sha256(convert_to(content, 'UTF8')), 'hex')) AS "content_hash!",
+            excerpt, content_hash,
             is_archived, created_at, updated_at, indexed_at
         FROM notes
         WHERE owner_id = $1
@@ -288,8 +278,7 @@ pub async fn lock_note_for_update(
         r#"
         SELECT
             id, owner_id, title, content, note_type, source_channel, source_ref, tags,
-            COALESCE(excerpt, left(content, 200)) AS "excerpt!",
-            COALESCE(content_hash, encode(sha256(convert_to(content, 'UTF8')), 'hex')) AS "content_hash!",
+            excerpt, content_hash,
             is_archived, created_at, updated_at, indexed_at
         FROM notes
         WHERE id = $1 AND owner_id = $2
@@ -323,14 +312,13 @@ pub async fn list_notes(
         r#"
         SELECT
             id, owner_id, title, note_type, source_channel, source_ref, tags,
-            COALESCE(excerpt, left(content, 200)) AS "excerpt!",
-            COALESCE(content_hash, encode(sha256(convert_to(content, 'UTF8')), 'hex')) AS "content_hash!",
+            excerpt, content_hash,
             is_archived, created_at, updated_at, indexed_at
         FROM notes
         WHERE owner_id = $1
           AND ($2::TEXT IS NULL OR $2 = ANY(tags))
           AND ($3::BOOLEAN OR is_archived = FALSE)
-          AND ($5::TEXT IS NULL OR (title || ' ' || COALESCE(search_text, content)) ILIKE $5)
+          AND ($5::TEXT IS NULL OR (title || ' ' || search_text) ILIKE $5)
         ORDER BY updated_at DESC
         LIMIT $4
         "#,
@@ -344,74 +332,6 @@ pub async fn list_notes(
     .await?;
 
     rows.into_iter().map(Note::try_from).collect()
-}
-
-/// A note whose derived columns have not been filled yet.
-pub struct MissingDerived {
-    pub id: i64,
-    pub owner_id: AccountId,
-    pub content: String,
-}
-
-/// Notes (across owners) missing any derived column, oldest first. Locks the
-/// rows it returns and skips rows another worker holds, so concurrent backfills
-/// take disjoint batches and a concurrent edit waits until the batch commits.
-pub async fn list_notes_missing_derived(
-    executor: impl PgExecutor<'_>,
-    limit: i64,
-) -> Result<Vec<MissingDerived>, sqlx::Error> {
-    let rows = sqlx::query!(
-        r#"
-        SELECT id, owner_id, content
-        FROM notes
-        WHERE content_hash IS NULL OR search_text IS NULL OR excerpt IS NULL
-        ORDER BY id
-        LIMIT $1
-        FOR UPDATE SKIP LOCKED
-        "#,
-        limit
-    )
-    .fetch_all(executor)
-    .await?;
-
-    Ok(rows
-        .into_iter()
-        .map(|r| MissingDerived {
-            id: r.id,
-            owner_id: AccountId::from_uuid(r.owner_id),
-            content: r.content,
-        })
-        .collect())
-}
-
-/// Fills the derived columns of a note that still lacks any of them. Guarded so
-/// a row that was written (and therefore derived) since it was listed is never
-/// overwritten with stale values. Returns whether the row was filled.
-pub async fn set_derived_fields(
-    executor: impl PgExecutor<'_>,
-    id: i64,
-    owner: &AccountId,
-    content_hash: &ContentHash,
-    search_text: &str,
-    excerpt: &str,
-) -> Result<bool, sqlx::Error> {
-    let res = sqlx::query!(
-        r#"
-        UPDATE notes
-        SET content_hash = $3, search_text = $4, excerpt = $5
-        WHERE id = $1 AND owner_id = $2
-          AND (content_hash IS NULL OR search_text IS NULL OR excerpt IS NULL)
-        "#,
-        id,
-        owner.as_uuid(),
-        content_hash.as_str(),
-        search_text,
-        excerpt
-    )
-    .execute(executor)
-    .await?;
-
-    Ok(res.rows_affected() > 0)
 }
 
 pub async fn archive_note(
@@ -505,32 +425,13 @@ pub async fn insert_test_note(
     .await
 }
 
-/// Inserts a note the way it existed before the derived columns: only the
-/// body, so every derived column is NULL. For backfill tests.
-#[cfg(test)]
-pub async fn insert_legacy_note(
-    executor: impl PgExecutor<'_>,
-    owner: &AccountId,
-    title: &str,
-    content: &str,
-) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar!(
-        "INSERT INTO notes (owner_id, title, content) VALUES ($1, $2, $3) RETURNING id",
-        owner.as_uuid(),
-        title,
-        content
-    )
-    .fetch_one(executor)
-    .await
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::db::migrate::run_migrations_unlocked;
     use crate::db::pool::{seed_account, test_pool};
 
-    // SHA-256 of "abc", the body used in the fallback test below.
+    // SHA-256 of "abc".
     const ABC_HASH: &str = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad";
 
     fn fields<'a>(
@@ -674,36 +575,23 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rows_without_derived_columns_still_read_back_with_a_hash_and_excerpt() {
+    async fn the_derived_columns_are_required_by_the_schema() {
         let pool = test_pool().await;
         run_migrations_unlocked(&pool).await;
         let alice = AccountId::generate();
         seed_account(&pool, &alice).await;
 
-        // A row as it existed before the derived columns: only `content`.
-        let id = sqlx::query_scalar!(
-            r#"INSERT INTO notes (owner_id, title, content) VALUES ($1, 'Legacy', 'abc')
-               RETURNING id"#,
+        let err = sqlx::query!(
+            "INSERT INTO notes (owner_id, title, content) VALUES ($1, 'Bare', 'abc')",
             alice.as_uuid()
         )
-        .fetch_one(&pool)
+        .execute(&pool)
         .await
-        .unwrap();
-
-        let listed = list_notes(&pool, &alice, None, None, false, 10)
-            .await
-            .unwrap();
-        assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].content_hash.as_str(), ABC_HASH);
-        assert_eq!(listed[0].excerpt, "abc");
-        assert_eq!(listed[0].note_type, NoteType::Note);
-
-        let document = lock_note_for_update(&pool, id, &alice)
-            .await
-            .unwrap()
-            .expect("legacy row");
-        assert_eq!(document.markdown, "abc");
-        assert_eq!(document.note.content_hash.as_str(), ABC_HASH);
+        .expect_err("a note without content_hash, search_text and excerpt is refused");
+        assert!(
+            err.to_string().contains("null value"),
+            "unexpected error: {err}"
+        );
     }
 
     #[tokio::test]
@@ -736,61 +624,5 @@ mod tests {
             matched, 1,
             "FTS indexes title + search_text, not raw Markdown"
         );
-    }
-
-    async fn insert_legacy(pool: &crate::db::DbPool, owner: &AccountId, body: &str) -> i64 {
-        sqlx::query_scalar!(
-            r#"INSERT INTO notes (owner_id, title, content) VALUES ($1, 'Legacy', $2)
-               RETURNING id"#,
-            owner.as_uuid(),
-            body
-        )
-        .fetch_one(pool)
-        .await
-        .unwrap()
-    }
-
-    #[tokio::test]
-    async fn missing_derived_lists_only_incomplete_rows_and_filling_is_guarded() {
-        let pool = test_pool().await;
-        run_migrations_unlocked(&pool).await;
-        let alice = AccountId::generate();
-        seed_account(&pool, &alice).await;
-        let legacy = insert_legacy(&pool, &alice, "abc").await;
-        let complete = insert_test_note(&pool, &alice, "Done", "body", &[])
-            .await
-            .unwrap();
-
-        let missing = list_notes_missing_derived(&pool, 10).await.unwrap();
-        let ids: Vec<i64> = missing.iter().map(|m| m.id).collect();
-        assert_eq!(ids, vec![legacy], "a derived row is not listed");
-        assert_eq!(missing[0].content, "abc");
-        assert_eq!(missing[0].owner_id, alice);
-
-        let hash = ContentHash::from_hex(ABC_HASH).unwrap();
-        assert!(
-            set_derived_fields(&pool, legacy, &alice, &hash, "abc", "abc")
-                .await
-                .unwrap()
-        );
-        // Filling again is refused: the row is no longer incomplete.
-        assert!(
-            !set_derived_fields(&pool, legacy, &alice, &hash, "other", "other")
-                .await
-                .unwrap()
-        );
-        // And never across owners.
-        let bob = AccountId::generate();
-        seed_account(&pool, &bob).await;
-        let legacy_2 = insert_legacy(&pool, &alice, "xyz").await;
-        assert!(!set_derived_fields(&pool, legacy_2, &bob, &hash, "x", "x")
-            .await
-            .unwrap());
-        assert_ne!(complete.id.0, legacy);
-        assert!(list_notes_missing_derived(&pool, 10)
-            .await
-            .unwrap()
-            .iter()
-            .all(|m| m.id == legacy_2));
     }
 }

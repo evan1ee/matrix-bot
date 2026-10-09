@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id, owner_id, title, note_type, source_channel, source_ref, tags,\n            COALESCE(excerpt, left(content, 200)) AS \"excerpt!\",\n            COALESCE(content_hash, encode(sha256(convert_to(content, 'UTF8')), 'hex')) AS \"content_hash!\",\n            is_archived, created_at, updated_at, indexed_at\n        FROM notes\n        WHERE owner_id = $1\n          AND ($2::TEXT IS NULL OR $2 = ANY(tags))\n          AND ($3::BOOLEAN OR is_archived = FALSE)\n          AND ($5::TEXT IS NULL OR (title || ' ' || COALESCE(search_text, content)) ILIKE $5)\n        ORDER BY updated_at DESC\n        LIMIT $4\n        ",
+  "query": "\n        INSERT INTO notes (\n            owner_id, title, content, note_type, source_channel, source_ref, tags,\n            content_hash, search_text, excerpt\n        )\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)\n        RETURNING\n            id, owner_id, title, note_type, source_channel, source_ref, tags,\n            excerpt, content_hash,\n            is_archived, created_at, updated_at, indexed_at\n        ",
   "describe": {
     "columns": [
       {
@@ -82,15 +82,25 @@
       },
       {
         "ordinal": 7,
-        "name": "excerpt!",
+        "name": "excerpt",
         "type_info": "Text",
-        "origin": "Expression"
+        "origin": {
+          "Table": {
+            "table": "notes",
+            "name": "excerpt"
+          }
+        }
       },
       {
         "ordinal": 8,
-        "name": "content_hash!",
+        "name": "content_hash",
         "type_info": "Text",
-        "origin": "Expression"
+        "origin": {
+          "Table": {
+            "table": "notes",
+            "name": "content_hash"
+          }
+        }
       },
       {
         "ordinal": 9,
@@ -141,8 +151,13 @@
       "Left": [
         "Uuid",
         "Text",
-        "Bool",
-        "Int8",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "TextArray",
+        "Text",
+        "Text",
         "Text"
       ]
     },
@@ -154,13 +169,13 @@
       false,
       true,
       false,
-      null,
-      null,
+      false,
+      false,
       false,
       false,
       false,
       true
     ]
   },
-  "hash": "1c03a9be52bfdacf648a254edf9ff6f79138b491ad65db9949a1503f47f7fe12"
+  "hash": "9c907c57e7ee1ebd66a9a898b3ca06d6e6496044304369d4730cb7be973aa88f"
 }

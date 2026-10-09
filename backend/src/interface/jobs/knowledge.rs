@@ -3,9 +3,8 @@
 //! Handlers:
 //! - `knowledge.embed_item`: fetches item content, chunks text with overlap,
 //!   computes embeddings, and upserts chunks into `knowledge_embeddings`.
-//! - `knowledge.backfill_embeddings`: first fills the derived columns of notes
-//!   that lack them, then scans unindexed items across notes, bookmarks,
-//!   journals, and footprints, enqueuing low-priority embed jobs.
+//! - `knowledge.backfill_embeddings`: scans unindexed items across notes,
+//!   bookmarks, journals, and footprints, enqueuing low-priority embed jobs.
 
 use async_trait::async_trait;
 
@@ -53,11 +52,6 @@ impl JobHandler for KnowledgeEmbedHandler {
     }
 }
 
-/// Notes filled per transaction by the derived-field backfill.
-const DERIVED_BATCH: i64 = 500;
-/// Upper bound on batches per job run (100k notes); the next run continues.
-const MAX_DERIVED_BATCHES: usize = 200;
-
 /// Handler for `knowledge.backfill_embeddings`.
 pub struct KnowledgeBackfillHandler {
     services: AppServices,
@@ -75,19 +69,7 @@ impl JobHandler for KnowledgeBackfillHandler {
         JobType::KnowledgeBackfillEmbeddings
     }
 
-    async fn run(&self, ctx: &JobContext, _payload: serde_json::Value) -> Result<(), JobError> {
-        // Derived columns come first: embedding reads them.
-        for _ in 0..MAX_DERIVED_BATCHES {
-            let filled = self
-                .services
-                .notes
-                .backfill_derived_fields(DERIVED_BATCH)
-                .await
-                .map_err(JobError::from)?;
-            if filled < DERIVED_BATCH as usize || ctx.cancel.is_cancelled() {
-                break;
-            }
-        }
+    async fn run(&self, _ctx: &JobContext, _payload: serde_json::Value) -> Result<(), JobError> {
         self.services
             .knowledge_search
             .backfill_embeddings(50)
@@ -206,42 +188,5 @@ mod tests {
         assert_eq!(claimed.job_type, "knowledge.embed_item");
         assert_eq!(claimed.payload["item_id"], note.id.0);
         assert_eq!(claimed.payload["item_type"], "note");
-    }
-
-    #[tokio::test]
-    async fn backfill_handler_fills_derived_columns_before_enqueueing_embeddings() {
-        let pool = test_pool().await;
-        run_migrations_unlocked(&pool).await;
-        let alice = AccountId::generate();
-        seed_account(&pool, &alice).await;
-        let id = repositories::knowledge::insert_legacy_note(&pool, &alice, "Old", "legacy body")
-            .await
-            .unwrap();
-        assert_eq!(
-            repositories::knowledge::list_notes_missing_derived(&pool, 10)
-                .await
-                .unwrap()
-                .len(),
-            1
-        );
-
-        let handler = KnowledgeBackfillHandler::new(AppServices::new(&pool));
-        handler
-            .run(&job_ctx(None), serde_json::json!({}))
-            .await
-            .expect("backfill run");
-
-        assert!(
-            repositories::knowledge::list_notes_missing_derived(&pool, 10)
-                .await
-                .unwrap()
-                .is_empty(),
-            "every note has its derived columns after the run"
-        );
-        let note = repositories::knowledge::get_note_by_id(&pool, id, &alice)
-            .await
-            .unwrap()
-            .unwrap();
-        assert_eq!(note.excerpt, "legacy body");
     }
 }

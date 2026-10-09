@@ -1,0 +1,60 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            k.item_type AS \"item_type!\",\n            k.item_id AS \"item_id!\",\n            COALESCE(n.title, b.title, f.title, l.log_date, k.item_type) AS \"title!\",\n            COALESCE(n.source_ref, b.url) AS source_ref,\n            CASE WHEN n.id IS NOT NULL THEN n.excerpt END AS excerpt,\n            (n.id IS NOT NULL OR b.id IS NOT NULL OR f.id IS NOT NULL OR l.id IS NOT NULL) AS \"found!\"\n        FROM unnest($2::TEXT[], $3::BIGINT[]) AS k(item_type, item_id)\n        LEFT JOIN notes n\n            ON k.item_type = 'note' AND n.id = k.item_id AND n.owner_id = $1\n        LEFT JOIN bookmarks b\n            ON k.item_type = 'bookmark' AND b.id = k.item_id AND b.owner_id = $1\n        LEFT JOIN footprints f\n            ON k.item_type = 'footprint' AND f.id = k.item_id AND f.owner_id = $1\n        LEFT JOIN life_day_logs l\n            ON k.item_type = 'journal' AND l.id = k.item_id AND l.owner_id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "item_type!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "item_id!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 2,
+        "name": "title!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 3,
+        "name": "source_ref",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 4,
+        "name": "excerpt",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 5,
+        "name": "found!",
+        "type_info": "Bool",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray",
+        "Int8Array"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "8fc8f7b7fcc21e50ef9574b275c7b3cbbbf7693e0a0b1539eb29806e1769368b"
+}

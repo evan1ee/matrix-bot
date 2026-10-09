@@ -602,4 +602,74 @@ mod tests {
             "a refused migration must leave matrix_links intact"
         );
     }
+
+    const OWNER_14: &str = "26ab01c0-f4c1-9b7d-854f-46dca154ee89";
+
+    /// 0014 makes the derived note columns NOT NULL, which is only safe after
+    /// the backfill ran: a leftover NULL must abort it by id, change nothing,
+    /// and succeed once the row is filled.
+    #[tokio::test]
+    async fn test_0014_refuses_notes_without_derived_columns_until_they_are_filled() {
+        let pool = crate::db::pool::test_pool().await;
+        migrator_up_to(13).run(&pool).await.expect("0001-0013");
+        sqlx::query("INSERT INTO accounts (id, display_name) VALUES ($1::uuid, 'a')")
+            .bind(OWNER_14)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let complete: i64 = sqlx::query_scalar(
+            "INSERT INTO notes (owner_id, title, content, content_hash, search_text, excerpt)              VALUES ($1::uuid, 'Done', 'body', 'h', 'body', 'body') RETURNING id",
+        )
+        .bind(OWNER_14)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let bare: i64 = sqlx::query_scalar(
+            "INSERT INTO notes (owner_id, title, content) VALUES ($1::uuid, 'Bare', 'walrus')              RETURNING id",
+        )
+        .bind(OWNER_14)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let err = migrator_up_to(14).run(&pool).await.unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains(&bare.to_string()), "{message}");
+        assert!(
+            !message.contains(&format!("ids: {{{complete}")),
+            "{message}"
+        );
+
+        let nullable: String = sqlx::query_scalar(
+            "SELECT is_nullable FROM information_schema.columns              WHERE table_schema = current_schema() AND table_name = 'notes'                AND column_name = 'search_text'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(nullable, "YES", "a refused migration changes nothing");
+
+        sqlx::query(
+            "UPDATE notes SET content_hash = 'h2', search_text = 'walrus', excerpt = 'walrus'              WHERE id = $1",
+        )
+        .bind(bare)
+        .execute(&pool)
+        .await
+        .unwrap();
+        migrator_up_to(14).run(&pool).await.expect("0014");
+
+        let found: i64 = sqlx::query_scalar(
+            "SELECT count(*) FROM notes WHERE search_vector @@ to_tsquery('simple', 'walrus')",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(found, 1, "the rebuilt search_vector indexes search_text");
+        let nullable: String = sqlx::query_scalar(
+            "SELECT is_nullable FROM information_schema.columns              WHERE table_schema = current_schema() AND table_name = 'notes'                AND column_name = 'search_text'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(nullable, "NO");
+    }
 }
