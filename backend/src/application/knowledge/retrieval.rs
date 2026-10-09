@@ -14,7 +14,8 @@ use super::search::SearchService;
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
 use crate::domain::knowledge::search::{
-    contains_cjk, rrf, ItemKey, KnowledgeItemType, SearchMode, SearchOutcome, SearchResultItem,
+    contains_cjk, embedding_prefixes, rrf, ItemKey, KnowledgeItemType, SearchMode, SearchOutcome,
+    SearchResultItem,
 };
 use crate::infrastructure::postgres::repositories::knowledge::{self as knowledge_repo, VectorHit};
 
@@ -247,9 +248,11 @@ impl SearchService {
         include_archived: bool,
     ) -> Result<Option<Vec<VectorHit>>, AppError> {
         let started = Instant::now();
+        // Asymmetric retrieval models embed a query differently from a stored
+        // passage; the prefix is for the embedder only.
+        let query_input = format!("{}{text}", embedding_prefixes(&self.model).query);
         let embedded =
-            tokio::time::timeout(self.embed_timeout, self.embedder.embed(&[text.to_string()]))
-                .await;
+            tokio::time::timeout(self.embed_timeout, self.embedder.embed(&[query_input])).await;
         let degraded = |error_kind: &str| {
             warn!(
                 operation = "knowledge.search",
@@ -315,6 +318,17 @@ mod tests {
     impl EmbeddingProvider for FailingEmbedder {
         async fn embed(&self, _texts: &[String]) -> Result<Vec<Vec<f32>>, EmbeddingError> {
             Err(EmbeddingError::Unreachable("down".to_string()))
+        }
+    }
+
+    /// Remembers the texts it was asked to embed.
+    struct Recording(std::sync::Mutex<Vec<String>>);
+
+    #[async_trait]
+    impl EmbeddingProvider for Recording {
+        async fn embed(&self, texts: &[String]) -> Result<Vec<Vec<f32>>, EmbeddingError> {
+            self.0.lock().unwrap().extend(texts.iter().cloned());
+            Ok(texts.iter().map(|_| vec![0.0; 384]).collect())
         }
     }
 
@@ -407,6 +421,33 @@ mod tests {
             vec!["note".to_string()]
         );
         assert!(resolve_types(Some(&["spreadsheet".to_string()])).is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_query_is_embedded_with_the_models_query_prefix() {
+        let f = fixture().await;
+        f.note("Rust", "ownership").await;
+
+        let recorder = Arc::new(Recording(std::sync::Mutex::new(Vec::new())));
+        let e5 = f
+            .search
+            .with_embedder(recorder.clone())
+            .with_model("multilingual-e5-small");
+        e5.search(&f.alice, SearchQuery::new("  ownership  "))
+            .await
+            .unwrap();
+        // A model without prefixes embeds the bare query.
+        f.search
+            .with_embedder(recorder.clone())
+            .with_model("bge-small-en-v1.5")
+            .search(&f.alice, SearchQuery::new("ownership"))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            *recorder.0.lock().unwrap(),
+            vec!["query: ownership".to_string(), "ownership".to_string()]
+        );
     }
 
     #[tokio::test]
