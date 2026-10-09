@@ -1,4 +1,4 @@
-//! Knowledge and Second Brain application services.
+//! Knowledge base (notes, bookmarks, journal, footprints) application services.
 //!
 //! Owns business use cases, transactional boundaries, and outbox event
 //! publication for notes and cross-domain semantic hybrid search.

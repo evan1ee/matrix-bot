@@ -9,7 +9,7 @@ export const KnowledgeView: React.FC = () => (
   <React.Suspense
     fallback={
       <div className="py-16 text-center text-xs text-neutral-400 font-mono">
-        Loading Second Brain...
+        Loading notes...
       </div>
     }
   >
@@ -19,11 +19,11 @@ export const KnowledgeView: React.FC = () => (
 
 export const knowledgeModule: FrontendModule = {
   id: 'knowledge',
-  name: 'Second Brain',
+  name: 'Notes',
   description: 'Personal knowledge base, notes, and semantic search',
   iconName: 'Brain',
   navTab: {
-    label: 'Second Brain',
+    label: 'Notes',
   },
   MainView: KnowledgeView,
   handleSseEvent: (event: SystemEvent, queryClient) => {

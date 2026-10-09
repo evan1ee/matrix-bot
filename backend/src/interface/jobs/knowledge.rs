@@ -1,4 +1,4 @@
-//! Background durable jobs for Knowledge & Second Brain embeddings.
+//! Background durable jobs for the knowledge base embeddings.
 //!
 //! Handlers:
 //! - `knowledge.embed_item`: fetches item content, chunks text with overlap,

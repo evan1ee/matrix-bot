@@ -112,6 +112,29 @@ Rulings:
 
 ---
 
+## 3b. Notes refactor (branch `feat/notes-refactor`)
+
+Spec: `docs/superpowers/specs/2026-10-08-second-brain-refactor-design.md`. Plan: `docs/superpowers/plans/2026-10-09-notes-refactor.md` (approved 2026-10-09). One commit per task.
+
+| Task | Scope | Status |
+|---|---|---|
+| 0 | Relabel "Second Brain" to "Notes" (UI, chat help, tool descriptions) | Done |
+| 1 | Markdown module + domain split | Pending |
+| 2 | Migrations 0012/0013 + derived write path | Pending |
+| 3 | Backfill derived fields | Pending |
+| 4 | Search rewrite (lexical + vector + RRF) | Pending |
+| 5 | Indexing: skip-on-hash, model tagging | Pending |
+| 6 | Real e5 inference | Pending |
+| 7 | API contract + frontend | Pending |
+| 8 | LLM / MCP tools | Pending |
+| 9 | Export / import | Pending |
+| 10 | Migration 0014 | Pending |
+| 11 | Cleanup + docs | Pending |
+
+Local test DB note: `CREATE EXTENSION vector` / `pg_trgm` race between parallel tests on a fresh server and land in a test schema. Create both once in `public` (`CREATE EXTENSION vector SCHEMA public; CREATE EXTENSION pg_trgm SCHEMA public;`) before the first `cargo test`.
+
+---
+
 ## 4. Remaining Tasks & Action Plan
 
 ### Track 1: Production Cutover & Deployment (Human Operator / User-Gated)

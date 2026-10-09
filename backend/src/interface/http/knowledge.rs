@@ -1,4 +1,4 @@
-//! HTTP REST API handlers and DTOs for Second Brain notes & knowledge search.
+//! HTTP REST API handlers and DTOs for notes & knowledge search.
 
 use axum::{
     extract::{Path, Query, State},

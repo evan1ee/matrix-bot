@@ -37,7 +37,7 @@ const NAV_GROUPS: NavGroup[] = [
     title: 'Productivity',
     items: [
       { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-      { id: 'knowledge', label: 'Second Brain', icon: Brain },
+      { id: 'knowledge', label: 'Notes', icon: Brain },
       { id: 'todo', label: 'Tasks', icon: CheckSquare },
       { id: 'reminder', label: 'Reminders', icon: Clock },
       { id: 'bookmarks', label: 'Bookmarks', icon: Bookmark },

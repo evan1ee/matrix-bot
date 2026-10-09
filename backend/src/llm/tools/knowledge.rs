@@ -1,4 +1,4 @@
-//! AI and MCP tool definitions and executors for Second Brain knowledge and notes.
+//! AI and MCP tool definitions and executors for the notes knowledge base.
 
 use serde_json::json;
 
@@ -97,7 +97,7 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
     vec![
         ToolDefinition::function(
             "knowledge_search",
-            "Perform hybrid vector semantic and keyword search across notes, bookmarks, journal entries, and footprints in your Second Brain.",
+            "Perform hybrid vector semantic and keyword search across your notes, bookmarks, journal entries and footprints.",
             json!({
                 "type": "object",
                 "properties": {
@@ -123,7 +123,7 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
         ),
         ToolDefinition::function(
             "knowledge_create_note",
-            "Capture ideas, thoughts, meeting notes, or documentation directly into the Second Brain.",
+            "Save an idea, thought or document as a note.",
             json!({
                 "type": "object",
                 "properties": {

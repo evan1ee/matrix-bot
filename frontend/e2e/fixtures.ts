@@ -22,7 +22,7 @@ export const DASHBOARD_READY = 'Active Tasks';
  */
 export const TAB = {
   dashboard: 'Dashboard',
-  knowledge: 'Second Brain',
+  knowledge: 'Notes',
   todo: 'Tasks',
   reminder: 'Reminders',
   bookmarks: 'Bookmarks',

@@ -2,11 +2,11 @@ import { test, expect, gotoApp, TAB } from './fixtures';
 
 const gotoKnowledge = (page: import('@playwright/test').Page) => gotoApp(page, TAB.knowledge);
 
-test.describe('Second Brain & Knowledge Base', () => {
+test.describe('Notes', () => {
   test('renders empty knowledge view with action buttons and empty state', async ({ app }) => {
     await gotoKnowledge(app);
 
-    await expect(app.getByRole('heading', { name: 'Second Brain' })).toBeVisible();
+    await expect(app.getByRole('heading', { name: 'Notes', exact: true })).toBeVisible();
     await expect(app.getByRole('button', { name: 'Active Notes' })).toBeVisible();
     await expect(app.getByRole('button', { name: 'Archive' })).toBeVisible();
     await expect(app.getByRole('button', { name: 'AI Search' })).toBeVisible();

@@ -190,7 +190,7 @@ export const KnowledgeMainView: React.FC = () => {
                 ? `No notes found tagged #${selectedTag}`
                 : activeTab === 'archived'
                 ? 'Notes you archive will show up here.'
-                : 'Capture ideas, snippets, and research into your second brain.'}
+                : 'Capture ideas, snippets and research as notes.'}
             </p>
           </div>
           {activeTab === 'active' && !selectedTag && (

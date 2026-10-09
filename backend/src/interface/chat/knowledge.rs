@@ -1,4 +1,4 @@
-//! Chat interface for Second Brain knowledge base & notes.
+//! Chat interface for the notes knowledge base.
 //!
 //! Handles `!note` / `/note`, `!notes` / `/notes`, and `!search` / `/search`
 //! commands via `NoteService` and `SearchService`.
@@ -79,7 +79,7 @@ impl BotModule for KnowledgeModule {
             CommandHelp {
                 name: "note".to_string(),
                 usage: "!note add <title> | <content> or !note <text>".to_string(),
-                description: "Create or manage notes in your Second Brain".to_string(),
+                description: "Create or manage your notes".to_string(),
             },
             CommandHelp {
                 name: "notes".to_string(),
@@ -107,7 +107,7 @@ impl BotModule for KnowledgeModule {
 }
 
 fn format_help() -> String {
-    "📝 <b>Second Brain & Notes:</b><br/>\
+    "📝 <b>Notes:</b><br/>\
      • <code>!note add &lt;title&gt; | &lt;content&gt;</code> — Create note with title<br/>\
      • <code>!note &lt;text&gt;</code> — Quick note capture<br/>\
      • <code>!notes [tag]</code> — List recent notes<br/>\
