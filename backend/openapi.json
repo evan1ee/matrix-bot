@@ -948,7 +948,7 @@
             "description": "Secret ID",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/uuid.Uuid"
+              "type": "string"
             }
           }
         ],
@@ -1032,7 +1032,7 @@
             "description": "Secret ID",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/uuid.Uuid"
+              "type": "string"
             }
           }
         ],
@@ -1098,7 +1098,7 @@
             "description": "Secret ID",
             "required": true,
             "schema": {
-              "$ref": "#/components/schemas/uuid.Uuid"
+              "type": "string"
             }
           }
         ],
@@ -9628,7 +9628,7 @@
         ],
         "properties": {
           "id": {
-            "$ref": "#/components/schemas/uuid.Uuid"
+            "type": "string"
           },
           "status": {
             "type": "string"
@@ -11900,7 +11900,7 @@
             "nullable": true
           },
           "id": {
-            "$ref": "#/components/schemas/uuid.Uuid"
+            "type": "string"
           },
           "key_version": {
             "type": "integer",
@@ -11952,7 +11952,7 @@
             "nullable": true
           },
           "id": {
-            "$ref": "#/components/schemas/uuid.Uuid"
+            "type": "string"
           },
           "status": {
             "type": "string"

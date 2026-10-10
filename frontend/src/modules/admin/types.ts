@@ -50,3 +50,10 @@ export interface AuditLogEntry {
   detail: any;
   created_at: string;
 }
+
+export interface AuditLogPage {
+  entries: AuditLogEntry[];
+  total: number;
+  limit: number;
+  offset: number;
+}

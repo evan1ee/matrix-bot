@@ -450,38 +450,26 @@ export class FakeApi {
       updated_by: null,
     },
     {
-      key: 'inference.embedding.model',
-      value: 'multilingual-e5-small',
-      default_value: 'multilingual-e5-small',
+      key: 'inference.embedding.base_url',
+      value: '',
+      default_value: '',
       value_type: 'string',
-      description: 'Active embedding model for note indexing',
-      is_custom: false,
-      hot_reloadable: false,
-      category: 'Inference',
-      updated_at: null,
-      updated_by: null,
-    },
-    {
-      key: 'app.default_timezone',
-      value: 'UTC',
-      default_value: 'UTC',
-      value_type: 'string',
-      description: 'Default fallback timezone for new accounts',
+      description: 'Base URL for knowledge embedding inference',
       is_custom: false,
       hot_reloadable: true,
-      category: 'General',
+      category: 'inference',
       updated_at: null,
       updated_by: null,
     },
     {
-      key: 'channels.telegram.enabled',
-      value: false,
-      default_value: false,
+      key: 'registration.allow_link_signup',
+      value: true,
+      default_value: true,
       value_type: 'boolean',
-      description: 'Enable Telegram bot adapter',
+      description: 'Allow allowlisted chat identities to create accounts via /link',
       is_custom: false,
-      hot_reloadable: false,
-      category: 'Channels',
+      hot_reloadable: true,
+      category: 'registration',
       updated_at: null,
       updated_by: null,
     },
@@ -1295,9 +1283,9 @@ export class FakeApi {
       if (path === '/admin/secrets' && method === 'POST') {
         const provider = String(body?.provider ?? 'openai');
         const slotName = String(body?.name ?? 'default');
-        const rawSecret = String(body?.secret ?? '');
+        const rawSecret = String(body?.secret ?? '').trim();
         const id = `sec_${this.nextSecretId++}`;
-        const masked = rawSecret && rawSecret.length > 8 ? `${rawSecret.slice(0, 3)}...${rawSecret.slice(-4)}` : '••••••••';
+        const masked = rawSecret && rawSecret.length > 10 ? `${rawSecret.slice(0, 3)}...${rawSecret.slice(-4)}` : '••••••••';
         const newSec = {
           id,
           provider,
@@ -1322,7 +1310,7 @@ export class FakeApi {
           detail: { masked_preview: masked },
           created_at: new Date().toISOString(),
         });
-        return json(route, 201, newSec);
+        return json(route, 200, newSec);
       }
 
       if (path.startsWith('/admin/secrets/') && path.endsWith('/test') && method === 'POST') {
@@ -1340,8 +1328,8 @@ export class FakeApi {
         const sec = this.adminSecrets.find((s) => s.id === id);
         if (!sec) return json(route, 404, { error: 'Secret not found', code: 404 });
         if (body?.secret) {
-          const rawSecret = String(body.secret);
-          sec.masked_preview = rawSecret.length > 8 ? `${rawSecret.slice(0, 3)}...${rawSecret.slice(-4)}` : '••••••••';
+          const rawSecret = String(body.secret).trim();
+          sec.masked_preview = rawSecret.length > 10 ? `${rawSecret.slice(0, 3)}...${rawSecret.slice(-4)}` : '••••••••';
         }
         if (body?.status) sec.status = String(body.status);
         sec.updated_at = new Date().toISOString();
@@ -1354,8 +1342,20 @@ export class FakeApi {
         return json(route, 200, { status: 'deleted' });
       }
 
+      if (path === '/admin/reload' && method === 'POST') {
+        return json(route, 200, { status: 'reloaded', reloaded_at: new Date().toISOString() });
+      }
+
       if (path.startsWith('/admin/audit-logs') && method === 'GET') {
-        return json(route, 200, this.adminAuditLogs);
+        const limit = Number(url?.searchParams.get('limit') ?? 50);
+        const offset = Number(url?.searchParams.get('offset') ?? 0);
+        const entries = this.adminAuditLogs.slice(offset, offset + limit);
+        return json(route, 200, {
+          entries,
+          total: this.adminAuditLogs.length,
+          limit,
+          offset,
+        });
       }
     }
 

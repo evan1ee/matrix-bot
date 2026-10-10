@@ -1,11 +1,12 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { fetchApi } from '../../core/apiClient';
+import { useSensitiveAction } from '../../core/security';
 import {
   ConfigStatus,
   SettingItem,
   SecretMetadata,
   SecretTestResult,
-  AuditLogEntry,
+  AuditLogPage,
 } from './types';
 
 export const ADMIN_KEYS = {
@@ -20,6 +21,7 @@ export function useAdminStatus() {
     queryKey: ADMIN_KEYS.status,
     queryFn: () => fetchApi<ConfigStatus>('/admin/config-status'),
     staleTime: 10_000,
+    retry: false,
   });
 }
 
@@ -28,38 +30,29 @@ export function useAdminSettings() {
     queryKey: ADMIN_KEYS.settings,
     queryFn: () => fetchApi<SettingItem[]>('/admin/settings'),
     staleTime: 15_000,
+    retry: false,
   });
 }
 
 export function useUpdateSetting() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ key, value }: { key: string; value: any }) =>
+  return useSensitiveAction(
+    ({ key, value }: { key: string; value: any }) =>
       fetchApi<SettingItem>(`/admin/settings/${encodeURIComponent(key)}`, {
         method: 'PUT',
         body: JSON.stringify({ value }),
       }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ADMIN_KEYS.settings });
-      queryClient.invalidateQueries({ queryKey: ADMIN_KEYS.status });
-      queryClient.invalidateQueries({ queryKey: ['admin', 'audit'] });
-    },
-  });
+    [ADMIN_KEYS.settings, ADMIN_KEYS.status, ['admin', 'audit']]
+  );
 }
 
 export function useResetSetting() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (key: string) =>
+  return useSensitiveAction(
+    (key: string) =>
       fetchApi<{ status: string }>(`/admin/settings/${encodeURIComponent(key)}`, {
         method: 'DELETE',
       }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ADMIN_KEYS.settings });
-      queryClient.invalidateQueries({ queryKey: ADMIN_KEYS.status });
-      queryClient.invalidateQueries({ queryKey: ['admin', 'audit'] });
-    },
-  });
+    [ADMIN_KEYS.settings, ADMIN_KEYS.status, ['admin', 'audit']]
+  );
 }
 
 export function useAdminSecrets() {
@@ -67,13 +60,13 @@ export function useAdminSecrets() {
     queryKey: ADMIN_KEYS.secrets,
     queryFn: () => fetchApi<SecretMetadata[]>('/admin/secrets'),
     staleTime: 15_000,
+    retry: false,
   });
 }
 
 export function useCreateSecret() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (payload: {
+  return useSensitiveAction(
+    (payload: {
       provider: string;
       name?: string;
       secret: string;
@@ -83,18 +76,13 @@ export function useCreateSecret() {
         method: 'POST',
         body: JSON.stringify(payload),
       }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ADMIN_KEYS.secrets });
-      queryClient.invalidateQueries({ queryKey: ADMIN_KEYS.status });
-      queryClient.invalidateQueries({ queryKey: ['admin', 'audit'] });
-    },
-  });
+    [ADMIN_KEYS.secrets, ADMIN_KEYS.status, ['admin', 'audit']]
+  );
 }
 
 export function useReplaceSecret() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({
+  return useSensitiveAction(
+    ({
       id,
       secret,
       status,
@@ -107,48 +95,35 @@ export function useReplaceSecret() {
         method: 'PUT',
         body: JSON.stringify({ secret, status }),
       }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ADMIN_KEYS.secrets });
-      queryClient.invalidateQueries({ queryKey: ADMIN_KEYS.status });
-      queryClient.invalidateQueries({ queryKey: ['admin', 'audit'] });
-    },
-  });
+    [ADMIN_KEYS.secrets, ADMIN_KEYS.status, ['admin', 'audit']]
+  );
 }
 
 export function useDeleteSecret() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) =>
+  return useSensitiveAction(
+    (id: string) =>
       fetchApi<{ status: string }>(`/admin/secrets/${id}`, {
         method: 'DELETE',
       }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ADMIN_KEYS.secrets });
-      queryClient.invalidateQueries({ queryKey: ADMIN_KEYS.status });
-      queryClient.invalidateQueries({ queryKey: ['admin', 'audit'] });
-    },
-  });
+    [ADMIN_KEYS.secrets, ADMIN_KEYS.status, ['admin', 'audit']]
+  );
 }
 
 export function useTestSecret() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: (id: string) =>
+  return useSensitiveAction(
+    (id: string) =>
       fetchApi<SecretTestResult>(`/admin/secrets/${id}/test`, {
         method: 'POST',
       }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ADMIN_KEYS.secrets });
-      queryClient.invalidateQueries({ queryKey: ADMIN_KEYS.status });
-      queryClient.invalidateQueries({ queryKey: ['admin', 'audit'] });
-    },
-  });
+    [ADMIN_KEYS.secrets, ADMIN_KEYS.status, ['admin', 'audit']]
+  );
 }
 
 export function useAdminAudit(limit = 50, offset = 0) {
-  return useQuery<AuditLogEntry[]>({
+  return useQuery<AuditLogPage>({
     queryKey: ADMIN_KEYS.audit(limit, offset),
-    queryFn: () => fetchApi<AuditLogEntry[]>(`/admin/audit-logs?limit=${limit}&offset=${offset}`),
+    queryFn: () => fetchApi<AuditLogPage>(`/admin/audit-logs?limit=${limit}&offset=${offset}`),
     staleTime: 10_000,
+    retry: false,
   });
 }

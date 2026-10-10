@@ -16,7 +16,7 @@ test('displays system status overview in Admin Console', async ({ app, api }) =>
 
   await expect(app.getByRole('heading', { name: 'Admin Console', exact: true }).first()).toBeVisible();
   await expect(app.getByText('Encryption Active')).toBeVisible();
-  await expect(app.getByText('Runtime Settings')).toBeVisible();
+  await expect(app.getByText('Runtime Settings', { exact: true })).toBeVisible();
   await expect(app.getByText('Encrypted Credentials', { exact: true })).toBeVisible();
   await expect(app.getByText('AES-256-GCM')).toBeVisible();
 });
@@ -91,4 +91,22 @@ test('stores write-only credential, tests connectivity, and never leaks plaintex
   await expect(deleteModal).toBeVisible();
   await deleteModal.getByRole('button', { name: 'Delete' }).click();
   await expect(app.getByText('sk-...9999')).toHaveCount(0);
+});
+
+test('supports Escape dismissal on modals and retry on query failure', async ({ app, api }) => {
+  api.role = 'admin';
+  api.failNext = { path: /^\/admin\/config-status$/, status: 500, error: 'Temporary database error' };
+  await gotoApp(app, TAB.admin);
+
+  // Verify error state and Retry button
+  await expect(app.getByRole('alert')).toContainText('Temporary database error');
+  await app.getByRole('button', { name: 'Retry' }).click();
+  await expect(app.getByText('Runtime Settings', { exact: true })).toBeVisible();
+
+  // Verify Escape closes SecretModal
+  await app.getByRole('button', { name: 'Secrets Vault' }).click();
+  await app.getByRole('button', { name: /add credential/i }).click();
+  await expect(app.getByRole('dialog')).toBeVisible();
+  await app.keyboard.press('Escape');
+  await expect(app.getByRole('dialog')).toHaveCount(0);
 });

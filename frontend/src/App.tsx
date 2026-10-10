@@ -96,6 +96,9 @@ const AppContent: React.FC = () => {
     const onNavigate = (e: Event) => {
       const detail = (e as CustomEvent).detail;
       if (detail?.moduleId) {
+        if (detail.moduleId === 'admin' && user && user.role !== 'admin') {
+          return;
+        }
         setActiveModuleId(detail.moduleId);
       }
     };
@@ -108,7 +111,13 @@ const AppContent: React.FC = () => {
       window.removeEventListener('app:navigate', onNavigate);
       window.removeEventListener('app:ai-prompt', onAiPrompt);
     };
-  }, []);
+  }, [user]);
+
+  useEffect(() => {
+    if (activeModuleId === 'admin' && user && user.role !== 'admin') {
+      setActiveModuleId('dashboard');
+    }
+  }, [activeModuleId, user]);
 
   // Signed out is a state, not an event: derive the prompt from the session
   // itself so it appears on a cold load as well as on an expiry, and so it
