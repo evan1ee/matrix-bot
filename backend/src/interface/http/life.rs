@@ -527,6 +527,7 @@ mod tests {
             session_id_hash: "hash_1".to_string(),
             last_verified_at: chrono::Utc::now(),
             restricted_until: None,
+            role: crate::domain::accounts::AccountRole::User,
         };
 
         // 1. Initial stats

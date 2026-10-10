@@ -55,6 +55,7 @@ pub struct Principal {
     pub session_id_hash: String,
     pub last_verified_at: DateTime<Utc>,
     pub restricted_until: Option<DateTime<Utc>>,
+    pub role: super::AccountRole,
 }
 
 #[cfg(test)]

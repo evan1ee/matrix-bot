@@ -55,6 +55,7 @@ impl AccountService {
             // creation time as the moment a passkey was last presented.
             last_verified_at: chrono::DateTime::<chrono::Utc>::MIN_UTC,
             restricted_until: None,
+            role: account.role,
         }))
     }
 
@@ -79,6 +80,7 @@ impl AccountService {
             session_id_hash: session.id_hash,
             last_verified_at: session.last_verified_at,
             restricted_until: session.restricted_until,
+            role: account.role,
         }))
     }
 

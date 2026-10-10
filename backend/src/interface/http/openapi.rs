@@ -31,11 +31,11 @@ use crate::interface::http::reminders::{RecurrencePattern, Reminder, ReminderSta
 use crate::interface::http::todos::{TodoItem, TodoPriority};
 use crate::interface::http::webhooks::{TelegramMessageResult, TelegramQuery, TelegramResponse};
 use crate::interface::http::{
-    account, agent, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_categories,
-    finance_net_worth, footprints, habits, health, identities, knowledge, knowledge_transfer, life,
-    life_activity, link, mcp, ocr, portfolio, portfolio_alerts, portfolio_cash, portfolio_history,
-    portfolio_prices, recurring_bills, reminders, rooms, settings, sse, storage, todos, voice,
-    webhooks,
+    account, admin, agent, ai, auth, bookmarks, briefing, finance, finance_analytics,
+    finance_categories, finance_net_worth, footprints, habits, health, identities, knowledge,
+    knowledge_transfer, life, life_activity, link, mcp, ocr, portfolio, portfolio_alerts,
+    portfolio_cash, portfolio_history, portfolio_prices, recurring_bills, reminders, rooms,
+    settings, sse, storage, todos, voice, webhooks,
 };
 
 #[derive(OpenApi)]
@@ -200,6 +200,17 @@ use crate::interface::http::{
         agent::reject_action,
         agent::list_tasks,
         agent::schedule_task,
+        admin::status::config_status,
+        admin::settings::list_settings,
+        admin::settings::get_setting,
+        admin::settings::update_setting,
+        admin::settings::reset_setting,
+        admin::secrets::list_secrets,
+        admin::secrets::create_secret,
+        admin::secrets::replace_secret,
+        admin::secrets::delete_secret,
+        admin::secrets::test_secret,
+        admin::audit::list_audit_logs,
     ),
     components(
         schemas(
@@ -375,7 +386,18 @@ use crate::interface::http::{
             DayActivityResponse,
             TelegramQuery,
             TelegramResponse,
-            TelegramMessageResult
+            TelegramMessageResult,
+            admin::status::ConfigurationStatusDto,
+            admin::settings::SettingItemDto,
+            admin::settings::UpdateSettingRequest,
+            admin::settings::ResetSettingResponse,
+            admin::secrets::SecretMetadataDto,
+            admin::secrets::CreateSecretRequest,
+            admin::secrets::ReplaceSecretRequest,
+            admin::secrets::DeleteSecretResponse,
+            admin::secrets::SecretTestResultDto,
+            admin::audit::ConfigAuditRowDto,
+            admin::audit::AuditLogPageDto,
         )
     ),
     modifiers(&SecurityAddon),

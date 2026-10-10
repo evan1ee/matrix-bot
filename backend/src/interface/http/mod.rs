@@ -22,6 +22,7 @@ use crate::config::Config;
 use crate::db::Database;
 
 pub mod account;
+pub mod admin;
 pub mod agent;
 pub mod ai;
 pub mod app_error;
@@ -244,6 +245,21 @@ mod step_up_tests {
         ("PUT", "/api/v1/account/passkeys/some-id"),
         ("GET", "/api/v1/notes/export"),
         ("POST", "/api/v1/notes/import"),
+        ("PUT", "/api/v1/admin/settings/llm.default_model"),
+        ("DELETE", "/api/v1/admin/settings/llm.default_model"),
+        ("POST", "/api/v1/admin/secrets"),
+        (
+            "PUT",
+            "/api/v1/admin/secrets/00000000-0000-0000-0000-000000000000",
+        ),
+        (
+            "DELETE",
+            "/api/v1/admin/secrets/00000000-0000-0000-0000-000000000000",
+        ),
+        (
+            "POST",
+            "/api/v1/admin/secrets/00000000-0000-0000-0000-000000000000/test",
+        ),
     ];
 
     /// Routes an ordinary, hours-old session must still be able to use.
@@ -273,6 +289,10 @@ mod step_up_tests {
 
         let accounts = &state.services.accounts;
         let account = accounts.create("evan", STATUS_ACTIVE).await.unwrap();
+        accounts
+            .update_role(&account, crate::domain::accounts::AccountRole::Admin)
+            .await
+            .unwrap();
         let token = accounts
             .create_session(&account, None, None, None)
             .await
@@ -487,6 +507,8 @@ mod server_shutdown_tests {
             trust_forwarded_for: false,
             ai: crate::config::AiEnvConfig::default(),
             storage: crate::config::StorageConfig::default(),
+            secrets_encryption_key: None,
+            secrets_encryption_keys: None,
         }
     }
 

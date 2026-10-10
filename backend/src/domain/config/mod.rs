@@ -233,6 +233,17 @@ pub enum SettingType {
     Boolean,
 }
 
+impl SettingType {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::String => "string",
+            Self::Integer => "integer",
+            Self::Float => "float",
+            Self::Boolean => "boolean",
+        }
+    }
+}
+
 /// Strongly typed runtime setting value.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(untagged)]

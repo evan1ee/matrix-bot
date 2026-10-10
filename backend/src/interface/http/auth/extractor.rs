@@ -115,6 +115,38 @@ where
     }
 }
 
+/// A caller who is both verified (passkey step-up within window, not restricted)
+/// and possesses the `admin` role.
+#[derive(Debug, Clone)]
+pub struct AdminUser(pub VerifiedUser);
+
+impl std::ops::Deref for AdminUser {
+    type Target = VerifiedUser;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[async_trait]
+impl<S> FromRequestParts<S> for AdminUser
+where
+    S: Send + Sync,
+    ApiState: FromRef<S>,
+{
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let verified = VerifiedUser::from_request_parts(parts, state).await?;
+
+        if !verified.is_admin() {
+            return Err(ApiError::forbidden("Administrative privileges required"));
+        }
+
+        Ok(AdminUser(verified))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -114,6 +114,7 @@ mod tests {
             session_id_hash: "hash".to_string(),
             last_verified_at: chrono::Utc::now(),
             restricted_until: None,
+            role: crate::domain::accounts::AccountRole::User,
         };
         (state, user)
     }

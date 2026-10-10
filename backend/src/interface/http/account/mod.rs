@@ -57,6 +57,7 @@ mod tests {
             session_id_hash: hash_token(&token),
             last_verified_at: chrono::Utc::now(),
             restricted_until: None,
+            role: crate::domain::accounts::AccountRole::User,
         }
     }
 

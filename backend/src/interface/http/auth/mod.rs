@@ -6,6 +6,7 @@ pub mod recovery;
 pub mod types;
 pub mod webauthn;
 
+pub use extractor::{AdminUser, VerifiedUser};
 pub use handlers::*;
 pub use types::*;
 

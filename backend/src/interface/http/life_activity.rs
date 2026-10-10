@@ -150,6 +150,7 @@ mod tests {
             session_id_hash: "sess_hash".to_string(),
             last_verified_at: crate::utils::time::now_at_storage_precision(),
             restricted_until: None,
+            role: crate::domain::accounts::AccountRole::User,
         }
     }
 

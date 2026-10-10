@@ -211,6 +211,10 @@ pub struct Config {
     pub trust_forwarded_for: bool,
     pub ai: AiEnvConfig,
     pub storage: StorageConfig,
+    /// Primary 256-bit symmetric encryption key for provider credentials (`SECRETS_ENCRYPTION_KEY`).
+    pub secrets_encryption_key: Option<String>,
+    /// Versioned symmetric encryption keys (`SECRETS_ENCRYPTION_KEYS`).
+    pub secrets_encryption_keys: Option<String>,
 }
 
 impl Config {
@@ -372,6 +376,8 @@ impl Config {
 
         let ai = AiEnvConfig::from_env();
         let storage = StorageConfig::from_env((!web_url.is_empty()).then(|| web_url.clone()));
+        let secrets_encryption_key = env::var("SECRETS_ENCRYPTION_KEY").ok();
+        let secrets_encryption_keys = env::var("SECRETS_ENCRYPTION_KEYS").ok();
 
         Ok(Self {
             homeserver,
@@ -413,6 +419,8 @@ impl Config {
             trust_forwarded_for,
             ai,
             storage,
+            secrets_encryption_key,
+            secrets_encryption_keys,
         })
     }
 
@@ -486,6 +494,8 @@ impl Config {
             trust_forwarded_for: false,
             ai: AiEnvConfig::default(),
             storage: StorageConfig::default(),
+            secrets_encryption_key: None,
+            secrets_encryption_keys: None,
         }
     }
 }
@@ -661,6 +671,8 @@ mod tests {
             trust_forwarded_for: false,
             ai: AiEnvConfig::default(),
             storage: StorageConfig::default(),
+            secrets_encryption_key: None,
+            secrets_encryption_keys: None,
         };
 
         for bad in ["https://mbm.one", "mbm.one:8080", "localhost:5173"] {

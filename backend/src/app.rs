@@ -190,7 +190,20 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
     let storage = crate::infrastructure::storage::build_storage(&config.storage)
         .map_err(|e| anyhow::anyhow!("Failed to initialize object storage: {e}"))?;
 
+    let secret_protector: Arc<dyn crate::infrastructure::crypto::SecretProtector> =
+        match crate::infrastructure::crypto::AesGcmSecretProtector::from_key_strings(
+            config.secrets_encryption_key.as_deref(),
+            config.secrets_encryption_keys.as_deref(),
+        ) {
+            Ok(protector) => Arc::new(protector),
+            Err(e) => {
+                warn!("Secret encryption not configured ({e}); secret operations will fail closed");
+                Arc::new(crate::infrastructure::crypto::FailClosedSecretProtector)
+            }
+        };
+
     let services = AppServices::new(&db.pool)
+        .with_secret_protector(secret_protector)
         .with_link_config(config.web_url.clone(), config.link_signup_allowlist.clone())
         .with_storage(storage)
         .with_embedder(config.embedding_provider())

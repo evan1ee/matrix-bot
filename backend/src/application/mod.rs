@@ -160,10 +160,7 @@ impl AppServices {
         let outbox = OutboxService::new(pool.clone());
         let app_config = AppConfigService::new(pool.clone());
         let protector: Arc<dyn crate::infrastructure::crypto::SecretProtector> =
-            match crate::infrastructure::crypto::AesGcmSecretProtector::from_env() {
-                Ok(p) => Arc::new(p),
-                Err(_) => Arc::new(crate::infrastructure::crypto::FailClosedSecretProtector),
-            };
+            Arc::new(crate::infrastructure::crypto::FailClosedSecretProtector);
         let secrets = SecretService::new(pool.clone(), protector);
         let storage = crate::infrastructure::storage::LocalStorageService::new(
             "data/storage",

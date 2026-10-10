@@ -90,6 +90,19 @@ impl SecretService {
         Ok(list)
     }
 
+    /// Whether the underlying protector has a valid encryption key configured.
+    pub fn is_configured(&self) -> bool {
+        self.protector.is_configured()
+    }
+
+    /// Retrieves metadata for a single stored secret by ID.
+    pub async fn get_metadata_by_id(&self, id: SecretId) -> Result<SecretMetadata, AppError> {
+        let all = self.list_metadata().await?;
+        all.into_iter()
+            .find(|m| m.id == id)
+            .ok_or_else(|| AppError::NotFound(format!("Secret not found: {id}")))
+    }
+
     /// Stores a new encrypted credential in a single transaction with audit and outbox events.
     pub async fn store_secret(
         &self,
@@ -190,6 +203,11 @@ impl SecretService {
             .map_err(|e| AppError::Validation(e.to_string()))?;
 
         let masked = mask_secret(plain);
+        let mut meta = existing.metadata.unwrap_or_else(|| serde_json::json!({}));
+        if let serde_json::Value::Object(ref mut map) = meta {
+            map.insert("masked_preview".to_string(), serde_json::json!(masked));
+        }
+
         let encrypted = self.protector.encrypt(provider, &existing.name, &secret)?;
 
         let mut tx = self.pool.begin().await?;
@@ -202,7 +220,7 @@ impl SecretService {
             encrypted.key_version,
             None,
             Some(actor),
-            None,
+            Some(&meta),
         )
         .await?;
 

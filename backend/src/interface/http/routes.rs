@@ -5,11 +5,11 @@ use axum::{
 };
 
 use super::{
-    account, agent, ai, auth, bookmarks, briefing, finance, finance_analytics, finance_categories,
-    finance_net_worth, footprints, habits, identities, knowledge, knowledge_transfer, life,
-    life_activity, link, mcp, ocr, openapi, portfolio, portfolio_alerts, portfolio_cash,
-    portfolio_history, portfolio_prices, recurring_bills, reminders, rooms, settings, sse, storage,
-    todos, voice, webhooks,
+    account, admin, agent, ai, auth, bookmarks, briefing, finance, finance_analytics,
+    finance_categories, finance_net_worth, footprints, habits, identities, knowledge,
+    knowledge_transfer, life, life_activity, link, mcp, ocr, openapi, portfolio, portfolio_alerts,
+    portfolio_cash, portfolio_history, portfolio_prices, recurring_bills, reminders, rooms,
+    settings, sse, storage, todos, voice, webhooks,
 };
 
 /// The API route table.
@@ -26,6 +26,7 @@ pub fn api_routes() -> Router<auth::ApiState> {
         .merge(routes_life())
         .merge(routes_ai_and_webhooks())
         .merge(routes_agent())
+        .merge(routes_admin())
 }
 
 fn routes_core() -> Router<auth::ApiState> {
@@ -387,4 +388,26 @@ fn routes_agent() -> Router<auth::ApiState> {
         .route("/agent/approvals/:id/reject", post(agent::reject_action))
         .route("/agent/tasks", get(agent::list_tasks))
         .route("/agent/tasks/:id", put(agent::schedule_task))
+}
+
+fn routes_admin() -> Router<auth::ApiState> {
+    Router::new()
+        .route("/admin/config-status", get(admin::status::config_status))
+        .route("/admin/settings", get(admin::settings::list_settings))
+        .route(
+            "/admin/settings/:key",
+            get(admin::settings::get_setting)
+                .put(admin::settings::update_setting)
+                .delete(admin::settings::reset_setting),
+        )
+        .route(
+            "/admin/secrets",
+            get(admin::secrets::list_secrets).post(admin::secrets::create_secret),
+        )
+        .route(
+            "/admin/secrets/:id",
+            put(admin::secrets::replace_secret).delete(admin::secrets::delete_secret),
+        )
+        .route("/admin/secrets/:id/test", post(admin::secrets::test_secret))
+        .route("/admin/audit-logs", get(admin::audit::list_audit_logs))
 }

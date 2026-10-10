@@ -36,6 +36,8 @@ pub struct AuthUser {
     /// Set when this session came out of account recovery and is still inside
     /// its restricted window.
     pub restricted_until: Option<chrono::DateTime<chrono::Utc>>,
+    /// The authorization role of the account (user or admin).
+    pub role: crate::domain::accounts::AccountRole,
 }
 
 impl AuthUser {
@@ -44,6 +46,11 @@ impl AuthUser {
     /// Every ownership check compares against this and nothing else.
     pub fn owner_id(&self) -> String {
         self.account_id.to_string()
+    }
+
+    /// Whether this caller has administrative privileges.
+    pub fn is_admin(&self) -> bool {
+        self.role.is_admin()
     }
 
     /// Whether a passkey assertion happened recently enough for a sensitive
@@ -72,6 +79,16 @@ impl AuthUser {
             session_id_hash: "test-session".to_string(),
             last_verified_at: chrono::Utc::now(),
             restricted_until: None,
+            role: crate::domain::accounts::AccountRole::User,
+        }
+    }
+
+    /// Test-only: [`Self::for_account`] with admin role.
+    #[cfg(test)]
+    pub fn for_admin(account_id: impl Into<AccountId>) -> Self {
+        Self {
+            role: crate::domain::accounts::AccountRole::Admin,
+            ..Self::for_account(account_id)
         }
     }
 
@@ -108,6 +125,7 @@ impl From<crate::domain::accounts::Principal> for AuthUser {
             session_id_hash: principal.session_id_hash,
             last_verified_at: principal.last_verified_at,
             restricted_until: principal.restricted_until,
+            role: principal.role,
         }
     }
 }
@@ -517,6 +535,8 @@ mod tests {
             trust_forwarded_for: true,
             ai: crate::config::AiEnvConfig::default(),
             storage: crate::config::StorageConfig::default(),
+            secrets_encryption_key: None,
+            secrets_encryption_keys: None,
         }
     }
 

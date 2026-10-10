@@ -93,6 +93,14 @@ impl AccountService {
         Ok(core::delete(&self.pool, account_id).await?)
     }
 
+    pub async fn update_role(
+        &self,
+        account_id: &AccountId,
+        role: crate::domain::accounts::AccountRole,
+    ) -> Result<bool, AppError> {
+        Ok(core::update_role(&self.pool, account_id, role).await?)
+    }
+
     // --- Sessions ---
 
     pub async fn create_session(

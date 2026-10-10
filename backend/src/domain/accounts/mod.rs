@@ -236,6 +236,10 @@ impl AccountRole {
             Self::Admin => "admin",
         }
     }
+
+    pub const fn is_admin(&self) -> bool {
+        matches!(self, Self::Admin)
+    }
 }
 
 impl std::str::FromStr for AccountRole {

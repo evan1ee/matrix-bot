@@ -144,6 +144,77 @@ impl AppConfigService {
         Ok(items)
     }
 
+    /// Reads rich description and effective value for a single setting.
+    pub async fn get_setting_item(&self, key: SettingKey) -> Result<SettingItem, AppError> {
+        let def = SettingRegistry::definition(key);
+        let key_str = def.key.as_str();
+        if let Some(row) = app_settings::get_setting(&self.pool, key_str).await? {
+            let parsed = serde_json::from_value::<SettingValue>(row.value)
+                .unwrap_or_else(|_| def.default_value.clone());
+            Ok(SettingItem {
+                key: key_str.to_string(),
+                value: parsed,
+                default_value: def.default_value.clone(),
+                value_type: def.value_type,
+                description: def.description.to_string(),
+                is_custom: true,
+                hot_reloadable: def.hot_reloadable,
+                category: category_for_key(&def.key).to_string(),
+                updated_at: Some(row.updated_at),
+                updated_by: row.updated_by,
+            })
+        } else {
+            Ok(SettingItem {
+                key: key_str.to_string(),
+                value: def.default_value.clone(),
+                default_value: def.default_value.clone(),
+                value_type: def.value_type,
+                description: def.description.to_string(),
+                is_custom: false,
+                hot_reloadable: def.hot_reloadable,
+                category: category_for_key(&def.key).to_string(),
+                updated_at: None,
+                updated_by: None,
+            })
+        }
+    }
+
+    /// Fetches a paginated slice of configuration audit entries and total count.
+    pub async fn list_audit_logs(
+        &self,
+        limit: i64,
+        offset: i64,
+    ) -> Result<(Vec<crate::domain::config::ConfigAuditEntry>, i64), AppError> {
+        let rows = config_audit::list_audit_entries(&self.pool, limit, offset).await?;
+        let total = config_audit::count_audit_entries(&self.pool).await?;
+
+        let entries = rows
+            .into_iter()
+            .map(|r| {
+                let action = r
+                    .action
+                    .parse::<ConfigAuditAction>()
+                    .unwrap_or(ConfigAuditAction::SettingUpdated);
+                let outcome = r
+                    .outcome
+                    .parse::<ConfigAuditOutcome>()
+                    .unwrap_or(ConfigAuditOutcome::Success);
+                crate::domain::config::ConfigAuditEntry {
+                    id: Some(r.id),
+                    actor_id: r.actor_id.map(AccountId::new),
+                    action,
+                    target_type: r.target_type,
+                    target_key: r.target_key,
+                    outcome,
+                    detail: r.detail,
+                    created_at: r.created_at,
+                }
+            })
+            .collect();
+
+        Ok((entries, total))
+    }
+
     /// Updates a runtime setting in a single transaction with audit and outbox events.
     pub async fn update_setting(
         &self,
@@ -235,7 +306,10 @@ impl AppConfigService {
     }
 
     /// Returns the system configuration status summary.
-    pub async fn get_status(&self) -> Result<ConfigurationStatusDto, AppError> {
+    pub async fn get_status(
+        &self,
+        encryption_configured: bool,
+    ) -> Result<ConfigurationStatusDto, AppError> {
         let settings = app_settings::list_settings(&self.pool).await?;
         let custom_count = settings.len();
         let total_settings = SettingRegistry::all().len();
@@ -243,9 +317,6 @@ impl AppConfigService {
         let secrets_meta = provider_secrets::list_secret_metadata(&self.pool).await?;
         let secrets_count = secrets_meta.len();
         let active_secrets = secrets_meta.iter().filter(|s| s.status == "active").count();
-
-        let encryption_configured = std::env::var("SECRETS_ENCRYPTION_KEY").is_ok()
-            || std::env::var("SECRETS_ENCRYPTION_KEYS").is_ok();
 
         let last_reload = **self.last_reload_at.load();
 
@@ -395,7 +466,7 @@ mod tests {
         let list = service.list_settings().await.unwrap();
         assert_eq!(list.len(), SettingRegistry::all().len());
 
-        let status = service.get_status().await.unwrap();
+        let status = service.get_status(true).await.unwrap();
         assert_eq!(status.settings_count, SettingRegistry::all().len());
     }
 }

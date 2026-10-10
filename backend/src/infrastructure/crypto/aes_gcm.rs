@@ -30,6 +30,10 @@ pub enum CryptoError {
 
 /// Trait for encrypting and decrypting credential values at rest.
 pub trait SecretProtector: Send + Sync {
+    fn is_configured(&self) -> bool {
+        true
+    }
+
     fn encrypt(
         &self,
         provider: SecretProvider,
@@ -82,20 +86,23 @@ impl MasterKeyProvider {
         })
     }
 
-    /// Resolves encryption master keys from environment variables.
+    /// Resolves encryption master keys from optional key strings.
     ///
-    /// Reads `SECRETS_ENCRYPTION_KEY` for a single master key (version 1),
-    /// or `SECRETS_ENCRYPTION_KEYS` for a versioned map (e.g. `1:<key1>,2:<key2>`).
+    /// Reads `primary` for a single master key (version 1),
+    /// or `versioned` for a versioned map (e.g. `1:<key1>,2:<key2>`).
     /// Keys may be hex-encoded (64 chars) or base64-encoded (32 raw bytes).
-    pub fn from_env() -> Result<Self, CryptoError> {
-        if let Ok(keys_str) = std::env::var("SECRETS_ENCRYPTION_KEYS") {
+    pub fn from_key_strings(
+        primary: Option<&str>,
+        versioned: Option<&str>,
+    ) -> Result<Self, CryptoError> {
+        if let Some(keys_str) = versioned {
             let trimmed = keys_str.trim();
             if !trimmed.is_empty() {
                 return Self::parse_versioned_keys(trimmed);
             }
         }
 
-        if let Ok(key_str) = std::env::var("SECRETS_ENCRYPTION_KEY") {
+        if let Some(key_str) = primary {
             let trimmed = key_str.trim();
             if !trimmed.is_empty() {
                 let raw = Self::parse_key(trimmed)?;
@@ -104,7 +111,7 @@ impl MasterKeyProvider {
         }
 
         Err(CryptoError::KeyUnavailable(
-            "SECRETS_ENCRYPTION_KEY environment variable is not configured".into(),
+            "SECRETS_ENCRYPTION_KEY is not configured".into(),
         ))
     }
 
@@ -204,8 +211,11 @@ impl AesGcmSecretProtector {
         Self { keys }
     }
 
-    pub fn from_env() -> Result<Self, CryptoError> {
-        MasterKeyProvider::from_env().map(Self::new)
+    pub fn from_key_strings(
+        primary: Option<&str>,
+        versioned: Option<&str>,
+    ) -> Result<Self, CryptoError> {
+        MasterKeyProvider::from_key_strings(primary, versioned).map(Self::new)
     }
 
     fn aad_string(provider: SecretProvider, name: &str, key_version: i32) -> String {
@@ -280,6 +290,10 @@ impl SecretProtector for AesGcmSecretProtector {
 pub struct FailClosedSecretProtector;
 
 impl SecretProtector for FailClosedSecretProtector {
+    fn is_configured(&self) -> bool {
+        false
+    }
+
     fn encrypt(
         &self,
         _provider: SecretProvider,

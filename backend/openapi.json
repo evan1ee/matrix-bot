@@ -712,6 +712,707 @@
         ]
       }
     },
+    "/api/v1/admin/audit-logs": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "list_audit_logs",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true
+            }
+          },
+          {
+            "name": "offset",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuditLogPageDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/config-status": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "config_status",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigurationStatusDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/secrets": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "list_secrets",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SecretMetadataDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "create_secret",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateSecretRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecretMetadataDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/secrets/{id}": {
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "replace_secret",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Secret ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/uuid.Uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReplaceSecretRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecretMetadataDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "delete_secret",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Secret ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/uuid.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeleteSecretResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/secrets/{id}/test": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "test_secret",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Secret ID",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/uuid.Uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SecretTestResultDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/settings": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "list_settings",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SettingItemDto"
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/admin/settings/{key}": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "get_setting",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "description": "Configuration setting key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingItemDto"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "update_setting",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "description": "Configuration setting key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateSettingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SettingItemDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "admin"
+        ],
+        "operationId": "reset_setting",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "description": "Configuration setting key",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResetSettingResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/agent/approvals": {
       "get": {
         "tags": [
@@ -7818,6 +8519,36 @@
           }
         }
       },
+      "AuditLogPageDto": {
+        "type": "object",
+        "description": "Paginated audit log response page.",
+        "required": [
+          "entries",
+          "total",
+          "limit",
+          "offset"
+        ],
+        "properties": {
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfigAuditRowDto"
+            }
+          },
+          "limit": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "offset": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
       "AuditVerificationResult": {
         "type": "object",
         "required": [
@@ -8219,6 +8950,84 @@
           }
         }
       },
+      "ConfigAuditRowDto": {
+        "type": "object",
+        "description": "Serialized row of an administrative configuration change.",
+        "required": [
+          "id",
+          "action",
+          "target_type",
+          "target_key",
+          "outcome"
+        ],
+        "properties": {
+          "action": {
+            "type": "string"
+          },
+          "actor_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "detail": {
+            "nullable": true
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "outcome": {
+            "type": "string"
+          },
+          "target_key": {
+            "type": "string"
+          },
+          "target_type": {
+            "type": "string"
+          }
+        }
+      },
+      "ConfigurationStatusDto": {
+        "type": "object",
+        "description": "Consolidated status overview of runtime configuration and secret vault.",
+        "required": [
+          "settings_count",
+          "custom_settings_count",
+          "encryption_configured",
+          "secrets_count",
+          "active_secrets_count",
+          "last_reload_at"
+        ],
+        "properties": {
+          "active_secrets_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "custom_settings_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "encryption_configured": {
+            "type": "boolean"
+          },
+          "last_reload_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "secrets_count": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "settings_count": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      },
       "CreateAlertRequest": {
         "type": "object",
         "required": [
@@ -8533,6 +9342,29 @@
           }
         }
       },
+      "CreateSecretRequest": {
+        "type": "object",
+        "description": "Request payload for creating a new encrypted credential.",
+        "required": [
+          "provider",
+          "name",
+          "secret"
+        ],
+        "properties": {
+          "metadata": {
+            "nullable": true
+          },
+          "name": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "secret": {
+            "type": "string"
+          }
+        }
+      },
       "CreateTodoRequest": {
         "type": "object",
         "required": [
@@ -8784,6 +9616,22 @@
           },
           "success": {
             "type": "boolean"
+          }
+        }
+      },
+      "DeleteSecretResponse": {
+        "type": "object",
+        "description": "Response returned when a secret is deleted.",
+        "required": [
+          "status",
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/uuid.Uuid"
+          },
+          "status": {
+            "type": "string"
           }
         }
       },
@@ -10915,6 +11763,34 @@
           }
         }
       },
+      "ReplaceSecretRequest": {
+        "type": "object",
+        "description": "Request payload for replacing an existing credential's secret value.",
+        "required": [
+          "secret"
+        ],
+        "properties": {
+          "secret": {
+            "type": "string"
+          }
+        }
+      },
+      "ResetSettingResponse": {
+        "type": "object",
+        "description": "Response returned when a setting is reset to default.",
+        "required": [
+          "status",
+          "key"
+        ],
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
       "ScheduleTaskRequest": {
         "type": "object",
         "required": [
@@ -11003,6 +11879,82 @@
             "nullable": true
           },
           "title": {
+            "type": "string"
+          }
+        }
+      },
+      "SecretMetadataDto": {
+        "type": "object",
+        "description": "Public metadata for a stored secret credential. Plaintext and ciphertext are omitted.",
+        "required": [
+          "id",
+          "provider",
+          "name",
+          "status",
+          "key_version"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "id": {
+            "$ref": "#/components/schemas/uuid.Uuid"
+          },
+          "key_version": {
+            "type": "integer",
+            "format": "int32"
+          },
+          "last_test_error": {
+            "type": "string",
+            "nullable": true
+          },
+          "last_test_status": {
+            "type": "string",
+            "nullable": true
+          },
+          "last_tested_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "masked_preview": {
+            "type": "string",
+            "nullable": true
+          },
+          "name": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          }
+        }
+      },
+      "SecretTestResultDto": {
+        "type": "object",
+        "description": "Outcome of a credential probe test.",
+        "required": [
+          "id",
+          "status"
+        ],
+        "properties": {
+          "error": {
+            "type": "string",
+            "nullable": true
+          },
+          "id": {
+            "$ref": "#/components/schemas/uuid.Uuid"
+          },
+          "status": {
             "type": "string"
           }
         }
@@ -11136,6 +12088,47 @@
         ],
         "properties": {
           "price": {
+            "type": "string"
+          }
+        }
+      },
+      "SettingItemDto": {
+        "type": "object",
+        "description": "Data transfer object for a registered configuration setting with value and metadata.",
+        "required": [
+          "key",
+          "value",
+          "default_value",
+          "value_type",
+          "description",
+          "is_custom",
+          "hot_reloadable",
+          "category"
+        ],
+        "properties": {
+          "category": {
+            "type": "string"
+          },
+          "default_value": {},
+          "description": {
+            "type": "string"
+          },
+          "hot_reloadable": {
+            "type": "boolean"
+          },
+          "is_custom": {
+            "type": "boolean"
+          },
+          "key": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "value": {},
+          "value_type": {
             "type": "string"
           }
         }
@@ -11930,6 +12923,16 @@
             "format": "int64",
             "minimum": 0
           }
+        }
+      },
+      "UpdateSettingRequest": {
+        "type": "object",
+        "description": "Request payload to update a setting value.",
+        "required": [
+          "value"
+        ],
+        "properties": {
+          "value": {}
         }
       },
       "UpdateSettingsRequest": {
