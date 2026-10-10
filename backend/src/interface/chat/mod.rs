@@ -189,7 +189,6 @@ impl From<String> for MediaReply {
 /// Describes a single command's usage and purpose for help generation.
 #[derive(Clone, Debug)]
 pub struct CommandHelp {
-    #[allow(dead_code)]
     pub name: String,
     pub usage: String,
     pub description: String,

@@ -11,7 +11,10 @@ use crate::domain::channels::PlatformIdentity;
 use crate::interface::http::auth::types::ApiState;
 use crate::interface::http::auth::webauthn::with_session_cookie;
 use crate::interface::http::error::ApiError;
-#[allow(unused_imports)]
+#[allow(
+    unused_imports,
+    reason = "named only inside #[utoipa::path] attributes, where it fixes the OpenAPI schema name; a path-qualified body would rename it"
+)]
 use crate::interface::http::error::ApiErrorResponse;
 
 /// The bot's access token, if the bot has one.
@@ -132,9 +135,6 @@ pub struct MatrixLoginResponse {
 #[derive(Deserialize)]
 struct MatrixWhoamiResponse {
     user_id: String,
-    #[serde(default)]
-    #[allow(dead_code)]
-    device_id: Option<String>,
 }
 
 /// Authenticates a user using their active Matrix session from Element X iOS.

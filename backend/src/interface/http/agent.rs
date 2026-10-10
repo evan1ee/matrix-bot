@@ -11,7 +11,10 @@ use uuid::Uuid;
 
 use crate::domain::agent::{AgentRunId, ApprovalId, TaskId};
 use crate::interface::http::auth::{ApiState, AuthUser};
-#[allow(unused_imports)]
+#[allow(
+    unused_imports,
+    reason = "named only inside #[utoipa::path] attributes, where it fixes the OpenAPI schema name; a path-qualified body would rename it"
+)]
 use crate::interface::http::error::{ApiError, ApiErrorResponse};
 use crate::utils::time::now_at_storage_precision;
 

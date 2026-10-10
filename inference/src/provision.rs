@@ -109,17 +109,17 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("provision-{}-{}", tag, std::process::id()));
         std::fs::create_dir_all(&dir).expect("temp dir should be creatable");
         for name in [
-            crate::ocr::DET_MODEL_NAME,
-            crate::ocr::CLS_MODEL_NAME,
-            crate::ocr::REC_MODEL_NAME,
-            crate::stt::SENSEVOICE_MODEL_FILE,
-            crate::stt::SENSEVOICE_TOKENS_FILE,
+            crate::ocr::paddle::DET_MODEL_NAME,
+            crate::ocr::paddle::CLS_MODEL_NAME,
+            crate::ocr::paddle::REC_MODEL_NAME,
+            crate::stt::sherpa::SENSEVOICE_MODEL_FILE,
+            crate::stt::sherpa::SENSEVOICE_TOKENS_FILE,
             crate::embeddings::MODEL_FILE,
             crate::embeddings::TOKENIZER_FILE,
         ] {
             std::fs::write(dir.join(name), b"x").expect("model stub should be writable");
         }
-        for name in crate::tts::KOKORO_REQUIRED_FILES {
+        for name in crate::tts::kokoro::KOKORO_REQUIRED_FILES {
             std::fs::write(dir.join(name), b"x").expect("model stub should be writable");
         }
         dir

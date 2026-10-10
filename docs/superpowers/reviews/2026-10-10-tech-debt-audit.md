@@ -22,7 +22,7 @@ Evidence came from the code, not from memory: production line counts (lines befo
 | TD-06 | Doc drift in AGENTS.md and the reference docs | Documentation | 2 | 2 | 1 | **20** | 1 | **Done** |
 | TD-07 | `domain/` imports `sha2` against the layer rule | Architecture | 2 | 2 | 2 | **16** | 1 | Open |
 | TD-08 | `application/secrets/mod.rs` over the 500-line cap; many files close to it | Code | 2 | 2 | 2 | **16** | 1 | Open |
-| TD-09 | `#[allow]`s with no reason, and dead code | Code | 2 | 1 | 1 | **15** | 1 | Open |
+| TD-09 | `#[allow]`s with no reason, and dead code | Code | 2 | 1 | 1 | **15** | 1 | **Done** |
 | TD-10 | Three `reqwest` / two `hyper` stacks; direct `reqwest 0.11` | Dependency | 2 | 3 | 3 | **15** | 2 | Open |
 | TD-11 | No integration test for the portfolio price-refresh snapshot | Test | 1 | 2 | 1 | **15** | 1 | Open |
 | TD-12 | Frontend has no unit tests; large components | Test / code | 2 | 2 | 3 | **12** | 2 | Open |

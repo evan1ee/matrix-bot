@@ -20,30 +20,6 @@ pub enum RecurrencePattern {
     Yearly,
 }
 
-impl RecurrencePattern {
-    #[allow(dead_code)]
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            RecurrencePattern::None => "none",
-            RecurrencePattern::Daily => "daily",
-            RecurrencePattern::Weekly => "weekly",
-            RecurrencePattern::Monthly => "monthly",
-            RecurrencePattern::Yearly => "yearly",
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn from_str_or_default(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
-            "daily" | "day" => RecurrencePattern::Daily,
-            "weekly" | "week" => RecurrencePattern::Weekly,
-            "monthly" | "month" => RecurrencePattern::Monthly,
-            "yearly" | "year" => RecurrencePattern::Yearly,
-            _ => RecurrencePattern::None,
-        }
-    }
-}
-
 /// Status of a reminder in the database.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
 pub enum ReminderStatus {
@@ -51,28 +27,6 @@ pub enum ReminderStatus {
     Triggered,
     Cancelled,
     Failed,
-}
-
-impl ReminderStatus {
-    #[allow(dead_code)]
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            ReminderStatus::Pending => "pending",
-            ReminderStatus::Triggered => "triggered",
-            ReminderStatus::Cancelled => "cancelled",
-            ReminderStatus::Failed => "failed",
-        }
-    }
-
-    #[allow(dead_code)]
-    pub fn from_str_or_default(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
-            "triggered" => ReminderStatus::Triggered,
-            "cancelled" => ReminderStatus::Cancelled,
-            "failed" => ReminderStatus::Failed,
-            _ => ReminderStatus::Pending,
-        }
-    }
 }
 
 /// A reminder stored in the database.

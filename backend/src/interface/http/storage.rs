@@ -17,7 +17,10 @@ use crate::domain::storage::{StorageError, StorageKey};
 use crate::infrastructure::storage::local::verify_storage_signature;
 use crate::interface::http::auth::types::{ApiState, AuthUser};
 use crate::interface::http::error::ApiError;
-#[allow(unused_imports)]
+#[allow(
+    unused_imports,
+    reason = "named only inside #[utoipa::path] attributes, where it fixes the OpenAPI schema name; a path-qualified body would rename it"
+)]
 use crate::interface::http::error::ApiErrorResponse;
 
 #[derive(Debug, Deserialize, IntoParams)]
