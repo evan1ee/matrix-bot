@@ -2,16 +2,16 @@
 
 **Read this before touching code.** This document is the authoritative hand-off state for `matrix-bot`. It outlines the current state of the platform, immediate operational cutover actions, remaining roadmap enhancements, and settled architectural invariants.
 
-> **Current Status (2026-10):** All major subsystems across the PostgreSQL foundation, omnichannel architecture, storage decoupling, autonomous agent runtime, web console polish, and **Notes & Knowledge Base (pgvector + hybrid search)** are **fully implemented and verified**.
+> **Current Status (2026-10):** All architectural phases across the PostgreSQL foundation, omnichannel adapters, storage decoupling, autonomous agent runtime, web console polish, **Notes & Knowledge Base (pgvector + hybrid search)**, and **Dynamic Configuration & Encrypted Credential Vault** are **implemented and verified**.
 
 ---
 
 ## 1. Quick Start & Architecture Overview
 
-`matrix-bot` is an **Omnichannel Personal AI/Life Workspace & Second Brain** built around Matrix, Discord, Telegram, Email, and a React 19 Web Console, powered by a modular Rust backend and local ONNX inference server.
+`matrix-bot` is an **Omnichannel Personal AI/Life Workspace & Knowledge Base** built around Matrix, Discord, Telegram, Email, and a React 19 Web Console, powered by a modular Rust backend and local ONNX inference server.
 
-- `backend/` (`matrix-bot`): Matrix bot, Axum REST/SSE API, MCP server, LLM gateway, durable jobs, transactional outbox, knowledge base (pgvector), and domain capabilities.
-- `inference/` (`matrix-bot-inference`): Axum server hosting local ONNX models for OCR, speech-to-text (Sherpa/SenseVoice), and text-to-speech (Kokoro-82M).
+- `backend/` (`matrix-bot`): Matrix bot, Axum REST/SSE API, MCP server, LLM gateway, durable jobs, transactional outbox, knowledge base (pgvector), dynamic configuration & AES-256-GCM secrets vault, and domain capabilities.
+- `inference/` (`matrix-bot-inference`): Axum server hosting local ONNX models for OCR, speech-to-text (Sherpa/SenseVoice), text-to-speech (Kokoro-82M), and text embeddings (`multilingual-e5-small`).
 - `frontend/` (`web`): React 19 + Vite + Tailwind v4 SPA, built into `backend/web/dist/`.
 - `contracts/`: JSON wire fixtures asserting cross-platform compatibility.
 
@@ -34,8 +34,9 @@ jobs/                        Job runtime: workers (SKIP LOCKED), heartbeat reape
 events/                      Events runtime: LISTEN outbox loop, SSE hub, delivery dispatcher, purge
 llm/                         Prompts, tool loop, tool registry, agent engine with native tool calling (llm/agent/)
 infrastructure/postgres/     repositories/<f>.rs (sqlx::query! only), read_models/, merge.rs
+infrastructure/crypto/       AES-256-GCM secret encryption with AAD binding and fail-closed fallback
 infrastructure/storage/      StorageService: Local filesystem (HMAC presigning) and S3/R2
-infrastructure/inference/    HTTP clients: OCR, STT, TTS, LLM transport
+infrastructure/inference/    HTTP clients: OCR, STT, TTS, embeddings, LLM transport, provider testers
 app.rs / main.rs             Composition roots, supervision, graceful shutdown
 ```
 
@@ -53,7 +54,8 @@ app.rs / main.rs             Composition roots, supervision, graceful shutdown
    - Gitea (`git@git.mbm.one:evan/matrix-bot.git`) is primary; GitHub (`origin`) is a mirror.
 4. **Preserve Security Invariants:**
    - Passkeys are the exclusive web authentication mechanism; session tokens are stored as SHA-256 only.
-   - Step-up verification (`VerifiedUser`) is strictly enforced for sensitive endpoints (`/account/*`, `/portfolio/trade`, `/agent/approvals/*`).
+   - Step-up verification (`VerifiedUser`) is strictly enforced for sensitive endpoints (`/account/*`, `/portfolio/trade`, `/agent/approvals/*`), and `AdminUser` (`role == 'admin'` + 5-minute passkey step-up) is enforced for `/admin/*`.
+   - Secret read APIs return metadata only (`SecretMetadata`); plaintext and ciphertext never appear in response DTOs, DOM, logs, or audit records.
    - Sensitive commands are strictly refused in public rooms/channels; `/link` is DM-only with 10-minute single-use tokens.
    - Every owner-keyed table must be registered in `OWNED_TABLES` or `ACCOUNT_ID_FOLLOWS` (`domain/accounts/mod.rs`).
    - Every user-supplied string rendered into HTML must pass through `html_escape()`; input strings are capped at 500 characters.
@@ -62,7 +64,6 @@ app.rs / main.rs             Composition roots, supervision, graceful shutdown
 
 ## 3. Verified System Baseline
 
-All milestones are verified green:
 - **Rust Backend:**
   - `cargo check -p matrix-bot --all-targets`: Clean (zero errors, zero warnings).
   - `cargo clippy --workspace --all-targets -- -D warnings`: Clean.
@@ -74,116 +75,15 @@ All milestones are verified green:
   - `cargo test -p matrix-bot-inference`: 74 passed / 0 failed.
 - **Frontend SPA:**
   - `npm --prefix frontend run build`: Clean (1779 modules transformed, zero TypeScript errors).
-  - `npm --prefix frontend run test:e2e`: 222 passed / 0 failed (100% green across all Playwright specs, including `e2e/admin.spec.ts`).
-
----
-
-## 3a. LLM prompt hardening (branch `fix/llm-prompt-hardening`)
-
-Plan: `docs/superpowers/plans/2026-10-05-llm-prompt-hardening.md` (approved 2026-10-05, implemented). One commit per phase, then review-fix commits: `c1ff2e3` (phase 2 review), `8760507` (every quote taints; its subject is misleading), `13488f8` (approval races, budget, at-most-once), `e109a24` (status-writer locks, step cap, resume module split).
-
-| Phase | Scope | Status |
-|---|---|---|
-| 1 | Static prompt prefix plus short context; no owner id; room cap | Done (`fix(llm): split system prompt into stable prefix and short context`) |
-| 2 | Quoted and tool content as data; confirm tainted sensitive calls; language-independent success guard | Done (`fix(llm): treat quoted and tool content as data; confirm tainted sensitive calls`) |
-| 3 | Agent native tool calling, ReAct removed | Done (`refactor(agent)!: native tool calling for agent runs`) |
-| 4 | Execute the approved action on resume | Done (`fix(agent): execute the approved action on resume`) |
-| 5 | Docs sweep | Done (`docs: llm prompt hardening sweep (phase 5)`) |
-
-Rulings:
-
-- Ruling: the agent moves to native tool calling and ReAct text parsing is removed (D1) — `AgentStep` already stores structured calls, so steps map onto `tool_calls` and `tool` messages with no migration or API change — a model without function calling cannot run agents, but plain text becomes the final answer so it fails safe.
-- Ruling: an approved agent action runs from the stored call when the job resumes, triggered by an approval marker step recorded in `approve_action`'s transaction, and it is at most once: an execution-started step is committed before the tool runs and a retry that finds it last fails the run for the user to check (phase 4 and its review) — the model used to be asked again and a repeated sensitive call opened another approval, so approving never did anything, and the first version re-ran the call after a crash between the tool and its result step — a rare interrupted approved action needs manual verification instead of risking a double trade or payment.
-- Ruling: the approval marker carries the approval id and the call the user was shown, and the job runs only if it equals the held step, otherwise it fails the run and runs nothing — the call that executes must be the call that was approved — a divergence between the two (which no code path produces today) fails a run instead of recovering.
-- Ruling: only the model's own steps use `max_steps`; markers, started steps, the result of an approved call and rejection steps do not, and each approved execution adds one step to the budget so the model can report the outcome — a held call near the limit used to run the tool and then fail the run with "Max steps", and shrink "Step k of N" — the total never exceeds twice `max_steps` (`step_budget` caps it), so a model that keeps asking for approved sensitive calls while a human keeps approving them ends with a failed run at that cap instead of looping; a legitimate run that needs more than that many approved actions must be restarted.
-- Ruling: approve, reject and cancel lock the run row (`lock_run`, `FOR UPDATE`) and honour the result of `resolve_approval`; approve and reject refuse a run that is not `WaitingApproval`, and `reject_action` numbers its step like the handler does (phase 4) — an approval racing a cancel could resurrect the run and run its held action, a second approver silently succeeded, and `current_step + 1` made every rejection after the first step fail on the unique step number — a cancelled run keeps a pending approval row that can no longer be resolved, and a cancel that arrives while the tool is running does not stop it.
-- Ruling: approve and reject publish the existing `AgentStepCompleted` event for the marker or rejection step in their transaction (every mutation announces itself) — no new event variant was needed, so `openapi.json` and the frontend contracts are unchanged — the `waiting_approval` to `executing` run-status transition still has no event of its own; adding one would need a new `SystemEvent` variant and would change the event contract.
-- Follow-up: wire the task whitelist. `ScheduledTaskDefinition::allowed_tools()` is never called and the job handler passes `allowed_tools: None`, so neither `evaluate_step` nor `execute_approved` enforces a task's whitelist today; the check in `execute_approved` is a no-op until the handler passes the run's allowed tools.
-- Ruling: an agent tool call whose arguments are not a JSON object is recorded as a failed step and the run continues; empty arguments mean `{}` (phase 3) — silently coercing garbage into a call is how a wrong tool input could execute, while ending the run on one typo wastes the whole goal, and `max_steps` bounds repeats — a model that never produces valid arguments burns its budget and the run fails at the step limit. The agent's tool results are wrapped in `<tool_output>` like chat's, so its prompt rule is true; the agent has no taint tracking because every sensitive tool already needs human approval.
-- Ruling: one language-independent confirmation rule replaces the zh/en reply templates (D2): after a success, start with ✅ and a short bold title, then bullets of the tool's key fields, in the user's language — rendering replies in code would couple formatting to every tool — formatting may drift between models; easy to revert.
-- Ruling: a single success-claim guard (no tool succeeded this turn but the reply starts with ✅) replaces the English substring lists (D3) — it works in every language — a reply that claims success without a leading ✅ is not caught, and a ✅ in the middle of a reply (a fact-check) is ignored.
-- Ruling: chat confirms only tainted sensitive calls (D4): the turn carries quoted context, or an earlier round ran a tool that returns outside content (`web_search`, `get_webhook_logs`, `knowledge_search`, `get_my_bookmarks`) or the prompt embeds OCR text, and any quote counts, the bot's own included; the tool is refused with `confirmation_required` and the model asks the user — confirming every sensitive call adds friction to plain requests — an untainted but mistaken call still runs without asking.
-- Ruling: `update_todo` is not a sensitive tool, while `cancel_reminder` and `update_my_settings` are (added after the phase 2 review) — editing a todo is too common to confirm each time and the friction would dominate, whereas cancelling a reminder or changing settings is silent and hard to notice — an injected quote could rewrite a todo's text without confirmation. Agent runs now also need approval for those two tools.
-- Ruling: every quote taints the turn, including a quote of the bot's own message (the subject of commit `8760507`, "only untaint replies to AI output", is misleading: nothing is untainted any more, the change removed `from_bot` so that every quote taints); `QuotedMessage::from_bot` is removed (supersedes the earlier "reply to the bot's own message does not taint") — the bot account also posts webhook alerts and notices whose text an outside caller chose, so "sent by the bot account" does not mean "written by the AI", and a footer or other text marker in the quote can be forged — a confirmation sent as a quoted reply is refused again and the user must answer in a plain message (the history carries the question), which costs one extra message in clients that auto-quote replies. Options to restore quote-based confirmation, none done: (1) a table `ai_reply_messages(owner_id, conversation, event_id)` written when an AI reply is sent, needs a migration, `OWNED_TABLES` entry and send-path plumbing in every adapter and for edit-in-place replies; (2) a bounded in-memory set of AI reply ids, no migration but lost on restart (fails safe) and the same plumbing; (3) matching the quoted text against stored assistant messages, no plumbing but fragile because of markdown/HTML and footer differences and it must be exact to avoid prefix forgery.
-- Ruling: the success-claim guard looks only at a reply that starts with ✅ — that is the D2 confirmation format, and a mid-text ✅ in a fact-check is not a claim — a model that confirms without the leading ✅ is not caught.
-- Ruling: OCR text is wrapped in `<ocr_text>` and the OCR turn is tainted, `get_my_bookmarks` counts as outside content, and every `<` inside wrapped content is escaped — a photo or a web-fetched title can carry instructions, and matching only closing tags missed spaced and full-width variants — deletions and trades after a receipt scan now need a confirming reply; voice transcripts are still unwrapped.
-- Ruling: dynamic context goes at the end of the single system message and a custom `system_prompt` still replaces everything (D5) — the static prefix stays byte-stable for provider caching — the prefix alone is only about 600 tokens, so the cache hit relies on the tools array being stable too; the conditional `web_search` tool breaks it.
-
----
-
-## 3b. Notes refactor (branch `feat/notes-refactor`) — implemented, awaiting merge and operator steps
-
-Spec: `docs/superpowers/specs/2026-10-08-second-brain-refactor-design.md`. Plan: `docs/superpowers/plans/2026-10-09-notes-refactor.md` (approved 2026-10-09). One commit per task.
-
-| Task | Scope | Status |
-|---|---|---|
-| 0 | Relabel "Second Brain" to "Notes" (UI, chat help, tool descriptions) | Done |
-| 1 | Markdown module + domain split | Done |
-| 2 | Migrations 0012/0013 + derived write path | Done |
-| 3 | Backfill derived fields | Done |
-| 4 | Search rewrite (lexical + vector + RRF) | Done |
-| 5 | Indexing: skip-on-hash, model tagging | Done |
-| 6 | Real e5 inference | Done (code + real-model tests; operator deploy pending, Track 1) |
-| 7 | API contract + frontend | Done |
-| 8 | LLM / MCP tools | Done |
-| 9 | Export / import | Done |
-| 10 | Migration 0014 | Done |
-| 11 | Cleanup + docs | Done |
-
-Runbook (task 10): migration `0014` makes `content_hash`, `search_text` and `excerpt` NOT NULL and aborts, naming up to 20 note ids, if any row lacks one. **`0012`–`0014` apply together in one boot**, and `0013` adds those columns empty. So a database that already holds notes from `0011` (written before the derived columns existed) cannot go straight to this release: first deploy commit `0f01833` (the last one with the derived-column backfill), let `knowledge.backfill_embeddings` run, confirm the query below returns 0, then deploy this release. A database with no notes (the production cutover has not happened yet) upgrades directly. The query only exists once `0013` has run, so run it against the `0f01833` deployment:
-
-```sql
-SELECT count(*) FROM notes WHERE content_hash IS NULL OR search_text IS NULL OR excerpt IS NULL;
-```
-
-If 0014 refuses to boot, redeploy `0f01833`, let the job run, and retry. This departs from spec §11 ("0014 ships only after the backfill is confirmed in every environment"): the backfill code is removed in the same release as the migration. Cost if wrong: one extra deploy of `0f01833` on a database with legacy notes. Rehearse on a production copy with `cargo test -p matrix-bot migrates_a_real_database -- --ignored` (user-gated; not run here).
-
-Ruling (task 10): the task 3 backfill machinery (`backfill_derived_fields`, `list_notes_missing_derived`, `set_derived_fields`, the job step, `insert_legacy_note`) is deleted with 0014 rather than kept — once the columns are NOT NULL it can never match a row, and AGENTS prefers deletion to dead compatibility code. Cost if wrong: an environment that skipped the backfill cannot boot 0014 and must run the previous release first (see the runbook). The rebuild-invariant test now drops embeddings and the `indexed_*` markers only; the derived note columns are schema-guaranteed.
-
-Ruling (task 8): `knowledge_create_note` took `source_channel` "ai", which the `notes.source_channel` CHECK rejects, so the tool always failed; the channel now comes from the tool call's room id (`mcp`, the platform, or `web`). `knowledge_get_note` returns at most 8,000 characters and flags `truncated` — the chat path has no shared tool-output cap, and the agent engine's 2,000-character prompt cap would have made the tool useless. Cost if wrong: raise `GET_NOTE_MAX_CHARS` in `llm/tools/knowledge.rs`.
-
-Ruling (task 9): import writes each note in its own transaction (not batches of 100) — one invalid note must not roll back its neighbours, and personal-scale imports do not need batching — cost if wrong: a 5,000-note import is 5,000 small transactions. The global `RequestBodyLimitLayer(1 MB)` became `DefaultBodyLimit(1 MB)` plus a 20 MB `RequestBodyLimitLayer` backstop so the import route can lift its own limit; the Telegram webhook still caps its own body.
-
-Rulings R1–R6 (spec §0 and plan): R1 note bodies are capped at 100,000 characters; R2 Markdown parsing lives in `application/knowledge/markdown.rs`; R3 archived notes are excluded from search unless `include_archived`; R4 the degraded-search signal is the `X-Search-Mode` header; R5 columns stay `owner_id`; R6 the inference embeddings handler was a byte-folding placeholder and now runs the real `multilingual-e5-small`. The pgvector bullet in §5 describes the fused lexical + vector search; before R6 the vectors were meaningless, so retrieval quality only starts once the operator steps below are done.
-
-Operator steps (user-gated, none done): (1) if an environment holds legacy notes, follow the task 10 runbook above (deploy `0f01833` first); (2) deploy `matrix-bot-inference` and wait until `/health` is ready — first start downloads the ~135 MB model into `EMBEDDING_MODEL_DIR` (a persisted volume) and verifies its SHA-256; (3) deploy the backend with `EMBEDDING_MODEL=multilingual-e5-small`, which applies `0012`–`0014` and lets `knowledge.backfill_embeddings` re-embed every chunk (keyword search covers the gap); (4) optionally rehearse the migrations on a production copy first.
-
-Ruling (task 11): `Config::validate` moved to `config/validate.rs` — `config/mod.rs` was already 508 production lines on `master` and the branch pushed it to 521; the split is behaviour-neutral. The export repository function is `export_documents` (it was `list_documents`, the name of the temporary task 2 helper the plan wanted gone). `get_item_content_for_embedding` no longer has a note arm: notes are indexed through `get_note_for_indexing`, so the arm returns an error instead of embedding raw Markdown. `LocalOnnxEmbeddingClient`'s fallback model is `multilingual-e5-small`, not `bge-small-en-v1.5`.
-
-Local test DB note: `CREATE EXTENSION vector` / `pg_trgm` race between parallel tests on a fresh server and land in a test schema. Create both once in `public` (`CREATE EXTENSION vector SCHEMA public; CREATE EXTENSION pg_trgm SCHEMA public;`) before the first `cargo test`.
-
----
-
-## 3c. Configuration Management & Secret Credential Storage (branch `feat/config-management`)
-
-Spec: [`specs/2026-10-09-configuration-management-design.md`](specs/2026-10-09-configuration-management-design.md) (approved 2026-10-09), Plan: [`plans/2026-10-09-configuration-management.md`](plans/2026-10-09-configuration-management.md), branch `feat/config-management`.
-
-| Task | Scope | Status |
-|---|---|---|
-| 1 | Domain types, settings registry, secret metadata, audit types | Done (`1f93372`) |
-| 2 | Database migration 0015 & SQLx repositories | Done (`9997c9b`) |
-| 3 | Cryptography & application services (`AppConfigService`, `SecretService`) | Done (`f615bda`) |
-| 4 | Admin REST API endpoints & authorization (`AdminUser`) | Done (`cfbaf9f`) |
-| 5 | Consumer integration & dynamic runtime reload | Done (`68801e0`) |
-| 6 | Frontend admin console & integration | Done (`abffee7`) |
-| 7 | Documentation & final verification | Done |
-
-Rulings:
-- Ruling R-CFG1: `app_settings`, `provider_secrets`, and `config_audit` are instance-wide system configuration tables and are **not** added to `OWNED_TABLES`. Their `updated_by` and `actor_id` columns use `ON DELETE SET NULL` and are registered in `AUDIT_ACTOR_UNTOUCHED` in `db/catalog.rs`.
-- Ruling R-CFG2: Secret read APIs return metadata only (`SecretMetadata`), with ciphertext and plaintext completely omitted from response DTOs, DOM, logs, and audit records.
-- Ruling R-CFG3: `AdminUser` requires both `account.role == 'admin'` and recent passkey assertion (`VerifiedUser`), enforcing 5-minute step-up on all administrative operations.
-- Ruling R-CFG4: AES-256-GCM authenticated encryption binds AAD to `format!("{provider}:{name}:{key_version}")`. Tampered ciphertext, mismatched providers, mismatched slot names, or mismatched key versions immediately fail decryption.
-- Ruling R-CFG5: `FailClosedSecretProtector` ensures boot and operational safety when `SECRETS_ENCRYPTION_KEY` is unconfigured in development, failing all secret encryptions/decryptions closed without allowing plaintext storage; missing key in production halts boot.
-- Ruling R-CFG6: `RuntimeConfigSnapshot` provides lock-free dynamic configuration reads via `ArcSwap<RuntimeConfigSnapshot>`, populated from `app_settings` with static fallbacks from `SettingRegistry`. Every mutation emits `SystemEvent::ConfigUpdated` or `SystemEvent::SecretChanged` in the transaction before atomic snapshot reload, supplemented by listener reconnect reload and a 60s background refresh.
-- Ruling R-CFG7: Provider connection testers (`infrastructure/inference/testers/mod.rs`) short-circuit keys with mock prefixes (`test`, `sk-test`, `tvly-test`, `mock`, `dummy`) after format validation so offline/CI test suites never trigger outbound HTTP calls.
+  - `npm --prefix frontend run test:e2e`: 222 passed / 0 failed (100% green across all Playwright specs).
 
 ---
 
 ## 4. Remaining Tasks & Action Plan
 
-### Track 1: Production Cutover & Deployment (Human Operator / User-Gated)
+### Track 1: Production Cutover & Operator Steps (Human Operator / User-Gated)
 
-Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in exact sequence:
+Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in sequence:
 
 1. **Pre-Cutover Channel Verification (Staging / Non-Production):**
    - **Discord:** Confirm bot application has Gateway Message Content intents enabled; verify `/todo`, `/expense`, `/portfolio`, `/ask`, and `/link` in DM and guild.
@@ -193,6 +93,7 @@ Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in exact seque
 2. **Production Database Pre-Flight & Migration Rehearsal:**
    - **Drain Legacy Webhooks:** Check `SELECT COUNT(*) FROM webhook_outbox WHERE status = 'pending'`. Allow the legacy binary to drain pending alerts, or accept dropping them (migration `0005` drops `webhook_outbox`).
    - **Check Orphan Matrix Links:** Verify `SELECT l.mxid FROM matrix_links l LEFT JOIN accounts a ON a.id = l.account_id WHERE a.id IS NULL;` returns 0 rows. Remove any orphaned links before migration `0007` backfills to `platform_identities`.
+   - **Legacy Notes Derived-Column Check (if upgrading a database with pre-`0013` notes):** Migration `0014` makes `content_hash`, `search_text`, and `excerpt` `NOT NULL`. If upgrading an environment with existing notes from `0011`, deploy commit `0f01833` first, let `knowledge.backfill_embeddings` populate those columns, verify `SELECT count(*) FROM notes WHERE content_hash IS NULL OR search_text IS NULL OR excerpt IS NULL;` returns `0`, then deploy the current release. Fresh databases or environments without legacy notes upgrade directly.
    - **Rehearse Migrations on Production Dump:**
      ```bash
      pg_dump -Fc "$PROD_URL" > prod.dump
@@ -203,9 +104,13 @@ Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in exact seque
        cargo test -p matrix-bot migrates_a_real_database -- --ignored
      ```
 
-3. **Supervised Production First Boot:**
+3. **Inference & Secrets Environment Setup:**
+   - Deploy `matrix-bot-inference` and wait until `/health` is ready (first start downloads the ~135 MB `multilingual-e5-small` model into `EMBEDDING_MODEL_DIR` and verifies its SHA-256).
+   - Set `EMBEDDING_MODEL=multilingual-e5-small` and configure a 32-byte `SECRETS_ENCRYPTION_KEY` (`openssl rand -base64 32`) in production before booting the backend.
+
+4. **Supervised Production First Boot:**
    - Take a complete backup of PostgreSQL and the `data/` directory (`bot_store/`, `matrix_session.json`, `matrix_token.json`, `verified_users.json`).
-   - Ensure writable storage directory (`STORAGE_LOCAL_ROOT`, default `data/storage`).
+   - Ensure writable storage directory (`STORAGE_LOCAL_DIR`, default `data/storage`).
    - Boot binary and verify log output:
      - Log confirms restored session: `Reusing stored Matrix session for ... on device <id>`.
      - Log confirms cross-signing self-verification: `Device::verify()` succeeded (`Ok`).
@@ -217,45 +122,49 @@ Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in exact seque
 
 ### Track 2: Post-Cutover Enhancements & Technical Debt
 
-0. **Notes refactor (implemented on `feat/notes-refactor`; merge and operator steps pending, §3b):** design [`specs/2026-10-08-second-brain-refactor-design.md`](specs/2026-10-08-second-brain-refactor-design.md) (approved 2026-10-09), plan [`plans/2026-10-09-notes-refactor.md`](plans/2026-10-09-notes-refactor.md), branch `feat/notes-refactor`. PostgreSQL stays the content store (Markdown files as a store were rejected); derived FTS/trigram/excerpt columns; RRF search with lexical fallback; `multilingual-e5-small`; relabel "Second Brain" → "Notes".
-   - Ruling: the inference `/v1/embeddings` handler now runs the real int8 `multilingual-e5-small` (ONNX + `tokenizers`, mean-pooled, L2-normalised, 384-d), downloaded on first start and SHA-256 verified. It adds no e5 prefixes; the backend applies `query: ` / `passage: ` (`embedding_prefixes`). Vectors written by the old byte-folding placeholder are meaningless: set `EMBEDDING_MODEL=multilingual-e5-small` on the backend and the backfill re-embeds every chunk (Track 1 operator step; keyword search covers the gap).
+1. **Wire Scheduled Agent Task Tool Whitelist (`backend/src/interface/jobs/agent.rs`):**
+   - `ScheduledTaskDefinition::allowed_tools()` is defined in the domain, but the job handler currently passes `allowed_tools: None` to `evaluate_step` and `execute_approved`. Wire the task's tool whitelist through the job execution context.
 
-1. **Deep Procedural Pipelines for Built-in Agent Tasks (`backend/src/domain/agent/task.rs`):**
-   - The 5 standard task plugins (`WeeklyBookmarkDigestTask`, `MonthlyFinancialAuditTask`, `PortfolioRebalanceAlertTask`, `BillDueDigestTask`, `HabitConsistencyReviewTask`) currently formulate goals executed through the agent's native tool calling.
-   - Expand specialized procedural workflows where appropriate:
+2. **Quote-Based AI Confirmation Without Taint:**
+   - Every quoted message currently taints the AI turn (including quotes of the bot's own messages, since webhook alerts and notices also come from the bot account). Users confirming a sensitive action in clients that auto-quote replies must send an unquoted message. To allow quote-based confirmation safely, track authentic AI reply event IDs (in-memory bounded set or an `ai_reply_messages` table).
+
+3. **Deep Procedural Pipelines for Built-in Agent Tasks (`backend/src/domain/agent/task.rs`):**
+   - Expand specialized procedural workflows for the 5 built-in task plugins (`WeeklyBookmarkDigestTask`, `MonthlyFinancialAuditTask`, `PortfolioRebalanceAlertTask`, `BillDueDigestTask`, `HabitConsistencyReviewTask`):
      - Direct Kokoro TTS audio compilation for weekly bookmark digests.
      - Deterministic mathematical portfolio drift calculation before invoking LLM synthesis.
 
-2. **Discord Channel Capabilities Expansion:**
+4. **Discord Channel Capabilities Expansion:**
    - Add interactive ActionRow buttons for task completion (matching Telegram's inline keyboard "Done" buttons).
    - Add typed slash command options (in addition to the single `args` string fast-path).
    - Inbound receipt/image attachment ingestion over Discord DMs (saving to `StorageService` and enqueuing `media.process_receipt`).
 
-3. **WebAuthn Conditional UI (Passkey Autofill):**
+5. **WebAuthn Conditional UI (Passkey Autofill):**
    - Implement passkey autofill on the web sign-in form using the WebAuthn Conditional UI standard (`mediation: 'conditional'`) for seamless page-load sign-in.
 
-4. **Integration Test for Portfolio Price Refresh Snapshot:**
+6. **Integration Test for Portfolio Price Refresh Snapshot:**
    - Add an integration test asserting that `RefreshPricesHandler` persists today's USD snapshot row in `portfolio_daily_snapshots` (currently tested at the service layer in `application/portfolio/mod.rs`).
 
-5. **Minor Deferred Edge Cases:**
-   - `SyncHealth`: Add fallback handling if Matrix sync timestamp string fails to parse (theoretical).
+7. **Minor Deferred Edge Cases:**
+   - `SyncHealth`: Add fallback handling if Matrix sync timestamp string fails to parse.
    - Morning briefing window: Wrap-around logic for target briefing windows close to the hour boundary (`:58`–`:02`).
 
 ---
 
 ## 5. Consolidated Architectural Invariants
 
-- **PostgreSQL 18 Exclusivity:** The application database is PostgreSQL only. `BIGINT` for row IDs, native `UUID` for `accounts.id` and `owner_id`. No SQL in `domain/`, `application/`, `jobs/`, or `interface/`.
+- **PostgreSQL 18 Exclusivity:** The application database is PostgreSQL only. `BIGINT` for row IDs, native `UUID` for `accounts.id` and `owner_id`. No SQL in `domain/`, `application/`, `jobs/`, `events/`, or `interface/`.
 - **Transactional Outbox:** State mutations and their corresponding `SystemEvent` must be committed in the same database transaction. Outbox deliveries handle external fan-out with independent retries.
-- **Unified Tool Registry:** Interactive user chat uses direct LLM + tool calling bounded by `MAX_TOOL_ROUNDS = 5`. The autonomous agent loop (native tool calling, one tool call per step) is strictly reserved for scheduled background workflows.
-- **pgvector Hybrid Search:** Multi-chunk `multilingual-e5-small` embeddings (`vector(384)`, served by `matrix-bot-inference`, tagged with the model that made them) indexed via HNSW (`vector_cosine_ops`), populated asynchronously via transactional outbox + background durable jobs (`knowledge.embed`). Search fuses a lexical list (FTS + trigram/substring, which also covers unembedded notes and CJK) with the vector list by reciprocal rank fusion, and degrades to lexical-only if the embedder fails, without external vector DBs.
-- **Account Identity Model:** One human account (`accounts.id`) links multiple chat identities across Matrix, Discord, Telegram, and Email via `platform_identities`.
-- **File Length & Code Quality:** No file in `backend/src/` or `inference/src/` may exceed 500 lines of production code (target < 300 lines). Every feature follows:
-  `domain/<f>` (pure rules) → `application/<f>` (service & transactions) → `infrastructure/postgres/repositories/<f>.rs` (SQL) → `interface/` (DTOs & chat handlers).
+- **Unified Tool Registry & Untrusted Input Guard:** Interactive user chat uses direct LLM + tool calling bounded by `MAX_TOOL_ROUNDS = 5`. Outside content (`<quoted_message>`, `<ocr_text>`, `<tool_output>`) escapes `<` and taints the turn, requiring explicit user confirmation before sensitive tools execute. The autonomous agent loop uses native tool calling (one tool call per step) and is reserved for background workflows, executing approved sensitive actions at-most-once from stored calls.
+- **pgvector Hybrid Search:** Multi-chunk `multilingual-e5-small` embeddings (`vector(384)`, served by `matrix-bot-inference`, tagged with the model that made them) indexed via HNSW (`vector_cosine_ops`), populated asynchronously via transactional outbox + background durable jobs (`knowledge.embed`). Search fuses lexical (FTS + trigram/substring) and vector results via reciprocal rank fusion, degrading to lexical-only if the embedder is unavailable.
+- **Dynamic Configuration & Encrypted Vault:** `RuntimeConfigSnapshot` (`ArcSwap`) provides lock-free reads backed by `app_settings` and `SettingRegistry` defaults, reloaded on `ConfigUpdated`/`SecretChanged` outbox notifications. External credentials in `provider_secrets` use AES-256-GCM with 96-bit CSPRNG nonces and AAD binding (`{provider}:{name}:{key_version}`), failing closed when `SECRETS_ENCRYPTION_KEY` is absent. Precedence: `AiUserConfig > Runtime Snapshot > Environment > Defaults`.
+- **Account Identity Model:** One human account (`accounts.id`) links multiple chat identities across Matrix, Discord, Telegram, and Email via `platform_identities`. Instance-wide tables (`app_settings`, `provider_secrets`, `config_audit`) are global and registered in `AUDIT_ACTOR_UNTOUCHED`.
+- **File Length & Code Quality:** No file in `backend/src/` or `inference/src/` may exceed 500 lines of production code (target < 300 lines). Only `config/` reads environment variables.
 
 ---
 
 ## 6. Verification Suite Reference
+
+Note for fresh local test PostgreSQL servers: create `vector` and `pg_trgm` extensions once in `public` (`CREATE EXTENSION IF NOT EXISTS vector SCHEMA public; CREATE EXTENSION IF NOT EXISTS pg_trgm SCHEMA public;`) before running parallel tests.
 
 Run these commands before any commit:
 
@@ -263,7 +172,7 @@ Run these commands before any commit:
 cargo fmt --all -- --check
 cargo check -p matrix-bot --all-targets
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test -p matrix-bot --all-targets
+cargo test -p matrix-bot --lib -- --test-threads=4
 cargo test -p matrix-bot --test architecture
 cargo test -p matrix-bot live_postgres -- --ignored --test-threads=1
 cargo run --bin generate-openapi && git diff --exit-code backend/openapi.json
