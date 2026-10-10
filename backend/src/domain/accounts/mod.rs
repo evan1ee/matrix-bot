@@ -282,40 +282,6 @@ impl Account {
     }
 }
 
-/// Checks whether an account id or platform identity is in the admin allowlist string (comma-separated).
-pub fn is_admin_in_allowlist(
-    admin_users_cfg: &str,
-    account_id: &AccountId,
-    identities: &[&str],
-) -> bool {
-    let trimmed = admin_users_cfg.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    for entry in trimmed
-        .split(',')
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-    {
-        if let Ok(parsed_id) = entry.parse::<AccountId>() {
-            if parsed_id == *account_id {
-                return true;
-            }
-        }
-        if let Ok(parsed_uuid) = uuid::Uuid::parse_str(entry) {
-            if parsed_uuid == account_id.uuid() {
-                return true;
-            }
-        }
-        for &ident in identities {
-            if entry.eq_ignore_ascii_case(ident) {
-                return true;
-            }
-        }
-    }
-    false
-}
-
 /// A Matrix user ID bound to an account.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MatrixLink {
@@ -768,26 +734,10 @@ mod tests {
     }
 
     #[test]
-    fn test_account_role_and_allowlist() {
+    fn test_account_role() {
         assert_eq!(AccountRole::default(), AccountRole::User);
         assert_eq!("admin".parse::<AccountRole>().unwrap(), AccountRole::Admin);
         assert_eq!("user".parse::<AccountRole>().unwrap(), AccountRole::User);
         assert!("invalid".parse::<AccountRole>().is_err());
-
-        let admin_id = AccountId::from_seed("admin_user");
-        let other_id = AccountId::from_seed("other_user");
-
-        let cfg = format!("{},@superadmin:matrix.org", admin_id);
-        assert!(is_admin_in_allowlist(&cfg, &admin_id, &[]));
-        assert!(is_admin_in_allowlist(
-            &cfg,
-            &other_id,
-            &["@superadmin:matrix.org"]
-        ));
-        assert!(!is_admin_in_allowlist(
-            &cfg,
-            &other_id,
-            &["@regular:matrix.org"]
-        ));
     }
 }

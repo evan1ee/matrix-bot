@@ -9,7 +9,7 @@ use utoipa::ToSchema;
 
 use crate::application::AppError;
 use crate::domain::config::{SettingKey, SettingRegistry, SettingValue};
-use crate::interface::http::auth::{AdminUser, ApiState};
+use crate::interface::http::auth::{AdminSession, AdminUser, ApiState};
 use crate::interface::http::error::ApiError;
 
 /// Data transfer object for a registered configuration setting with value and metadata.
@@ -71,7 +71,7 @@ pub struct ResetSettingResponse {
 )]
 pub async fn list_settings(
     State(state): State<ApiState>,
-    _admin: AdminUser,
+    _admin: AdminSession,
 ) -> Result<Json<Vec<SettingItemDto>>, ApiError> {
     let items = state
         .services
@@ -97,7 +97,7 @@ pub async fn list_settings(
 )]
 pub async fn get_setting(
     State(state): State<ApiState>,
-    _admin: AdminUser,
+    _admin: AdminSession,
     Path(key): Path<String>,
 ) -> Result<Json<SettingItemDto>, ApiError> {
     let parsed_key = key

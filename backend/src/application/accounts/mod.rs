@@ -101,6 +101,142 @@ impl AccountService {
         Ok(core::update_role(&self.pool, account_id, role).await?)
     }
 
+    pub async fn has_passkey(&self, account_id: &AccountId) -> Result<bool, AppError> {
+        Ok(self.count_passkeys(account_id).await? > 0)
+    }
+
+    /// Grants `admin` role to an active account that has at least one enrolled passkey.
+    ///
+    /// Used exclusively by the controlled CLI bootstrap (`matrix-bot admin grant <account_id>`).
+    /// Public registration and passkey enrollment never call this method.
+    pub async fn grant_admin(&self, account_id: &AccountId) -> Result<Account, AppError> {
+        let Some(account) = core::find(&self.pool, account_id).await? else {
+            return Err(AccountsError::AccountNotFound.into());
+        };
+        if account.is_unclaimed() {
+            return Err(AppError::Validation(
+                "Cannot grant administrator privileges to an unclaimed placeholder account"
+                    .to_string(),
+            ));
+        }
+        if !self.has_passkey(account_id).await? {
+            return Err(AppError::Validation(
+                "Account must have at least one enrolled passkey before administrator privileges can be granted"
+                    .to_string(),
+            ));
+        }
+
+        let mut tx = self.pool.begin().await?;
+        core::update_role(
+            &mut *tx,
+            account_id,
+            crate::domain::accounts::AccountRole::Admin,
+        )
+        .await?;
+        let entry = crate::domain::config::ConfigAuditEntry::new(
+            Some(*account_id),
+            crate::domain::config::ConfigAuditAction::AdminGranted,
+            crate::domain::config::ConfigAuditTarget::Account(*account_id),
+            crate::domain::config::ConfigAuditOutcome::Success,
+            Some(serde_json::json!({
+                "previous_role": account.role.as_str(),
+                "new_role": "admin",
+            })),
+        );
+        crate::infrastructure::postgres::repositories::config_audit::insert_audit_entry(
+            &mut *tx,
+            entry.actor_id.as_ref(),
+            entry.action.as_str(),
+            &entry.target_type,
+            &entry.target_key,
+            entry.outcome.as_str(),
+            entry.detail.as_ref(),
+        )
+        .await?;
+        let updated = core::find(&mut *tx, account_id)
+            .await?
+            .ok_or(AccountsError::AccountNotFound)?;
+        tx.commit().await?;
+        Ok(updated)
+    }
+
+    /// Revokes `admin` role from an account, demoting it to `user` and revoking all active sessions.
+    ///
+    /// Used by the controlled CLI recovery procedure (`matrix-bot admin revoke <account_id>`).
+    pub async fn revoke_admin(&self, account_id: &AccountId) -> Result<Account, AppError> {
+        let Some(account) = core::find(&self.pool, account_id).await? else {
+            return Err(AccountsError::AccountNotFound.into());
+        };
+
+        let mut tx = self.pool.begin().await?;
+        core::update_role(
+            &mut *tx,
+            account_id,
+            crate::domain::accounts::AccountRole::User,
+        )
+        .await?;
+        sessions::revoke_all_for_account(&mut *tx, account_id, None).await?;
+        let entry = crate::domain::config::ConfigAuditEntry::new(
+            Some(*account_id),
+            crate::domain::config::ConfigAuditAction::AdminRevoked,
+            crate::domain::config::ConfigAuditTarget::Account(*account_id),
+            crate::domain::config::ConfigAuditOutcome::Success,
+            Some(serde_json::json!({
+                "previous_role": account.role.as_str(),
+                "new_role": "user",
+            })),
+        );
+        crate::infrastructure::postgres::repositories::config_audit::insert_audit_entry(
+            &mut *tx,
+            entry.actor_id.as_ref(),
+            entry.action.as_str(),
+            &entry.target_type,
+            &entry.target_key,
+            entry.outcome.as_str(),
+            entry.detail.as_ref(),
+        )
+        .await?;
+        let updated = core::find(&mut *tx, account_id)
+            .await?
+            .ok_or(AccountsError::AccountNotFound)?;
+        tx.commit().await?;
+        Ok(updated)
+    }
+
+    /// Controlled CLI entry point for `matrix-bot admin <grant|revoke> <account_id>`.
+    pub async fn run_admin_cli(
+        &self,
+        action: &str,
+        raw_account_id: &str,
+    ) -> Result<String, AppError> {
+        let account_id: AccountId = raw_account_id.trim().parse().map_err(|_| {
+            AppError::Validation(format!(
+                "Invalid account ID '{}': expected format acct_<uuid>",
+                raw_account_id.trim()
+            ))
+        })?;
+        match action {
+            "grant" => {
+                let updated = self.grant_admin(&account_id).await?;
+                Ok(format!(
+                    "Granted administrator privileges to {} ({})",
+                    updated.display_name, updated.id
+                ))
+            }
+            "revoke" => {
+                let updated = self.revoke_admin(&account_id).await?;
+                Ok(format!(
+                    "Revoked administrator privileges from {} ({}) and terminated active sessions",
+                    updated.display_name, updated.id
+                ))
+            }
+            other => Err(AppError::Validation(format!(
+                "Unknown admin subcommand '{}': expected 'grant' or 'revoke'",
+                other
+            ))),
+        }
+    }
+
     // --- Sessions ---
 
     pub async fn create_session(

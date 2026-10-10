@@ -7,9 +7,11 @@ use axum::{
 };
 use tower::ServiceExt;
 
+use crate::application::secrets::TestResultDto;
 use crate::db::Database;
 use crate::domain::accounts::{AccountRole, COOKIE_NAME, STATUS_ACTIVE};
 use crate::infrastructure::crypto::{AesGcmSecretProtector, MasterKeyProvider};
+use crate::infrastructure::inference::testers::CredentialTester;
 use crate::interface::http::admin::audit::AuditLogPageDto;
 use crate::interface::http::admin::secrets::SecretMetadataDto;
 use crate::interface::http::admin::settings::SettingItemDto;
@@ -18,6 +20,26 @@ use crate::interface::http::auth::ApiState;
 use crate::interface::http::routes::api_routes;
 
 const ORIGIN: &str = "http://localhost:8080";
+
+async fn start_mock_provider_server() -> String {
+    use axum::routing::{get, post};
+
+    let app = Router::new()
+        .route(
+            "/v1/models",
+            get(|| async { (StatusCode::OK, r#"{"data":[]}"#) }),
+        )
+        .route(
+            "/search",
+            post(|| async { (StatusCode::OK, r#"{"results":[]}"#) }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(async move {
+        let _ = axum::serve(listener, app).await;
+    });
+    format!("http://{addr}")
+}
 
 async fn setup_app() -> (
     Router,
@@ -29,10 +51,14 @@ async fn setup_app() -> (
     let pool = crate::db::pool::test_pool().await;
     crate::db::migrate::run_migrations_unlocked(&pool).await;
 
+    let mock_base = start_mock_provider_server().await;
     let key_provider = MasterKeyProvider::from_raw_key([42u8; 32]);
     let protector = std::sync::Arc::new(AesGcmSecretProtector::new(key_provider));
     let mut services = crate::application::AppServices::new(&pool);
     services = services.with_secret_protector(protector);
+    services.secrets = services
+        .secrets
+        .with_tester(CredentialTester::for_test(&mock_base));
 
     let state = ApiState::new(
         Database { pool: pool.clone() },
@@ -43,7 +69,7 @@ async fn setup_app() -> (
     let mut state = state;
     state.services = services;
 
-    // Create admin user
+    // Create admin user with enrolled passkey via controlled grant_admin
     let admin_acct = state
         .services
         .accounts
@@ -53,7 +79,13 @@ async fn setup_app() -> (
     state
         .services
         .accounts
-        .update_role(&admin_acct, AccountRole::Admin)
+        .add_passkey(&admin_acct, "cred_admin_alice", "{}", "Admin Passkey")
+        .await
+        .unwrap();
+    state
+        .services
+        .accounts
+        .grant_admin(&admin_acct)
         .await
         .unwrap();
     let admin_token = state
@@ -63,11 +95,17 @@ async fn setup_app() -> (
         .await
         .unwrap();
 
-    // Create regular user
+    // Create regular user with passkey + fresh session so step-up is satisfied, proving role check blocks them
     let user_acct = state
         .services
         .accounts
         .create("user_bob", STATUS_ACTIVE)
+        .await
+        .unwrap();
+    state
+        .services
+        .accounts
+        .add_passkey(&user_acct, "cred_user_bob", "{}", "User Passkey")
         .await
         .unwrap();
     state
@@ -142,8 +180,8 @@ async fn test_anonymous_caller_rejected_with_401() {
 }
 
 #[tokio::test]
-async fn test_non_admin_user_rejected_with_403() {
-    let (app, _state, _admin_token, user_token, _admin_acct) = setup_app().await;
+async fn test_non_admin_user_rejected_with_403_on_reads_and_writes() {
+    let (app, state, _admin_token, user_token, admin_acct) = setup_app().await;
 
     for path in [
         "/api/v1/admin/config-status",
@@ -155,43 +193,284 @@ async fn test_non_admin_user_rejected_with_403() {
         assert_eq!(
             status,
             StatusCode::FORBIDDEN,
-            "Non-admin request to {path} must yield 403"
+            "Non-admin GET request to {path} must yield 403"
         );
         assert!(
             body.contains("Administrative privileges required"),
             "Body must indicate admin required: {body}"
         );
     }
+
+    for (method, path, payload) in [
+        (
+            Method::PUT,
+            "/api/v1/admin/settings/llm.default_model",
+            Some(r#"{"value": "gpt-4o"}"#),
+        ),
+        (
+            Method::DELETE,
+            "/api/v1/admin/settings/llm.default_model",
+            None,
+        ),
+        (
+            Method::POST,
+            "/api/v1/admin/secrets",
+            Some(r#"{"provider":"openai","name":"default","secret":"sk-1234567890abcdef"}"#),
+        ),
+        (
+            Method::PUT,
+            "/api/v1/admin/secrets/00000000-0000-0000-0000-000000000000",
+            Some(r#"{"secret":"sk-1234567890abcdef"}"#),
+        ),
+        (
+            Method::DELETE,
+            "/api/v1/admin/secrets/00000000-0000-0000-0000-000000000000",
+            None,
+        ),
+        (
+            Method::POST,
+            "/api/v1/admin/secrets/00000000-0000-0000-0000-000000000000/test",
+            None,
+        ),
+    ] {
+        let (status, body) = send_request(&app, method, path, Some(&user_token), payload).await;
+        assert_eq!(
+            status,
+            StatusCode::FORBIDDEN,
+            "Non-admin write request to {path} must yield 403"
+        );
+        assert!(
+            body.contains("Administrative privileges required"),
+            "Body must indicate admin required: {body}"
+        );
+    }
+
+    // Also verify an MCP bearer token belonging to an admin account is rejected on both GET and write routes
+    let (mcp_raw, _) = state
+        .services
+        .mcp
+        .create_token(&admin_acct, "admin_mcp_token", None)
+        .await
+        .unwrap();
+    for (method, path, body_str) in [
+        (Method::GET, "/api/v1/admin/config-status", None),
+        (
+            Method::PUT,
+            "/api/v1/admin/settings/llm.default_model",
+            Some(r#"{"value": "gpt-4o"}"#),
+        ),
+    ] {
+        let req = Request::builder()
+            .method(method)
+            .uri(path)
+            .header(header::AUTHORIZATION, format!("Bearer {mcp_raw}"))
+            .header(header::ORIGIN, ORIGIN)
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(match body_str {
+                Some(b) => Body::from(b.to_string()),
+                None => Body::empty(),
+            })
+            .unwrap();
+        let resp = app.clone().oneshot(req).await.unwrap();
+        assert_eq!(
+            resp.status(),
+            StatusCode::FORBIDDEN,
+            "MCP token must be rejected with 403 on {path}"
+        );
+    }
 }
 
 #[tokio::test]
-async fn test_stale_admin_session_rejected_with_403_step_up() {
+async fn test_stale_admin_session_allows_gets_but_rejects_writes_past_five_minutes() {
     let (app, state, admin_token, _user_token, admin_acct) = setup_app().await;
 
-    // Age admin step-up verification past 5 minutes
+    // 1. Within 5-minute window (4 minutes ago): write succeeds
     state
         .services
         .accounts
         .update_last_verified_at(
             &admin_acct,
-            chrono::Utc::now() - chrono::Duration::minutes(60),
+            chrono::Utc::now() - chrono::Duration::minutes(4),
         )
         .await
         .unwrap();
 
     let (status, body) = send_request(
         &app,
-        Method::GET,
-        "/api/v1/admin/config-status",
+        Method::PUT,
+        "/api/v1/admin/settings/llm.default_model",
         Some(&admin_token),
-        None,
+        Some(r#"{"value": "gpt-4o"}"#),
     )
     .await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "4-minute-old verification must pass 5-minute window: {body}"
+    );
 
+    // 2. Past 5-minute window (6 minutes ago): ordinary GETs still succeed, writes demand step-up
+    state
+        .services
+        .accounts
+        .update_last_verified_at(
+            &admin_acct,
+            chrono::Utc::now() - chrono::Duration::minutes(6),
+        )
+        .await
+        .unwrap();
+
+    for path in [
+        "/api/v1/admin/config-status",
+        "/api/v1/admin/settings",
+        "/api/v1/admin/settings/llm.default_model",
+        "/api/v1/admin/secrets",
+        "/api/v1/admin/audit-logs",
+    ] {
+        let (status, body) = send_request(&app, Method::GET, path, Some(&admin_token), None).await;
+        assert_eq!(
+            status,
+            StatusCode::OK,
+            "Ordinary admin GET {path} must not require fresh step-up: {body}"
+        );
+    }
+
+    let (status, body) = send_request(
+        &app,
+        Method::PUT,
+        "/api/v1/admin/settings/llm.default_model",
+        Some(&admin_token),
+        Some(r#"{"value": "claude-3-5-sonnet"}"#),
+    )
+    .await;
     assert_eq!(status, StatusCode::FORBIDDEN);
     assert!(
         body.contains("Confirm with your passkey to continue"),
-        "Body must demand step up passkey: {body}"
+        "Write with 6-minute-old verification must demand step-up passkey: {body}"
+    );
+}
+
+#[tokio::test]
+async fn test_admin_bootstrap_cli_and_passkey_enforcement() {
+    let (app, state, _admin_token, _user_token, _admin_acct) = setup_app().await;
+
+    // 1. Registering an account with a passkey never implicitly grants admin
+    let first_user = crate::domain::accounts::AccountId::from_seed("first_registered_user");
+    let pk = crate::application::accounts::test_passkey(b"first-user-cred", 1);
+    state
+        .services
+        .accounts
+        .register_with_passkey(&first_user, "first_user", &pk, "Primary Passkey")
+        .await
+        .unwrap();
+    let acct = state
+        .services
+        .accounts
+        .find(&first_user)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        acct.role,
+        AccountRole::User,
+        "Passkey registration must never auto-promote an account to admin"
+    );
+
+    // 2. Account without passkey cannot be granted admin via CLI or access admin endpoints even if DB role is forced
+    let no_pk_acct = state
+        .services
+        .accounts
+        .create("no_passkey_admin", STATUS_ACTIVE)
+        .await
+        .unwrap();
+    let err = state
+        .services
+        .accounts
+        .grant_admin(&no_pk_acct)
+        .await
+        .unwrap_err();
+    assert!(err.to_string().contains("enrolled passkey"), "{err}");
+
+    // Force role in DB without a passkey and verify AdminSession still rejects
+    state
+        .services
+        .accounts
+        .update_role(&no_pk_acct, AccountRole::Admin)
+        .await
+        .unwrap();
+    let no_pk_token = state
+        .services
+        .accounts
+        .create_session(&no_pk_acct, None, None, None)
+        .await
+        .unwrap();
+    let (status, body) = send_request(
+        &app,
+        Method::GET,
+        "/api/v1/admin/config-status",
+        Some(&no_pk_token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN);
+    assert!(body.contains("Passkey enrollment is required"), "{body}");
+
+    // 3. Controlled CLI grant and revoke lifecycle
+    let msg = state
+        .services
+        .accounts
+        .run_admin_cli("grant", &first_user.to_string())
+        .await
+        .unwrap();
+    assert!(msg.contains("Granted administrator privileges"));
+    assert_eq!(
+        state
+            .services
+            .accounts
+            .find(&first_user)
+            .await
+            .unwrap()
+            .unwrap()
+            .role,
+        AccountRole::Admin
+    );
+
+    let first_user_session = state
+        .services
+        .accounts
+        .create_session(&first_user, None, None, None)
+        .await
+        .unwrap();
+    let (status, _) = send_request(
+        &app,
+        Method::GET,
+        "/api/v1/admin/config-status",
+        Some(&first_user_session),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Revoke demotes role and terminates active sessions
+    let revoke_msg = state
+        .services
+        .accounts
+        .run_admin_cli("revoke", &first_user.to_string())
+        .await
+        .unwrap();
+    assert!(revoke_msg.contains("Revoked administrator privileges"));
+    let (status, _) = send_request(
+        &app,
+        Method::GET,
+        "/api/v1/admin/config-status",
+        Some(&first_user_session),
+        None,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::UNAUTHORIZED,
+        "Revoking admin must terminate active sessions"
     );
 }
 
@@ -295,7 +574,8 @@ async fn test_verified_admin_full_lifecycle_and_zero_leakage() {
     let (status, body) =
         send_request(&app, Method::POST, &test_url, Some(&admin_token), None).await;
     assert_eq!(status, StatusCode::OK, "Test secret: {body}");
-    assert!(body.contains("healthy"));
+    let test_res: TestResultDto = serde_json::from_str(&body).unwrap();
+    assert_eq!(test_res.status, "healthy");
 
     // 8. PUT /api/v1/admin/secrets/:id (replace)
     let replace_url = format!("/api/v1/admin/secrets/{}", created_secret.id);

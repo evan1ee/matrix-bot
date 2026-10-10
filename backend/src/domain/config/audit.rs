@@ -18,6 +18,8 @@ pub enum ConfigAuditAction {
     SecretDeleted,
     SecretTested,
     ConfigReloaded,
+    AdminGranted,
+    AdminRevoked,
 }
 
 impl ConfigAuditAction {
@@ -30,6 +32,8 @@ impl ConfigAuditAction {
             Self::SecretDeleted => "secret_deleted",
             Self::SecretTested => "secret_tested",
             Self::ConfigReloaded => "config_reloaded",
+            Self::AdminGranted => "admin_granted",
+            Self::AdminRevoked => "admin_revoked",
         }
     }
 }
@@ -52,6 +56,8 @@ impl std::str::FromStr for ConfigAuditAction {
             "secret_deleted" => Ok(Self::SecretDeleted),
             "secret_tested" => Ok(Self::SecretTested),
             "config_reloaded" => Ok(Self::ConfigReloaded),
+            "admin_granted" => Ok(Self::AdminGranted),
+            "admin_revoked" => Ok(Self::AdminRevoked),
             other => Err(format!("unknown audit action: {other}")),
         }
     }
@@ -62,6 +68,7 @@ impl std::str::FromStr for ConfigAuditAction {
 pub enum ConfigAuditTarget {
     Setting(String),
     Secret(uuid::Uuid),
+    Account(AccountId),
     System,
 }
 
@@ -70,6 +77,7 @@ impl ConfigAuditTarget {
         match self {
             Self::Setting(_) => "setting",
             Self::Secret(_) => "secret",
+            Self::Account(_) => "account",
             Self::System => "system",
         }
     }
@@ -78,6 +86,7 @@ impl ConfigAuditTarget {
         match self {
             Self::Setting(k) => k.clone(),
             Self::Secret(id) => id.to_string(),
+            Self::Account(id) => id.to_string(),
             Self::System => "system".to_string(),
         }
     }
@@ -154,20 +163,29 @@ impl ConfigAuditEntry {
     }
 }
 
+fn is_sensitive_audit_field(k: &str) -> bool {
+    let lower = k.to_ascii_lowercase();
+    lower == "api_key"
+        || lower == "private_key"
+        || lower == "master_key"
+        || lower == "encryption_key"
+        || lower == "recovery_key"
+        || lower == "secret_key"
+        || lower.contains("secret")
+        || lower.contains("password")
+        || lower.contains("token")
+        || lower.contains("ciphertext")
+        || lower.contains("nonce")
+        || lower.contains("credential")
+}
+
 /// Strips any accidental secret, ciphertext, nonce, or key payload from audit details.
 pub fn sanitize_audit_detail(val: &serde_json::Value) -> serde_json::Value {
     match val {
         serde_json::Value::Object(map) => {
             let mut sanitized = serde_json::Map::new();
             for (k, v) in map {
-                let lower = k.to_ascii_lowercase();
-                if lower.contains("secret")
-                    || lower.contains("key")
-                    || lower.contains("password")
-                    || lower.contains("token")
-                    || lower.contains("ciphertext")
-                    || lower.contains("nonce")
-                {
+                if is_sensitive_audit_field(k) {
                     sanitized.insert(
                         k.clone(),
                         serde_json::Value::String("[REDACTED]".to_string()),
@@ -199,6 +217,8 @@ mod tests {
             ConfigAuditAction::SecretDeleted,
             ConfigAuditAction::SecretTested,
             ConfigAuditAction::ConfigReloaded,
+            ConfigAuditAction::AdminGranted,
+            ConfigAuditAction::AdminRevoked,
         ] {
             let s = action.as_str();
             let parsed: ConfigAuditAction = s.parse().unwrap();
@@ -211,6 +231,8 @@ mod tests {
     fn test_audit_detail_sanitizes_credentials() {
         let raw = serde_json::json!({
             "provider": "openai",
+            "key": "llm.default_model",
+            "key_version": 1,
             "api_key": "sk-1234567890abcdef",
             "password": "secret_password",
             "secret_token": "token123",
@@ -219,6 +241,8 @@ mod tests {
 
         let sanitized = sanitize_audit_detail(&raw);
         assert_eq!(sanitized["provider"], "openai");
+        assert_eq!(sanitized["key"], "llm.default_model");
+        assert_eq!(sanitized["key_version"], 1);
         assert_eq!(sanitized["safe_field"], "public_info");
         assert_eq!(sanitized["api_key"], "[REDACTED]");
         assert_eq!(sanitized["password"], "[REDACTED]");

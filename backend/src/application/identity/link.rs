@@ -87,6 +87,7 @@ pub struct LinkService {
     /// Identities that may register a new account from a link token (D4),
     /// per channel, in canonical form. Never logged.
     signup_allowlist: Arc<HashMap<Channel, Vec<String>>>,
+    app_config: Option<crate::application::config::AppConfigService>,
 }
 
 impl LinkService {
@@ -99,6 +100,7 @@ impl LinkService {
             pool,
             web_url,
             signup_allowlist: Arc::new(signup_allowlist),
+            app_config: None,
         }
     }
 
@@ -112,7 +114,17 @@ impl LinkService {
             pool: self.pool,
             web_url,
             signup_allowlist: Arc::new(signup_allowlist),
+            app_config: self.app_config,
         }
+    }
+
+    /// Attaches the dynamic runtime configuration service for `registration.allow_link_signup`.
+    pub fn with_app_config(
+        mut self,
+        app_config: crate::application::config::AppConfigService,
+    ) -> Self {
+        self.app_config = Some(app_config);
+        self
     }
 
     /// Mints a token for `identity`, who asked in `conversation`. A shared
@@ -217,6 +229,13 @@ impl LinkService {
 
     /// Whether `identity` may register a fresh account from a link token.
     pub fn signup_allowed(&self, identity: &PlatformIdentity) -> bool {
+        if self
+            .app_config
+            .as_ref()
+            .is_some_and(|cfg| !cfg.snapshot().registration_allow_link_signup())
+        {
+            return false;
+        }
         self.signup_allowlist
             .get(&identity.channel())
             .is_some_and(|allowed| allowed.iter().any(|id| id == identity.user_id().as_str()))

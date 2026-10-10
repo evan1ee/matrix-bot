@@ -7,7 +7,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
-use crate::interface::http::auth::{AdminUser, ApiState};
+use crate::interface::http::auth::{AdminSession, ApiState};
 use crate::interface::http::error::ApiError;
 
 /// Query parameters for paginating administrative audit logs.
@@ -53,7 +53,7 @@ pub struct AuditLogPageDto {
 )]
 pub async fn list_audit_logs(
     State(state): State<ApiState>,
-    _admin: AdminUser,
+    _admin: AdminSession,
     Query(query): Query<AuditLogQuery>,
 ) -> Result<Json<AuditLogPageDto>, ApiError> {
     let limit = query.limit.unwrap_or(50).clamp(1, 100);

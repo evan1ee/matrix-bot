@@ -115,13 +115,83 @@ where
     }
 }
 
-/// A caller who is both verified (passkey step-up within window, not restricted)
-/// and possesses the `admin` role.
+/// An authenticated administrator with an enrolled passkey and normal session.
+///
+/// Used by ordinary administrative `GET` endpoints, which require `admin` role,
+/// passkey enrollment, a non-recovery-restricted session, and a human session
+/// (not a machine MCP token), without requiring a fresh 5-minute passkey step-up.
 #[derive(Debug, Clone)]
-pub struct AdminUser(pub VerifiedUser);
+pub struct AdminSession(pub AuthUser);
+
+impl std::ops::Deref for AdminSession {
+    type Target = AuthUser;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[async_trait]
+impl<S> FromRequestParts<S> for AdminSession
+where
+    S: Send + Sync,
+    ApiState: FromRef<S>,
+{
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let api_state = ApiState::from_ref(state);
+        let user = AuthUser::from_request_parts(parts, state).await?;
+
+        if !user.is_admin() {
+            return Err(ApiError::forbidden("Administrative privileges required"));
+        }
+
+        // Reject machine MCP tokens (`MIN_UTC` sentinel) from accessing admin routes.
+        if user.last_verified_at == chrono::DateTime::<chrono::Utc>::MIN_UTC {
+            return Err(ApiError::forbidden(
+                "Normal passkey authentication is required for administrative access",
+            ));
+        }
+
+        if user
+            .restricted_until
+            .is_some_and(|until| chrono::Utc::now() < until)
+        {
+            return Err(ApiError::forbidden(
+                "This session was created by account recovery and cannot do that yet",
+            ));
+        }
+
+        let has_passkey = api_state
+            .services
+            .accounts
+            .has_passkey(&user.account_id)
+            .await
+            .map_err(|err| {
+                tracing::error!("Could not check passkey enrollment: {:?}", err);
+                ApiError::internal("Could not verify passkey enrollment")
+            })?;
+        if !has_passkey {
+            return Err(ApiError::forbidden(
+                "Passkey enrollment is required for administrative access",
+            ));
+        }
+
+        Ok(AdminSession(user))
+    }
+}
+
+/// An administrator who has also proved possession of a passkey within the
+/// 5-minute step-up window (`STEP_UP_WINDOW_MINUTES`).
+///
+/// Required for all administrative write operations and security-sensitive
+/// actions (such as live credential probes).
+#[derive(Debug, Clone)]
+pub struct AdminUser(pub AdminSession);
 
 impl std::ops::Deref for AdminUser {
-    type Target = VerifiedUser;
+    type Target = AdminSession;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -137,13 +207,13 @@ where
     type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let verified = VerifiedUser::from_request_parts(parts, state).await?;
+        let admin = AdminSession::from_request_parts(parts, state).await?;
 
-        if !verified.is_admin() {
-            return Err(ApiError::forbidden("Administrative privileges required"));
+        if !admin.may_perform_sensitive_action(chrono::Utc::now()) {
+            return Err(ApiError::forbidden("Confirm with your passkey to continue"));
         }
 
-        Ok(AdminUser(verified))
+        Ok(AdminUser(admin))
     }
 }
 

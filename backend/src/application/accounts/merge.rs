@@ -87,6 +87,21 @@ impl MergeService {
         )
         .await?;
 
+        // Preserve admin role if the absorbed account held administrator privileges
+        if let Some(absorbed) =
+            crate::infrastructure::postgres::repositories::accounts::core::find(&mut **tx, from)
+                .await?
+        {
+            if absorbed.role == crate::domain::accounts::AccountRole::Admin {
+                crate::infrastructure::postgres::repositories::accounts::core::update_role(
+                    &mut **tx,
+                    into,
+                    crate::domain::accounts::AccountRole::Admin,
+                )
+                .await?;
+            }
+        }
+
         repo_merge::delete_account(tx, from).await?;
 
         Ok(MergeOutcome { moved, discarded })
@@ -882,5 +897,86 @@ mod tests {
 
         assert_eq!(owner_of(&pool, "should not move").await, from);
         assert!(repo_core::find(&pool, &from).await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn test_merge_remaps_admin_audit_settings_secrets_and_preserves_admin_role() {
+        use crate::domain::accounts::AccountRole;
+        use crate::infrastructure::postgres::repositories::{
+            app_settings, config_audit, provider_secrets,
+        };
+
+        let pool = db().await;
+        let from = repo_core::create(&pool, "admin_from", STATUS_ACTIVE)
+            .await
+            .unwrap();
+        let into = repo_core::create(&pool, "user_into", STATUS_ACTIVE)
+            .await
+            .unwrap();
+
+        repo_core::update_role(&pool, &from, AccountRole::Admin)
+            .await
+            .unwrap();
+
+        app_settings::upsert_setting(
+            &pool,
+            "llm.default_model",
+            &serde_json::json!("gpt-4o"),
+            Some(&from),
+        )
+        .await
+        .unwrap();
+
+        let secret_id = provider_secrets::insert_secret(
+            &pool,
+            "openai",
+            "default",
+            &[1, 2, 3, 4],
+            &[0u8; 12],
+            1,
+            Some(&from),
+            None,
+        )
+        .await
+        .unwrap();
+
+        let audit_id = config_audit::insert_audit_entry(
+            &pool,
+            Some(&from),
+            "setting_updated",
+            "setting",
+            "llm.default_model",
+            "success",
+            None,
+        )
+        .await
+        .unwrap();
+
+        MergeService::merge(&pool, &from, &into).await.unwrap();
+
+        let survivor = repo_core::find(&pool, &into).await.unwrap().unwrap();
+        assert_eq!(
+            survivor.role,
+            AccountRole::Admin,
+            "Surviving account must preserve admin role when merging an admin account"
+        );
+
+        let setting = app_settings::get_setting(&pool, "llm.default_model")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(setting.updated_by, Some(into.uuid()));
+
+        let secret_after = provider_secrets::get_secret_by_id(&pool, secret_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(secret_after.updated_by, Some(into.uuid()));
+
+        let audits = config_audit::list_audit_entries(&pool, 10, 0)
+            .await
+            .unwrap();
+        let entry = audits.iter().find(|e| e.id == audit_id).unwrap();
+        assert_eq!(entry.actor_id, Some(into.uuid()));
     }
 }

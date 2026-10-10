@@ -4,7 +4,7 @@ use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::interface::http::auth::{AdminUser, ApiState};
+use crate::interface::http::auth::{AdminSession, ApiState};
 use crate::interface::http::error::ApiError;
 
 /// Consolidated status overview of runtime configuration and secret vault.
@@ -31,7 +31,7 @@ pub struct ConfigurationStatusDto {
 )]
 pub async fn config_status(
     State(state): State<ApiState>,
-    _admin: AdminUser,
+    _admin: AdminSession,
 ) -> Result<Json<ConfigurationStatusDto>, ApiError> {
     let status = state
         .services

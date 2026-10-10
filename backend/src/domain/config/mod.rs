@@ -63,36 +63,6 @@ pub enum SettingKey {
     // Inference - Embedding
     #[serde(rename = "inference.embedding.base_url")]
     InferenceEmbeddingBaseUrl,
-    #[serde(rename = "inference.embedding.model")]
-    InferenceEmbeddingModel,
-
-    // Channels - Discord
-    #[serde(rename = "channels.discord.enabled")]
-    ChannelsDiscordEnabled,
-    #[serde(rename = "channels.discord.guild_id")]
-    ChannelsDiscordGuildId,
-
-    // Channels - Telegram
-    #[serde(rename = "channels.telegram.enabled")]
-    ChannelsTelegramEnabled,
-    #[serde(rename = "channels.telegram.mode")]
-    ChannelsTelegramMode,
-
-    // Channels - Email
-    #[serde(rename = "channels.email.enabled")]
-    ChannelsEmailEnabled,
-    #[serde(rename = "channels.email.imap_url")]
-    ChannelsEmailImapUrl,
-    #[serde(rename = "channels.email.smtp_url")]
-    ChannelsEmailSmtpUrl,
-    #[serde(rename = "channels.email.from")]
-    ChannelsEmailFrom,
-    #[serde(rename = "channels.email.authserv_id")]
-    ChannelsEmailAuthservId,
-    #[serde(rename = "channels.email.poll_seconds")]
-    ChannelsEmailPollSeconds,
-    #[serde(rename = "channels.email.processed_folder")]
-    ChannelsEmailProcessedFolder,
 
     // Registration
     #[serde(rename = "registration.allow_link_signup")]
@@ -122,18 +92,6 @@ impl SettingKey {
             Self::InferenceTtsVoice => "inference.tts.voice",
             Self::InferenceTtsDialect => "inference.tts.dialect",
             Self::InferenceEmbeddingBaseUrl => "inference.embedding.base_url",
-            Self::InferenceEmbeddingModel => "inference.embedding.model",
-            Self::ChannelsDiscordEnabled => "channels.discord.enabled",
-            Self::ChannelsDiscordGuildId => "channels.discord.guild_id",
-            Self::ChannelsTelegramEnabled => "channels.telegram.enabled",
-            Self::ChannelsTelegramMode => "channels.telegram.mode",
-            Self::ChannelsEmailEnabled => "channels.email.enabled",
-            Self::ChannelsEmailImapUrl => "channels.email.imap_url",
-            Self::ChannelsEmailSmtpUrl => "channels.email.smtp_url",
-            Self::ChannelsEmailFrom => "channels.email.from",
-            Self::ChannelsEmailAuthservId => "channels.email.authserv_id",
-            Self::ChannelsEmailPollSeconds => "channels.email.poll_seconds",
-            Self::ChannelsEmailProcessedFolder => "channels.email.processed_folder",
             Self::RegistrationAllowLinkSignup => "registration.allow_link_signup",
         }
     }
@@ -159,18 +117,6 @@ impl SettingKey {
         Self::InferenceTtsVoice,
         Self::InferenceTtsDialect,
         Self::InferenceEmbeddingBaseUrl,
-        Self::InferenceEmbeddingModel,
-        Self::ChannelsDiscordEnabled,
-        Self::ChannelsDiscordGuildId,
-        Self::ChannelsTelegramEnabled,
-        Self::ChannelsTelegramMode,
-        Self::ChannelsEmailEnabled,
-        Self::ChannelsEmailImapUrl,
-        Self::ChannelsEmailSmtpUrl,
-        Self::ChannelsEmailFrom,
-        Self::ChannelsEmailAuthservId,
-        Self::ChannelsEmailPollSeconds,
-        Self::ChannelsEmailProcessedFolder,
         Self::RegistrationAllowLinkSignup,
     ];
 }
@@ -205,18 +151,6 @@ impl std::str::FromStr for SettingKey {
             "inference.tts.voice" => Ok(Self::InferenceTtsVoice),
             "inference.tts.dialect" => Ok(Self::InferenceTtsDialect),
             "inference.embedding.base_url" => Ok(Self::InferenceEmbeddingBaseUrl),
-            "inference.embedding.model" => Ok(Self::InferenceEmbeddingModel),
-            "channels.discord.enabled" => Ok(Self::ChannelsDiscordEnabled),
-            "channels.discord.guild_id" => Ok(Self::ChannelsDiscordGuildId),
-            "channels.telegram.enabled" => Ok(Self::ChannelsTelegramEnabled),
-            "channels.telegram.mode" => Ok(Self::ChannelsTelegramMode),
-            "channels.email.enabled" => Ok(Self::ChannelsEmailEnabled),
-            "channels.email.imap_url" => Ok(Self::ChannelsEmailImapUrl),
-            "channels.email.smtp_url" => Ok(Self::ChannelsEmailSmtpUrl),
-            "channels.email.from" => Ok(Self::ChannelsEmailFrom),
-            "channels.email.authserv_id" => Ok(Self::ChannelsEmailAuthservId),
-            "channels.email.poll_seconds" => Ok(Self::ChannelsEmailPollSeconds),
-            "channels.email.processed_folder" => Ok(Self::ChannelsEmailProcessedFolder),
             "registration.allow_link_signup" => Ok(Self::RegistrationAllowLinkSignup),
             unknown => Err(ConfigError::UnknownKey(unknown.to_string())),
         }

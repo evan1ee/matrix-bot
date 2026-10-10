@@ -13,24 +13,6 @@ pub struct SettingDefinition {
     pub validator: fn(&SettingKey, &SettingValue) -> Result<(), ConfigError>,
 }
 
-fn validate_string_max_500(key: &SettingKey, val: &SettingValue) -> Result<(), ConfigError> {
-    if let Some(s) = val.as_str() {
-        if s.len() > 500 {
-            return Err(ConfigError::Validation {
-                key: key.as_str().to_string(),
-                reason: "value exceeds maximum length of 500 characters".to_string(),
-            });
-        }
-        Ok(())
-    } else {
-        Err(ConfigError::TypeMismatch {
-            key: key.as_str().to_string(),
-            expected: SettingType::String,
-            actual: val.setting_type(),
-        })
-    }
-}
-
 fn validate_non_empty_string(key: &SettingKey, val: &SettingValue) -> Result<(), ConfigError> {
     if let Some(s) = val.as_str() {
         let trimmed = s.trim();
@@ -62,43 +44,80 @@ fn validate_optional_url(key: &SettingKey, val: &SettingValue) -> Result<(), Con
         if trimmed.is_empty() {
             return Ok(());
         }
-        if !(trimmed.starts_with("http://")
-            || trimmed.starts_with("https://")
-            || trimmed.starts_with("imaps://")
-            || trimmed.starts_with("smtps://"))
-        {
-            return Err(ConfigError::Validation {
-                key: key.as_str().to_string(),
-                reason: "URL must start with http://, https://, imaps://, or smtps://".to_string(),
-            });
-        }
         if trimmed.len() > 500 {
             return Err(ConfigError::Validation {
                 key: key.as_str().to_string(),
                 reason: "URL exceeds maximum length of 500 characters".to_string(),
             });
         }
-        Ok(())
-    } else {
-        Err(ConfigError::TypeMismatch {
-            key: key.as_str().to_string(),
-            expected: SettingType::String,
-            actual: val.setting_type(),
-        })
-    }
-}
-
-fn validate_optional_email(key: &SettingKey, val: &SettingValue) -> Result<(), ConfigError> {
-    if let Some(s) = val.as_str() {
-        let trimmed = s.trim();
-        if trimmed.is_empty() {
-            return Ok(());
-        }
-        if !trimmed.contains('@') || trimmed.len() > 500 {
+        if trimmed.chars().any(|c| c.is_whitespace() || c.is_control()) {
             return Err(ConfigError::Validation {
                 key: key.as_str().to_string(),
-                reason: "invalid email address format".to_string(),
+                reason: "URL must not contain whitespace or control characters".to_string(),
             });
+        }
+        let rest = if let Some(r) = trimmed.strip_prefix("http://") {
+            r
+        } else if let Some(r) = trimmed.strip_prefix("https://") {
+            r
+        } else {
+            return Err(ConfigError::Validation {
+                key: key.as_str().to_string(),
+                reason: "URL must start with http:// or https://".to_string(),
+            });
+        };
+
+        let authority = rest.split(['/', '?', '#']).next().unwrap_or("");
+        if authority.is_empty() {
+            return Err(ConfigError::Validation {
+                key: key.as_str().to_string(),
+                reason: "URL must include a valid host".to_string(),
+            });
+        }
+        if authority.contains('@') {
+            return Err(ConfigError::Validation {
+                key: key.as_str().to_string(),
+                reason: "URL must not contain embedded userinfo credentials".to_string(),
+            });
+        }
+
+        let (host, port_opt) = if let Some(after_bracket) = authority.strip_prefix('[') {
+            let Some((ipv6, rem)) = after_bracket.split_once(']') else {
+                return Err(ConfigError::Validation {
+                    key: key.as_str().to_string(),
+                    reason: "malformed IPv6 host in URL".to_string(),
+                });
+            };
+            let port = if let Some(p) = rem.strip_prefix(':') {
+                Some(p)
+            } else if rem.is_empty() {
+                None
+            } else {
+                return Err(ConfigError::Validation {
+                    key: key.as_str().to_string(),
+                    reason: "malformed authority in URL".to_string(),
+                });
+            };
+            (ipv6, port)
+        } else if let Some((h, p)) = authority.rsplit_once(':') {
+            (h, Some(p))
+        } else {
+            (authority, None)
+        };
+
+        if host.is_empty() || host.starts_with('.') || host.ends_with(':') {
+            return Err(ConfigError::Validation {
+                key: key.as_str().to_string(),
+                reason: "URL must include a valid host".to_string(),
+            });
+        }
+        if let Some(port_str) = port_opt {
+            if port_str.parse::<u16>().map_or(true, |p| p == 0) {
+                return Err(ConfigError::Validation {
+                    key: key.as_str().to_string(),
+                    reason: "URL port must be between 1 and 65535".to_string(),
+                });
+            }
         }
         Ok(())
     } else {
@@ -236,44 +255,7 @@ fn validate_tts_dialect(key: &SettingKey, val: &SettingValue) -> Result<(), Conf
     }
 }
 
-fn validate_telegram_mode(key: &SettingKey, val: &SettingValue) -> Result<(), ConfigError> {
-    if let Some(s) = val.as_str() {
-        match s.to_ascii_lowercase().as_str() {
-            "polling" | "webhook" => Ok(()),
-            other => Err(ConfigError::Validation {
-                key: key.as_str().to_string(),
-                reason: format!("unsupported telegram mode '{other}'; must be polling or webhook"),
-            }),
-        }
-    } else {
-        Err(ConfigError::TypeMismatch {
-            key: key.as_str().to_string(),
-            expected: SettingType::String,
-            actual: val.setting_type(),
-        })
-    }
-}
-
-fn validate_email_poll_seconds(key: &SettingKey, val: &SettingValue) -> Result<(), ConfigError> {
-    if let Some(i) = val.as_i64() {
-        if (5..=86400).contains(&i) {
-            Ok(())
-        } else {
-            Err(ConfigError::Validation {
-                key: key.as_str().to_string(),
-                reason: format!("poll seconds {i} must be at least 5 seconds"),
-            })
-        }
-    } else {
-        Err(ConfigError::TypeMismatch {
-            key: key.as_str().to_string(),
-            expected: SettingType::Integer,
-            actual: val.setting_type(),
-        })
-    }
-}
-
-/// Catalog of definitions for all supported settings.
+/// Catalog of definitions for all supported hot-reloadable runtime settings.
 pub struct SettingRegistry;
 
 impl SettingRegistry {
@@ -458,102 +440,6 @@ impl SettingRegistry {
                 hot_reloadable: true,
                 description: "Base URL for knowledge embedding inference",
                 validator: validate_optional_url,
-            },
-            SettingDefinition {
-                key: SettingKey::InferenceEmbeddingModel,
-                value_type: SettingType::String,
-                default_value: SettingValue::String("multilingual-e5-small".to_string()),
-                hot_reloadable: false,
-                description: "Active embedding model for note indexing",
-                validator: validate_non_empty_string,
-            },
-            SettingDefinition {
-                key: SettingKey::ChannelsDiscordEnabled,
-                value_type: SettingType::Boolean,
-                default_value: SettingValue::Boolean(false),
-                hot_reloadable: false,
-                description: "Enable/disable Discord adapter",
-                validator: validate_boolean,
-            },
-            SettingDefinition {
-                key: SettingKey::ChannelsDiscordGuildId,
-                value_type: SettingType::String,
-                default_value: SettingValue::String("".to_string()),
-                hot_reloadable: false,
-                description: "Target Discord Guild ID for instant slash command registration",
-                validator: validate_string_max_500,
-            },
-            SettingDefinition {
-                key: SettingKey::ChannelsTelegramEnabled,
-                value_type: SettingType::Boolean,
-                default_value: SettingValue::Boolean(false),
-                hot_reloadable: false,
-                description: "Enable/disable Telegram adapter",
-                validator: validate_boolean,
-            },
-            SettingDefinition {
-                key: SettingKey::ChannelsTelegramMode,
-                value_type: SettingType::String,
-                default_value: SettingValue::String("polling".to_string()),
-                hot_reloadable: false,
-                description: "Telegram update mode (webhook or polling)",
-                validator: validate_telegram_mode,
-            },
-            SettingDefinition {
-                key: SettingKey::ChannelsEmailEnabled,
-                value_type: SettingType::Boolean,
-                default_value: SettingValue::Boolean(false),
-                hot_reloadable: false,
-                description: "Enable/disable Email adapter",
-                validator: validate_boolean,
-            },
-            SettingDefinition {
-                key: SettingKey::ChannelsEmailImapUrl,
-                value_type: SettingType::String,
-                default_value: SettingValue::String("".to_string()),
-                hot_reloadable: false,
-                description: "IMAPS endpoint URL",
-                validator: validate_optional_url,
-            },
-            SettingDefinition {
-                key: SettingKey::ChannelsEmailSmtpUrl,
-                value_type: SettingType::String,
-                default_value: SettingValue::String("".to_string()),
-                hot_reloadable: false,
-                description: "SMTP endpoint URL",
-                validator: validate_optional_url,
-            },
-            SettingDefinition {
-                key: SettingKey::ChannelsEmailFrom,
-                value_type: SettingType::String,
-                default_value: SettingValue::String("".to_string()),
-                hot_reloadable: false,
-                description: "Outbound sender email address",
-                validator: validate_optional_email,
-            },
-            SettingDefinition {
-                key: SettingKey::ChannelsEmailAuthservId,
-                value_type: SettingType::String,
-                default_value: SettingValue::String("".to_string()),
-                hot_reloadable: false,
-                description: "Mail receiving server authserv ID for DMARC validation",
-                validator: validate_string_max_500,
-            },
-            SettingDefinition {
-                key: SettingKey::ChannelsEmailPollSeconds,
-                value_type: SettingType::Integer,
-                default_value: SettingValue::Integer(60),
-                hot_reloadable: false,
-                description: "IMAP mailbox polling interval (seconds, min 5)",
-                validator: validate_email_poll_seconds,
-            },
-            SettingDefinition {
-                key: SettingKey::ChannelsEmailProcessedFolder,
-                value_type: SettingType::String,
-                default_value: SettingValue::String("".to_string()),
-                hot_reloadable: false,
-                description: "Optional IMAP folder for processed messages",
-                validator: validate_string_max_500,
             },
             SettingDefinition {
                 key: SettingKey::RegistrationAllowLinkSignup,

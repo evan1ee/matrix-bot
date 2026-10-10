@@ -78,6 +78,22 @@ impl Config {
         }
         channels::validate_email_allowlist(allowed(Channel::Email))?;
 
+        let has_encryption_key = self
+            .secrets_encryption_key
+            .as_deref()
+            .is_some_and(|s| !s.trim().is_empty())
+            || self
+                .secrets_encryption_keys
+                .as_deref()
+                .is_some_and(|s| !s.trim().is_empty());
+        if has_encryption_key || is_prod {
+            crate::infrastructure::crypto::aes_gcm::MasterKeyProvider::from_key_strings(
+                self.secrets_encryption_key.as_deref(),
+                self.secrets_encryption_keys.as_deref(),
+            )
+            .map_err(|e| anyhow::anyhow!("Invalid secret encryption configuration: {e}"))?;
+        }
+
         Ok(())
     }
 }

@@ -270,6 +270,11 @@ mod step_up_tests {
         ("GET", "/api/v1/account/security-events"),
         ("GET", "/api/v1/account/recovery-status"),
         ("GET", "/api/v1/todos"),
+        ("GET", "/api/v1/admin/config-status"),
+        ("GET", "/api/v1/admin/settings"),
+        ("GET", "/api/v1/admin/settings/llm.default_model"),
+        ("GET", "/api/v1/admin/secrets"),
+        ("GET", "/api/v1/admin/audit-logs"),
         // Cancelling recovery is deliberately *not* sensitive: the person doing
         // it may be racing a 24-hour clock against a recovery they did not ask
         // for, and demanding a passkey would be exactly backwards.
@@ -290,9 +295,10 @@ mod step_up_tests {
         let accounts = &state.services.accounts;
         let account = accounts.create("evan", STATUS_ACTIVE).await.unwrap();
         accounts
-            .update_role(&account, crate::domain::accounts::AccountRole::Admin)
+            .add_passkey(&account, "cred_evan", "{}", "Evan Passkey")
             .await
             .unwrap();
+        accounts.grant_admin(&account).await.unwrap();
         let token = accounts
             .create_session(&account, None, None, None)
             .await
