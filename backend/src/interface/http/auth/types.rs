@@ -478,6 +478,8 @@ pub struct UserProfileResponse {
     /// Matrix identities linked to this account, if any. An empty list is the
     /// normal state for someone who has only ever used the web UI.
     pub linked_mxids: Vec<String>,
+    /// Account authorization role ("user" or "admin").
+    pub role: String,
 }
 
 #[derive(Debug, Deserialize, ToSchema, utoipa::IntoParams)]

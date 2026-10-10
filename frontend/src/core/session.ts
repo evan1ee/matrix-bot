@@ -9,6 +9,7 @@ export interface SessionUser {
   display_name: string | null;
   avatar_url: string | null;
   linked_mxids: string[];
+  role?: 'user' | 'admin';
 }
 
 /**

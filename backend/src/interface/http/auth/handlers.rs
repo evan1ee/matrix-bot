@@ -106,6 +106,7 @@ pub async fn get_current_user(
         display_name: final_display_name,
         avatar_url,
         linked_mxids: linked,
+        role: auth_user.role.as_str().to_string(),
     }))
 }
 

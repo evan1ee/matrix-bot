@@ -40,6 +40,7 @@ const MODULE_LABELS: Record<string, string> = {
   ai: 'AI Assistant',
   agent: 'Autonomous Agent',
   core: 'System Overview',
+  admin: 'Admin Console',
 };
 
 export const AppShell: React.FC<AppShellProps> = ({

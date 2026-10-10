@@ -5,7 +5,7 @@ import { fetchApi } from '../core/apiClient';
 import { Theme } from '../core/theme';
 import {
   Bot, Brain, ChevronLeft, LayoutDashboard, CheckSquare, Clock, Bookmark,
-  Wallet, TrendingUp, Receipt, Webhook, Sparkles, Compass, Zap, Hourglass, Smile, Settings, LogIn, Sun, Moon, LucideIcon
+  Wallet, TrendingUp, Receipt, Webhook, Sparkles, Compass, Zap, Hourglass, Smile, Settings, LogIn, Sun, Moon, Shield, LucideIcon
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -239,7 +239,16 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
       {/* ─── Zone 2: Navigation ─── */}
       <nav className={`flex-1 overflow-y-auto overflow-x-hidden w-full ${collapsed ? 'py-3' : 'py-4'}`}>
-        {NAV_GROUPS.map((group, groupIdx) => (
+        {(user?.role === 'admin'
+          ? [
+              ...NAV_GROUPS,
+              {
+                title: 'System',
+                items: [{ id: 'admin', label: 'Admin', icon: Shield }],
+              },
+            ]
+          : NAV_GROUPS
+        ).map((group, groupIdx) => (
           <div key={group.title} className={`w-full ${groupIdx > 0 ? (collapsed ? 'mt-3' : 'mt-5') : ''}`}>
             {/* Section header or divider */}
             {!collapsed ? (

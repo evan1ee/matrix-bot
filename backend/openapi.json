@@ -13113,7 +13113,8 @@
         "required": [
           "account_id",
           "username",
-          "linked_mxids"
+          "linked_mxids",
+          "role"
         ],
         "properties": {
           "account_id": {
@@ -13134,6 +13135,10 @@
               "type": "string"
             },
             "description": "Matrix identities linked to this account, if any. An empty list is the\nnormal state for someone who has only ever used the web UI."
+          },
+          "role": {
+            "type": "string",
+            "description": "Account authorization role (\"user\" or \"admin\")."
           },
           "username": {
             "type": "string"

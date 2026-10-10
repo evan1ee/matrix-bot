@@ -37,6 +37,7 @@ export const TAB = {
   webhooks: 'Webhooks',
   ai: 'AI Assistant',
   agent: 'Agent',
+  admin: 'Admin',
 } as const;
 
 interface Fixtures {

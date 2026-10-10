@@ -411,6 +411,84 @@ export class FakeApi {
    * answer — there is no client-side token for a test to plant.
    */
   signedIn = true;
+  role: 'user' | 'admin' = 'user';
+  adminSettings: any[] = [
+    {
+      key: 'llm.default_provider',
+      value: 'openai',
+      default_value: 'openai',
+      value_type: 'string',
+      description: 'Default AI provider identifier',
+      is_custom: false,
+      hot_reloadable: true,
+      category: 'LLM',
+      updated_at: null,
+      updated_by: null,
+    },
+    {
+      key: 'llm.default_model',
+      value: 'gpt-4o-mini',
+      default_value: 'gpt-4o-mini',
+      value_type: 'string',
+      description: 'Default model name passed in inference requests',
+      is_custom: false,
+      hot_reloadable: true,
+      category: 'LLM',
+      updated_at: null,
+      updated_by: null,
+    },
+    {
+      key: 'search.tavily.enabled',
+      value: true,
+      default_value: true,
+      value_type: 'boolean',
+      description: 'Enable/disable Tavily live web search',
+      is_custom: false,
+      hot_reloadable: true,
+      category: 'Search',
+      updated_at: null,
+      updated_by: null,
+    },
+    {
+      key: 'inference.embedding.model',
+      value: 'multilingual-e5-small',
+      default_value: 'multilingual-e5-small',
+      value_type: 'string',
+      description: 'Active embedding model for note indexing',
+      is_custom: false,
+      hot_reloadable: false,
+      category: 'Inference',
+      updated_at: null,
+      updated_by: null,
+    },
+    {
+      key: 'app.default_timezone',
+      value: 'UTC',
+      default_value: 'UTC',
+      value_type: 'string',
+      description: 'Default fallback timezone for new accounts',
+      is_custom: false,
+      hot_reloadable: true,
+      category: 'General',
+      updated_at: null,
+      updated_by: null,
+    },
+    {
+      key: 'channels.telegram.enabled',
+      value: false,
+      default_value: false,
+      value_type: 'boolean',
+      description: 'Enable Telegram bot adapter',
+      is_custom: false,
+      hot_reloadable: false,
+      category: 'Channels',
+      updated_at: null,
+      updated_by: null,
+    },
+  ];
+  adminSecrets: any[] = [];
+  adminAuditLogs: any[] = [];
+  nextSecretId = 1;
 
   /** Passkeys the account holds, as Settings -> Security lists them. */
   passkeys: { id: string; label: string; created_at: string; last_used_at: string | null }[] = [
@@ -1136,7 +1214,149 @@ export class FakeApi {
         display_name: DISPLAY_NAME,
         avatar_url: null,
         linked_mxids: this.linkedMxids,
+        role: this.role,
       });
+    }
+
+    // --- admin endpoints ---
+    if (path.startsWith('/admin/')) {
+      if (!this.signedIn) {
+        return json(route, 401, { error: 'Not signed in', code: 401 });
+      }
+      if (this.role !== 'admin') {
+        return json(route, 403, { error: 'Admin privileges required', code: 403 });
+      }
+
+      if (path === '/admin/config-status' && method === 'GET') {
+        return json(route, 200, {
+          settings_count: this.adminSettings.length,
+          custom_settings_count: this.adminSettings.filter((s) => s.is_custom).length,
+          encryption_configured: true,
+          secrets_count: this.adminSecrets.length,
+          active_secrets_count: this.adminSecrets.filter((s) => s.status === 'active').length,
+          last_reload_at: new Date().toISOString(),
+        });
+      }
+
+      if (path === '/admin/settings' && method === 'GET') {
+        return json(route, 200, this.adminSettings);
+      }
+
+      if (path.startsWith('/admin/settings/') && method === 'PUT') {
+        const key = decodeURIComponent(path.slice('/admin/settings/'.length));
+        const val = body?.value;
+        let setting = this.adminSettings.find((s) => s.key === key);
+        if (!setting) {
+          setting = {
+            key,
+            value: val,
+            default_value: val,
+            value_type: typeof val === 'boolean' ? 'boolean' : typeof val === 'number' ? 'integer' : 'string',
+            description: key,
+            is_custom: true,
+            hot_reloadable: true,
+            category: 'General',
+            updated_at: new Date().toISOString(),
+            updated_by: OWNER,
+          };
+          this.adminSettings.push(setting);
+        } else {
+          setting.value = val;
+          setting.is_custom = true;
+          setting.updated_at = new Date().toISOString();
+        }
+        this.adminAuditLogs.unshift({
+          id: this.adminAuditLogs.length + 1,
+          actor_id: OWNER,
+          action: 'setting_updated',
+          target_type: 'setting',
+          target_key: key,
+          outcome: 'success',
+          detail: { new_value: val },
+          created_at: new Date().toISOString(),
+        });
+        return json(route, 200, setting);
+      }
+
+      if (path.startsWith('/admin/settings/') && method === 'DELETE') {
+        const key = decodeURIComponent(path.slice('/admin/settings/'.length));
+        const setting = this.adminSettings.find((s) => s.key === key);
+        if (setting) {
+          setting.value = setting.default_value;
+          setting.is_custom = false;
+        }
+        return json(route, 200, { status: 'reset' });
+      }
+
+      if (path === '/admin/secrets' && method === 'GET') {
+        return json(route, 200, this.adminSecrets);
+      }
+
+      if (path === '/admin/secrets' && method === 'POST') {
+        const provider = String(body?.provider ?? 'openai');
+        const slotName = String(body?.name ?? 'default');
+        const rawSecret = String(body?.secret ?? '');
+        const id = `sec_${this.nextSecretId++}`;
+        const masked = rawSecret && rawSecret.length > 8 ? `${rawSecret.slice(0, 3)}...${rawSecret.slice(-4)}` : '••••••••';
+        const newSec = {
+          id,
+          provider,
+          name: slotName || 'default',
+          status: 'active',
+          key_version: 1,
+          masked_preview: masked,
+          last_tested_at: null,
+          last_test_status: null,
+          last_test_error: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        this.adminSecrets.push(newSec);
+        this.adminAuditLogs.unshift({
+          id: this.adminAuditLogs.length + 1,
+          actor_id: OWNER,
+          action: 'secret_created',
+          target_type: 'secret',
+          target_key: `${provider}:${newSec.name}`,
+          outcome: 'success',
+          detail: { masked_preview: masked },
+          created_at: new Date().toISOString(),
+        });
+        return json(route, 201, newSec);
+      }
+
+      if (path.startsWith('/admin/secrets/') && path.endsWith('/test') && method === 'POST') {
+        const id = path.slice('/admin/secrets/'.length, -'/test'.length);
+        const sec = this.adminSecrets.find((s) => s.id === id);
+        if (sec) {
+          sec.last_tested_at = new Date().toISOString();
+          sec.last_test_status = 'healthy';
+        }
+        return json(route, 200, { id, status: 'healthy', error: null });
+      }
+
+      if (path.startsWith('/admin/secrets/') && method === 'PUT') {
+        const id = path.slice('/admin/secrets/'.length);
+        const sec = this.adminSecrets.find((s) => s.id === id);
+        if (!sec) return json(route, 404, { error: 'Secret not found', code: 404 });
+        if (body?.secret) {
+          const rawSecret = String(body.secret);
+          sec.masked_preview = rawSecret.length > 8 ? `${rawSecret.slice(0, 3)}...${rawSecret.slice(-4)}` : '••••••••';
+        }
+        if (body?.status) sec.status = String(body.status);
+        sec.updated_at = new Date().toISOString();
+        return json(route, 200, sec);
+      }
+
+      if (path.startsWith('/admin/secrets/') && method === 'DELETE') {
+        const id = path.slice('/admin/secrets/'.length);
+        this.adminSecrets = this.adminSecrets.filter((s) => s.id !== id);
+        return json(route, 200, { status: 'deleted' });
+      }
+
+      if (path.startsWith('/admin/audit-logs') && method === 'GET') {
+        return json(route, 200, this.adminAuditLogs);
+      }
     }
 
     // --- account management ---

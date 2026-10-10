@@ -18,6 +18,7 @@ import { timeBlocksModule } from './modules/time_blocks';
 import { bookmarksModule } from './modules/bookmarks';
 import { knowledgeModule } from './modules/knowledge';
 import { agentModule } from './modules/agent';
+import { adminModule } from './modules/admin';
 import { useSystemEvents } from './core/useSystemEvents';
 import { AppShell } from './components/AppShell';
 import { AuthModal } from './components/AuthModal';
@@ -37,7 +38,7 @@ const PublicTransparencyView = React.lazy(() =>
 );
 
 // Safely register modules only once without HMR re-registration warnings
-[dashboardModule, coreModule, knowledgeModule, todoModule, reminderModule, bookmarksModule, financeModule, portfolioModule, recurringBillsModule, footprintsModule, habitsModule, moodModule, timeBlocksModule, lifeModule, webhooksModule, aiModule, agentModule].forEach((mod) => {
+[dashboardModule, coreModule, knowledgeModule, todoModule, reminderModule, bookmarksModule, financeModule, portfolioModule, recurringBillsModule, footprintsModule, habitsModule, moodModule, timeBlocksModule, lifeModule, webhooksModule, aiModule, agentModule, adminModule].forEach((mod) => {
   if (!registry.get(mod.id)) {
     registry.register(mod);
   }
