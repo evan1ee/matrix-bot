@@ -11,12 +11,13 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::domain::secrets::{SecretId, SecretMetadata, SecretProvider, SecretValue};
-use crate::interface::http::auth::{AdminUser, ApiState};
+use crate::interface::http::auth::{AdminSession, AdminUser, ApiState};
 use crate::interface::http::error::ApiError;
 
 /// Public metadata for a stored secret credential. Plaintext and ciphertext are omitted.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SecretMetadataDto {
+    #[schema(value_type = String)]
     pub id: uuid::Uuid,
     pub provider: String,
     pub name: String,
@@ -68,12 +69,14 @@ pub struct ReplaceSecretRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct DeleteSecretResponse {
     pub status: String,
+    #[schema(value_type = String)]
     pub id: uuid::Uuid,
 }
 
 /// Outcome of a credential probe test.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SecretTestResultDto {
+    #[schema(value_type = String)]
     pub id: uuid::Uuid,
     pub status: String,
     pub error: Option<String>,
@@ -92,7 +95,7 @@ pub struct SecretTestResultDto {
 )]
 pub async fn list_secrets(
     State(state): State<ApiState>,
-    _admin: AdminUser,
+    _admin: AdminSession,
 ) -> Result<Json<Vec<SecretMetadataDto>>, ApiError> {
     let metadata_list = state
         .services
@@ -158,7 +161,7 @@ pub async fn create_secret(
     put,
     tag = "admin",
     path = "/api/v1/admin/secrets/{id}",
-    params(("id" = uuid::Uuid, Path, description = "Secret ID")),
+    params(("id" = String, Path, description = "Secret ID")),
     request_body = ReplaceSecretRequest,
     responses(
         (status = 200, body = SecretMetadataDto),
@@ -198,7 +201,7 @@ pub async fn replace_secret(
     delete,
     tag = "admin",
     path = "/api/v1/admin/secrets/{id}",
-    params(("id" = uuid::Uuid, Path, description = "Secret ID")),
+    params(("id" = String, Path, description = "Secret ID")),
     responses(
         (status = 200, body = DeleteSecretResponse),
         (status = 401, body = ApiErrorResponse),
@@ -231,7 +234,7 @@ pub async fn delete_secret(
     post,
     tag = "admin",
     path = "/api/v1/admin/secrets/{id}/test",
-    params(("id" = uuid::Uuid, Path, description = "Secret ID")),
+    params(("id" = String, Path, description = "Secret ID")),
     responses(
         (status = 200, body = SecretTestResultDto),
         (status = 401, body = ApiErrorResponse),

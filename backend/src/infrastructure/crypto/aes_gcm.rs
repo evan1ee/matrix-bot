@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 
-use aes_gcm::aead::{Aead, KeyInit, Payload};
+use aes_gcm::aead::{Aead, AeadCore, KeyInit, OsRng, Payload};
 use aes_gcm::{Aes256Gcm, Key, Nonce};
 use base64::Engine;
 
@@ -50,13 +50,33 @@ pub trait SecretProtector: Send + Sync {
 }
 
 /// Provider for AES-256 master symmetric keys with version support.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct MasterKeyProvider {
     primary_version: i32,
     keys: HashMap<i32, [u8; 32]>,
 }
 
+impl std::fmt::Debug for MasterKeyProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut versions: Vec<i32> = self.keys.keys().copied().collect();
+        versions.sort_unstable();
+        f.debug_struct("MasterKeyProvider")
+            .field("primary_version", &self.primary_version)
+            .field("key_versions", &versions)
+            .finish()
+    }
+}
+
 impl MasterKeyProvider {
+    fn ensure_non_zero(key: &[u8; 32]) -> Result<(), CryptoError> {
+        if key.iter().all(|&b| b == 0) {
+            return Err(CryptoError::InvalidKey(
+                "Encryption key must not be all zeros".into(),
+            ));
+        }
+        Ok(())
+    }
+
     /// Constructs a key provider with a single raw 32-byte key at version 1.
     pub fn from_raw_key(key: [u8; 32]) -> Self {
         let mut keys = HashMap::new();
@@ -76,6 +96,14 @@ impl MasterKeyProvider {
             return Err(CryptoError::KeyUnavailable(
                 "No encryption keys provided".into(),
             ));
+        }
+        for (&ver, key) in &keys {
+            if ver <= 0 {
+                return Err(CryptoError::InvalidKey(
+                    "Key version must be a positive integer (>= 1)".into(),
+                ));
+            }
+            Self::ensure_non_zero(key)?;
         }
         if !keys.contains_key(&primary_version) {
             return Err(CryptoError::UnknownKeyVersion(primary_version));
@@ -124,6 +152,7 @@ impl MasterKeyProvider {
                 if bytes.len() == 32 {
                     let mut arr = [0u8; 32];
                     arr.copy_from_slice(&bytes);
+                    Self::ensure_non_zero(&arr)?;
                     return Ok(arr);
                 }
             }
@@ -134,6 +163,7 @@ impl MasterKeyProvider {
             if bytes.len() == 32 {
                 let mut arr = [0u8; 32];
                 arr.copy_from_slice(&bytes);
+                Self::ensure_non_zero(&arr)?;
                 return Ok(arr);
             }
         }
@@ -143,6 +173,7 @@ impl MasterKeyProvider {
             if bytes.len() == 32 {
                 let mut arr = [0u8; 32];
                 arr.copy_from_slice(&bytes);
+                Self::ensure_non_zero(&arr)?;
                 return Ok(arr);
             }
         }
@@ -154,35 +185,41 @@ impl MasterKeyProvider {
 
     fn parse_versioned_keys(raw: &str) -> Result<Self, CryptoError> {
         let mut keys = HashMap::new();
-        let mut max_version = 1;
 
-        for part in raw.split(',') {
+        for (idx, part) in raw.split(',').enumerate() {
             let part = part.trim();
             if part.is_empty() {
                 continue;
             }
+            let entry_num = idx + 1;
             let (ver_str, key_str) = part.split_once(':').ok_or_else(|| {
-                CryptoError::InvalidKey(format!("Expected version:key format, got: {part}"))
+                CryptoError::InvalidKey(format!("entry {entry_num} is not in version:key format"))
             })?;
-            let ver: i32 = ver_str
-                .trim()
-                .parse()
-                .map_err(|_| CryptoError::InvalidKey(format!("Invalid key version: {ver_str}")))?;
-            let key = Self::parse_key(key_str)?;
-            if ver > max_version {
-                max_version = ver;
+            let ver: i32 = ver_str.trim().parse().map_err(|_| {
+                CryptoError::InvalidKey(format!(
+                    "entry {entry_num} has an invalid positive integer version"
+                ))
+            })?;
+            if ver <= 0 {
+                return Err(CryptoError::InvalidKey(format!(
+                    "entry {entry_num} has a non-positive version (must be >= 1)"
+                )));
             }
+            if keys.contains_key(&ver) {
+                return Err(CryptoError::InvalidKey(format!(
+                    "duplicate key version {ver} in SECRETS_ENCRYPTION_KEYS"
+                )));
+            }
+            let key = Self::parse_key(key_str)?;
             keys.insert(ver, key);
         }
 
-        if keys.is_empty() {
-            return Err(CryptoError::KeyUnavailable(
-                "No keys found in SECRETS_ENCRYPTION_KEYS".into(),
-            ));
-        }
+        let primary_version = keys.keys().copied().max().ok_or_else(|| {
+            CryptoError::KeyUnavailable("No keys found in SECRETS_ENCRYPTION_KEYS".into())
+        })?;
 
         Ok(Self {
-            primary_version: max_version,
+            primary_version,
             keys,
         })
     }
@@ -231,11 +268,10 @@ impl SecretProtector for AesGcmSecretProtector {
         secret: &SecretValue,
     ) -> Result<EncryptedSecret, CryptoError> {
         let (key_version, key_bytes) = self.keys.primary_key();
-        let nonce_bytes = crate::utils::random::random_bytes(12);
+        let nonce = Aes256Gcm::generate_nonce(&mut OsRng);
 
         let aad = Self::aad_string(provider, name, key_version);
         let cipher = Aes256Gcm::new(Key::<Aes256Gcm>::from_slice(key_bytes));
-        let nonce = Nonce::from_slice(&nonce_bytes);
 
         let payload = Payload {
             msg: secret.expose_secret().as_bytes(),
@@ -243,12 +279,12 @@ impl SecretProtector for AesGcmSecretProtector {
         };
 
         let ciphertext = cipher
-            .encrypt(nonce, payload)
+            .encrypt(&nonce, payload)
             .map_err(|e| CryptoError::EncryptionFailed(e.to_string()))?;
 
         Ok(EncryptedSecret {
             ciphertext,
-            nonce: nonce_bytes,
+            nonce: nonce.to_vec(),
             key_version,
         })
     }
@@ -365,14 +401,14 @@ mod tests {
     #[test]
     fn test_aad_provider_mismatch_fails() {
         let protector = test_protector();
-        let secret = SecretValue::new("discord-bot-token");
+        let secret = SecretValue::new("provider-bound-token");
 
         let encrypted = protector
-            .encrypt(SecretProvider::Discord, "default", &secret)
+            .encrypt(SecretProvider::OpenAi, "default", &secret)
             .unwrap();
 
         let err = protector
-            .decrypt(SecretProvider::Telegram, "default", &encrypted)
+            .decrypt(SecretProvider::Anthropic, "default", &encrypted)
             .unwrap_err();
 
         assert!(matches!(err, CryptoError::DecryptionFailed(_)));
@@ -474,5 +510,46 @@ mod tests {
         assert_eq!(provider.primary_version, 2);
         assert_eq!(*provider.get_key(1).unwrap(), [1u8; 32]);
         assert_eq!(*provider.get_key(2).unwrap(), [2u8; 32]);
+
+        let dbg = format!("{provider:?}");
+        assert!(dbg.contains("primary_version: 2"));
+        assert!(!dbg.contains(&k1));
+        assert!(!dbg.contains(&k2));
+    }
+
+    #[test]
+    fn test_malformed_versioned_keys_never_leak_key_material_and_reject_bad_versions() {
+        let secret_hex = "deadbeefcafebabe0123456789abcdefdeadbeefcafebabe0123456789abcdef";
+
+        // Missing version prefix: must not echo raw key material in error message
+        let err = MasterKeyProvider::parse_versioned_keys(secret_hex).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            !msg.contains(secret_hex) && !msg.contains("deadbeef"),
+            "error leaked key material: {msg}"
+        );
+
+        // Non-integer version prefix: must not echo ver_str in error message
+        let err = MasterKeyProvider::parse_versioned_keys(&format!("{secret_hex}:{secret_hex}"))
+            .unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            !msg.contains(secret_hex) && !msg.contains("deadbeef"),
+            "error leaked version prefix: {msg}"
+        );
+
+        // Non-positive version rejected
+        assert!(MasterKeyProvider::parse_versioned_keys(&format!("0:{secret_hex}")).is_err());
+        assert!(MasterKeyProvider::parse_versioned_keys(&format!("-1:{secret_hex}")).is_err());
+
+        // Duplicate version rejected
+        assert!(
+            MasterKeyProvider::parse_versioned_keys(&format!("1:{secret_hex},1:{secret_hex}"))
+                .is_err()
+        );
+
+        // All-zero key rejected
+        let zero_hex = "0".repeat(64);
+        assert!(MasterKeyProvider::parse_key(&zero_hex).is_err());
     }
 }

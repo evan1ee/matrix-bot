@@ -1,218 +1,239 @@
 //! Provider connection testers for external services.
 //!
-//! Validates external credentials without persistent side-effects.
+//! Validates external credentials without persistent side-effects, enforcing
+//! SSRF protections, disabled HTTP redirects, and URL-redacted error reporting.
 
 use std::time::Duration;
 
+use crate::domain::secrets::SecretProvider;
+use crate::infrastructure::web::ssrf::is_safe_target_url;
+
 const TEST_TIMEOUT: Duration = Duration::from_secs(8);
 
-fn is_mock_test_key(key: &str) -> bool {
-    let lower = key.to_lowercase();
-    lower.starts_with("test")
-        || lower.starts_with("sk-test")
-        || lower.starts_with("tvly-test")
-        || lower.starts_with("mock")
-        || lower.starts_with("dummy")
+/// Concrete HTTP connectivity tester for external provider credentials.
+#[derive(Debug, Clone)]
+pub struct CredentialTester {
+    openai_base_url: String,
+    anthropic_base_url: String,
+    tavily_url: String,
+    allow_private: bool,
 }
 
-/// Validates an LLM API key against the provider models/ping endpoint.
-pub async fn test_llm_credential(endpoint: &str, api_key: &str) -> Result<(), String> {
-    let key = api_key.trim();
-    if key.is_empty() {
-        return Err("LLM API key cannot be empty".to_string());
-    }
-    if is_mock_test_key(key) {
-        return Ok(());
-    }
-
-    let client = reqwest::Client::builder()
-        .timeout(TEST_TIMEOUT)
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
-
-    let base = endpoint.trim().trim_end_matches('/');
-    let url = if base.ends_with("/models") {
-        base.to_string()
-    } else {
-        format!("{base}/models")
-    };
-
-    let mut req = client.get(&url);
-    if base.contains("anthropic") {
-        req = req
-            .header("x-api-key", key)
-            .header("anthropic-version", "2023-06-01");
-    } else {
-        req = req.header("Authorization", format!("Bearer {key}"));
-    }
-
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| format!("Connection to LLM provider failed: {e}"))?;
-
-    let status = resp.status();
-    if status.is_success() {
-        Ok(())
-    } else {
-        Err(format!(
-            "LLM provider rejected credential with status {status}"
-        ))
+impl Default for CredentialTester {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
-/// Validates a Tavily Search API key with a minimal search request.
-pub async fn test_tavily_credential(api_key: &str) -> Result<(), String> {
-    let key = api_key.trim();
-    if key.is_empty() {
-        return Err("Tavily API key cannot be empty".to_string());
-    }
-    if is_mock_test_key(key) {
-        return Ok(());
-    }
-
-    let client = reqwest::Client::builder()
-        .timeout(TEST_TIMEOUT)
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
-
-    let payload = serde_json::json!({
-        "api_key": key,
-        "query": "ping",
-        "max_results": 1,
-    });
-
-    let resp = client
-        .post("https://api.tavily.com/search")
-        .json(&payload)
-        .send()
-        .await
-        .map_err(|e| format!("Connection to Tavily failed: {e}"))?;
-
-    let status = resp.status();
-    if status.is_success() {
-        Ok(())
-    } else {
-        Err(format!("Tavily rejected credential with status {status}"))
-    }
-}
-
-/// Validates a Telegram bot token via getMe endpoint.
-pub async fn test_telegram_credential(token: &str) -> Result<(), String> {
-    let tok = token.trim();
-    if tok.is_empty() {
-        return Err("Telegram bot token cannot be empty".to_string());
-    }
-    if is_mock_test_key(tok) {
-        return Ok(());
+impl CredentialTester {
+    /// Creates a production tester targeting canonical provider endpoints with SSRF guard enabled.
+    pub fn new() -> Self {
+        Self {
+            openai_base_url: "https://api.openai.com/v1".to_string(),
+            anthropic_base_url: "https://api.anthropic.com/v1".to_string(),
+            tavily_url: "https://api.tavily.com/search".to_string(),
+            allow_private: false,
+        }
     }
 
-    let client = reqwest::Client::builder()
-        .timeout(TEST_TIMEOUT)
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
+    /// Creates a tester pointed at a local loopback mock server for unit/integration tests.
+    #[cfg(test)]
+    pub fn for_test(base_url: &str) -> Self {
+        let base = base_url.trim_end_matches('/');
+        Self {
+            openai_base_url: format!("{base}/v1"),
+            anthropic_base_url: format!("{base}/v1"),
+            tavily_url: format!("{base}/search"),
+            allow_private: true,
+        }
+    }
 
-    let url = format!("https://api.telegram.org/bot{tok}/getMe");
-    let resp = client
-        .get(&url)
-        .send()
-        .await
-        .map_err(|e| format!("Connection to Telegram failed: {e}"))?;
+    /// Probes the external provider for `provider` using `api_key`.
+    ///
+    /// Returns:
+    /// - `Ok(Some(()))` when a live connectivity probe succeeded (`"healthy"`).
+    /// - `Ok(None)` when the provider has no standalone probe endpoint (`"unknown"`).
+    /// - `Err(reason)` when the probe failed or the credential was rejected (`"unhealthy"`).
+    pub async fn test_provider(
+        &self,
+        provider: SecretProvider,
+        api_key: &str,
+    ) -> Result<Option<()>, String> {
+        match provider {
+            SecretProvider::OpenAi => self
+                .test_llm(&self.openai_base_url, false, api_key)
+                .await
+                .map(Some),
+            SecretProvider::Anthropic => self
+                .test_llm(&self.anthropic_base_url, true, api_key)
+                .await
+                .map(Some),
+            SecretProvider::Tavily => self.test_tavily(&self.tavily_url, api_key).await.map(Some),
+            SecretProvider::Stt | SecretProvider::Tts | SecretProvider::Generic => Ok(None),
+        }
+    }
 
-    let status = resp.status();
-    if status.is_success() {
-        let body: serde_json::Value = resp
-            .json()
+    async fn test_llm(
+        &self,
+        endpoint: &str,
+        is_anthropic: bool,
+        api_key: &str,
+    ) -> Result<(), String> {
+        let key = api_key.trim();
+        if key.is_empty() {
+            return Err("LLM API key cannot be empty".to_string());
+        }
+
+        if !self.allow_private && !is_safe_target_url(endpoint).await {
+            return Err("Invalid provider endpoint: disallowed or private target URL".to_string());
+        }
+
+        let client = reqwest::Client::builder()
+            .timeout(TEST_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|e| format!("Failed to build HTTP client: {}", e.without_url()))?;
+
+        let base = endpoint.trim().trim_end_matches('/');
+        let url = if base.ends_with("/models") {
+            base.to_string()
+        } else {
+            format!("{base}/models")
+        };
+
+        let mut req = client.get(&url);
+        if is_anthropic {
+            req = req
+                .header("x-api-key", key)
+                .header("anthropic-version", "2023-06-01");
+        } else {
+            req = req.header("Authorization", format!("Bearer {key}"));
+        }
+
+        let resp = req
+            .send()
             .await
-            .map_err(|e| format!("Invalid Telegram response: {e}"))?;
-        if body.get("ok").and_then(|v| v.as_bool()) == Some(true) {
+            .map_err(|e| format!("Connection to LLM provider failed: {}", e.without_url()))?;
+
+        let status = resp.status();
+        if status.is_success() {
             Ok(())
         } else {
-            Err("Telegram getMe reported ok: false".to_string())
+            Err(format!(
+                "LLM provider rejected credential with status {status}"
+            ))
         }
-    } else {
-        Err(format!("Telegram rejected token with status {status}"))
-    }
-}
-
-/// Validates a Discord bot token via GET /users/@me.
-pub async fn test_discord_credential(token: &str) -> Result<(), String> {
-    let tok = token.trim();
-    if tok.is_empty() {
-        return Err("Discord bot token cannot be empty".to_string());
-    }
-    if is_mock_test_key(tok) {
-        return Ok(());
     }
 
-    let client = reqwest::Client::builder()
-        .timeout(TEST_TIMEOUT)
-        .build()
-        .map_err(|e| format!("Failed to build HTTP client: {e}"))?;
-
-    let resp = client
-        .get("https://discord.com/api/v10/users/@me")
-        .header("Authorization", format!("Bot {tok}"))
-        .send()
-        .await
-        .map_err(|e| format!("Connection to Discord failed: {e}"))?;
-
-    let status = resp.status();
-    if status.is_success() {
-        Ok(())
-    } else {
-        Err(format!("Discord rejected token with status {status}"))
-    }
-}
-
-/// Validates email credentials shape and required parameters.
-pub async fn test_email_credential(cfg_str: &str) -> Result<(), String> {
-    let trimmed = cfg_str.trim();
-    if trimmed.is_empty() {
-        return Err("Email configuration cannot be empty".to_string());
-    }
-    if is_mock_test_key(trimmed) {
-        return Ok(());
-    }
-
-    // Try parsing as JSON configuration
-    if let Ok(val) = serde_json::from_str::<serde_json::Value>(trimmed) {
-        if val.get("imap_host").is_none() && val.get("smtp_host").is_none() {
-            return Err("Email configuration missing imap_host or smtp_host".to_string());
+    async fn test_tavily(&self, endpoint: &str, api_key: &str) -> Result<(), String> {
+        let key = api_key.trim();
+        if key.is_empty() {
+            return Err("Tavily API key cannot be empty".to_string());
         }
-        Ok(())
-    } else if trimmed.starts_with("imap://") || trimmed.starts_with("imaps://") {
-        Ok(())
-    } else {
-        Err("Email configuration must be valid JSON or imap(s) URL".to_string())
+
+        if !self.allow_private && !is_safe_target_url(endpoint).await {
+            return Err("Invalid provider endpoint: disallowed or private target URL".to_string());
+        }
+
+        let client = reqwest::Client::builder()
+            .timeout(TEST_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|e| format!("Failed to build HTTP client: {}", e.without_url()))?;
+
+        let payload = serde_json::json!({
+            "api_key": key,
+            "query": "ping",
+            "max_results": 1,
+        });
+
+        let resp = client
+            .post(endpoint)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|e| format!("Connection to Tavily failed: {}", e.without_url()))?;
+
+        let status = resp.status();
+        if status.is_success() {
+            Ok(())
+        } else {
+            Err(format!("Tavily rejected credential with status {status}"))
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    use tokio::net::TcpListener;
 
-    #[tokio::test]
-    async fn test_mock_keys_pass_without_network() {
-        assert!(
-            test_llm_credential("https://api.openai.com/v1", "sk-test-1234")
-                .await
-                .is_ok()
-        );
-        assert!(test_tavily_credential("tvly-test-1234").await.is_ok());
-        assert!(test_telegram_credential("test-bot-token").await.is_ok());
-        assert!(test_discord_credential("test-discord-token").await.is_ok());
-        assert!(test_email_credential("test-email-config").await.is_ok());
+    async fn spawn_one_shot_http(status_line: &'static str) -> String {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            if let Ok((mut stream, _)) = listener.accept().await {
+                let mut buf = [0u8; 1024];
+                let _ = stream.read(&mut buf).await;
+                let resp = format!(
+                    "{status_line}\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}"
+                );
+                let _ = stream.write_all(resp.as_bytes()).await;
+            }
+        });
+        format!("http://{addr}")
     }
 
     #[tokio::test]
-    async fn test_empty_keys_rejected() {
-        assert!(test_llm_credential("https://api.openai.com/v1", "   ")
+    async fn test_local_mock_server_success_and_rejection() {
+        let ok_url = spawn_one_shot_http("HTTP/1.1 200 OK").await;
+        let tester = CredentialTester::for_test(&ok_url);
+        assert_eq!(
+            tester
+                .test_provider(SecretProvider::OpenAi, "sk-live-key-1234567890")
+                .await
+                .unwrap(),
+            Some(())
+        );
+
+        let unauthorized_url = spawn_one_shot_http("HTTP/1.1 401 Unauthorized").await;
+        let bad_tester = CredentialTester::for_test(&unauthorized_url);
+        let err = bad_tester
+            .test_provider(SecretProvider::Anthropic, "sk-ant-invalid-key")
+            .await
+            .unwrap_err();
+        assert!(err.contains("401"));
+
+        // Providers without standalone probe endpoints return Ok(None)
+        assert_eq!(
+            tester
+                .test_provider(SecretProvider::Generic, "any-key")
+                .await
+                .unwrap(),
+            None
+        );
+    }
+
+    #[tokio::test]
+    async fn test_empty_keys_and_ssrf_rejected() {
+        let prod_tester = CredentialTester::new();
+        assert!(prod_tester
+            .test_provider(SecretProvider::OpenAi, "   ")
             .await
             .is_err());
-        assert!(test_tavily_credential("").await.is_err());
-        assert!(test_telegram_credential("  ").await.is_err());
-        assert!(test_discord_credential("").await.is_err());
-        assert!(test_email_credential("").await.is_err());
+        assert!(prod_tester
+            .test_provider(SecretProvider::Tavily, "")
+            .await
+            .is_err());
+
+        // Production tester refuses loopback/private URLs via SSRF guard
+        let mut private_disallowed = CredentialTester::for_test("http://127.0.0.1:8080");
+        private_disallowed.allow_private = false;
+        let err = private_disallowed
+            .test_provider(SecretProvider::OpenAi, "sk-valid-looking-key")
+            .await
+            .unwrap_err();
+        assert!(err.contains("Invalid provider endpoint"), "{err}");
     }
 }

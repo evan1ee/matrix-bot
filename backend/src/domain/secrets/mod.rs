@@ -74,11 +74,6 @@ pub enum SecretProvider {
     Tavily,
     Stt,
     Tts,
-    Discord,
-    Telegram,
-    TelegramWebhook,
-    Email,
-    S3,
     Generic,
 }
 
@@ -90,11 +85,6 @@ impl SecretProvider {
             Self::Tavily => "tavily",
             Self::Stt => "stt",
             Self::Tts => "tts",
-            Self::Discord => "discord",
-            Self::Telegram => "telegram",
-            Self::TelegramWebhook => "telegram_webhook",
-            Self::Email => "email",
-            Self::S3 => "s3",
             Self::Generic => "generic",
         }
     }
@@ -116,11 +106,6 @@ impl std::str::FromStr for SecretProvider {
             "tavily" => Ok(Self::Tavily),
             "stt" => Ok(Self::Stt),
             "tts" => Ok(Self::Tts),
-            "discord" => Ok(Self::Discord),
-            "telegram" => Ok(Self::Telegram),
-            "telegram_webhook" => Ok(Self::TelegramWebhook),
-            "email" => Ok(Self::Email),
-            "s3" => Ok(Self::S3),
             "generic" => Ok(Self::Generic),
             other => Err(SecretError::InvalidProvider(other.to_string())),
         }
@@ -222,25 +207,36 @@ impl std::fmt::Display for SecretValue {
 impl Drop for SecretValue {
     fn drop(&mut self) {
         if !self.0.is_empty() {
+            // SAFETY: Overwriting raw UTF-8 bytes with 0x00 leaves valid UTF-8 (NUL bytes),
+            // and `write_volatile` followed by a compiler fence prevents dead-store elimination
+            // before the String buffer is deallocated.
             unsafe {
-                let vec = self.0.as_mut_vec();
-                std::ptr::write_bytes(vec.as_mut_ptr(), 0, vec.len());
+                let bytes = self.0.as_bytes_mut();
+                for byte in bytes.iter_mut() {
+                    std::ptr::write_volatile(byte, 0);
+                }
             }
+            std::sync::atomic::compiler_fence(std::sync::atomic::Ordering::SeqCst);
         }
     }
 }
 
 /// Generates a masked preview for UI presentation (e.g., `sk-...4a1b` or `••••...4a1b`).
+///
+/// Never slices by byte index (safe for arbitrary UTF-8) and fully masks any secret
+/// of 10 characters or fewer so short secrets never expose 40%+ of their entropy.
 pub fn mask_secret(secret: &str) -> String {
     let trimmed = secret.trim();
-    if trimmed.len() <= 6 {
+    let chars: Vec<char> = trimmed.chars().collect();
+    if chars.len() <= 10 {
         "••••••••".to_string()
-    } else if trimmed.starts_with("sk-") && trimmed.len() > 10 {
-        let end = &trimmed[trimmed.len() - 4..];
-        format!("sk-...{end}")
     } else {
-        let end = &trimmed[trimmed.len() - 4..];
-        format!("••••...{end}")
+        let end: String = chars[chars.len() - 4..].iter().collect();
+        if trimmed.starts_with("sk-") {
+            format!("sk-...{end}")
+        } else {
+            format!("••••...{end}")
+        }
     }
 }
 
@@ -277,17 +273,19 @@ mod tests {
             SecretProvider::Tavily,
             SecretProvider::Stt,
             SecretProvider::Tts,
-            SecretProvider::Discord,
-            SecretProvider::Telegram,
-            SecretProvider::TelegramWebhook,
-            SecretProvider::Email,
-            SecretProvider::S3,
             SecretProvider::Generic,
         ] {
             let s = provider.as_str();
             let parsed: SecretProvider = s.parse().unwrap();
             assert_eq!(parsed, provider);
             assert_eq!(format!("{provider}"), s);
+        }
+
+        for env_only in ["discord", "telegram", "telegram_webhook", "email", "s3"] {
+            assert!(
+                env_only.parse::<SecretProvider>().is_err(),
+                "Restart-required provider {env_only} must be configured via .env only"
+            );
         }
     }
 
@@ -304,5 +302,12 @@ mod tests {
         assert_eq!(mask_secret("sk-1234567890abcdef"), "sk-...cdef");
         assert_eq!(mask_secret("ghp_myfaketoken1234"), "••••...1234");
         assert_eq!(mask_secret("short"), "••••••••");
+        assert_eq!(mask_secret("1234567890"), "••••••••");
+        assert_eq!(mask_secret("sec-🔑-🎉-🔒"), "••••••••");
+        assert_eq!(mask_secret("secret-🔑-🎉-🔒"), "••••...-🎉-🔒");
+        assert_eq!(
+            mask_secret("long-secret-with-emoji-🔑🎉🔒✨"),
+            "••••...🔑🎉🔒✨"
+        );
     }
 }

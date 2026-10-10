@@ -84,6 +84,7 @@ pub async fn get_secret_by_provider(
 }
 
 /// Inserts a new encrypted secret row, returning its ID.
+// Repository insert takes individual column binds directly rather than a one-off parameter struct.
 #[allow(clippy::too_many_arguments)]
 pub async fn insert_secret(
     conn: impl PgExecutor<'_>,
@@ -114,6 +115,7 @@ pub async fn insert_secret(
 }
 
 /// Updates ciphertext, nonce, key version, status, and metadata for an existing secret.
+// Repository update takes individual column binds directly rather than a one-off parameter struct.
 #[allow(clippy::too_many_arguments)]
 pub async fn update_secret(
     conn: impl PgExecutor<'_>,
