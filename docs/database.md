@@ -147,6 +147,29 @@ Migration `0011_knowledge_base` introduces the personal knowledge base and vecto
 
 **Rebuild invariant.** Embeddings are derived data. Deleting every row of `knowledge_embeddings` and clearing `notes.indexed_content_hash` loses nothing: `knowledge.backfill_embeddings` re-queues every item and the chunks come back identical (a test pins this). The same path re-tags everything after an `EMBEDDING_MODEL` change.
 
+## Configuration Management and Encrypted Secrets (`0015_configuration_and_secrets.sql`)
+
+Migration `0015_configuration_and_secrets` introduces system-wide dynamic configuration, an encrypted credentials vault, and an administrative audit log:
+
+- **`accounts.role` column:** `TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin'))`. Only `admin` accounts can read or write system settings and secrets.
+- **`app_settings` table:**
+  - `key TEXT PRIMARY KEY` (validated against the 32-key `SettingKey` enum)
+  - `value JSONB NOT NULL`, `value_type TEXT NOT NULL CHECK (value_type IN ('string', 'integer', 'float', 'boolean', 'json'))`
+  - `description TEXT NOT NULL DEFAULT ''`, `is_sensitive BOOLEAN NOT NULL DEFAULT FALSE`, `hot_reloadable BOOLEAN NOT NULL DEFAULT TRUE`, `category TEXT NOT NULL DEFAULT 'general'`
+  - `updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`, `updated_by UUID REFERENCES accounts(id) ON DELETE SET NULL`
+- **`provider_secrets` table:**
+  - `id UUID PRIMARY KEY DEFAULT gen_random_uuid()`
+  - `provider TEXT NOT NULL`, `name TEXT NOT NULL DEFAULT 'default'` with `UNIQUE (provider, name)`
+  - `encrypted_value BYTEA NOT NULL` (AES-256-GCM ciphertext + 16-byte authentication tag), `nonce BYTEA NOT NULL` (12-byte CSPRNG nonce, `CHECK (octet_length(nonce) = 12)`), `key_version INTEGER NOT NULL DEFAULT 1`
+  - `status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled', 'invalid', 'expired'))`
+  - `masked_preview TEXT`, `metadata JSONB NOT NULL DEFAULT '{}'`, `last_tested_at TIMESTAMPTZ`, `last_test_status TEXT`, `last_test_error TEXT`
+  - `created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`, `updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`, `updated_by UUID REFERENCES accounts(id) ON DELETE SET NULL`
+- **`config_audit` table:**
+  - `id BIGSERIAL PRIMARY KEY`, `actor_id UUID REFERENCES accounts(id) ON DELETE SET NULL`
+  - `action TEXT NOT NULL`, `target_type TEXT NOT NULL CHECK (target_type IN ('setting', 'secret'))`, `target_key TEXT NOT NULL`, `outcome TEXT NOT NULL CHECK (outcome IN ('success', 'failure'))`
+  - `detail JSONB`, `created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
+- **Global Scope:** These three tables are system-global rather than per-account owned data; `updated_by` and `actor_id` use `ON DELETE SET NULL` and are registered in `AUDIT_ACTOR_UNTOUCHED` in `db/catalog.rs`.
+
 ## Migrations
 
 `db/migrate.rs::run_migrations` is the only migration mechanism: `sqlx::migrate!("./migrations")` applies every file in `backend/migrations/` in order, tracked in `_sqlx_migrations`, serialised across concurrent boots by sqlx's own advisory lock. Migrations are forward-only — a committed migration is never edited; a mistake is fixed by a new migration, not a rewritten old one.

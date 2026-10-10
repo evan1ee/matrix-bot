@@ -136,6 +136,25 @@ Request bodies are limited to 1 MB for extractors (`DefaultBodyLimit`); `POST /n
 
 Mutations publish `NoteCreated`, `NoteUpdated`, or `NoteDeleted` outbox events with valid `owner_id()`. Background durable jobs (`knowledge.embed`) chunk and embed note content asynchronously for vector search.
 
+## Admin Configuration & Secrets Vault API
+
+Administrative configuration and encrypted secret management endpoints are mounted under `/api/v1/admin` and gated by the `AdminUser` extractor (`role == 'admin'` AND WebAuthn passkey step-up within 5 minutes; all mutating endpoints are registered in `SENSITIVE`):
+
+| Method | Path | Auth | Purpose |
+|---|---|---|---|
+| `GET` | `/api/v1/admin/config-status` | `AdminUser` | System configuration overview (`settings_count`, `custom_settings_count`, `encryption_configured`, `secrets_count`, `active_secrets_count`, `last_reload_at`) |
+| `GET` | `/api/v1/admin/settings` | `AdminUser` | List all 32 catalogued `SettingItem`s with current value, default, type, category, `is_custom`, and `hot_reloadable` flag |
+| `PUT` | `/api/v1/admin/settings/:key` | `AdminUser` | Update a setting (`{ value }`), validate schema/bounds, persist to `app_settings`, record `config_audit`, publish `ConfigUpdated`, and refresh `RuntimeConfigSnapshot` |
+| `DELETE` | `/api/v1/admin/settings/:key` | `AdminUser` | Reset a setting to its built-in default |
+| `GET` | `/api/v1/admin/secrets` | `AdminUser` | List `SecretMetadata` items (`id`, `provider`, `name`, `status`, `key_version`, `masked_preview`, `last_test_status`). Plaintext and ciphertext are never returned |
+| `POST` | `/api/v1/admin/secrets` | `AdminUser` | Encrypt and store a new credential (`{ provider, name?, secret, metadata? }`) using AES-256-GCM with AAD `{provider}:{name}:{key_version}` |
+| `PUT` | `/api/v1/admin/secrets/:id` | `AdminUser` | Replace secret value and/or update status (`{ secret?, status? }`) |
+| `DELETE` | `/api/v1/admin/secrets/:id` | `AdminUser` | Delete an encrypted credential from the vault |
+| `POST` | `/api/v1/admin/secrets/:id/test` | `AdminUser` | Decrypt credential in memory and run live provider connectivity check (`healthy` / `failed`) |
+| `GET` | `/api/v1/admin/audit-logs` | `AdminUser` | Paginated append-only `AuditLogEntry` records (`?limit=50&offset=0`) |
+
+`GET /api/v1/auth/me` includes `role: "user" | "admin"` so the SPA can conditionally display the Admin Console navigation item.
+
 ## Testing passkey auth locally
 
 Everything runs on `localhost`, without HTTPS or a hardware key.

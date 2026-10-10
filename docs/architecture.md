@@ -317,3 +317,31 @@ The notes subsystem (`domain/knowledge/`, `application/knowledge/`, `infrastruct
 - **REST API & Web UI (`frontend/src/modules/knowledge/`):** Axum endpoints at `/api/v1/notes` and `/api/v1/knowledge/search`. React SPA module with live markdown preview, tag filter chips, instant search panel, and keyboard shortcuts (`Escape`, `Cmd/Ctrl+Enter`).
 - **AI & MCP Tools (`llm/tools/knowledge.rs`):** Exposes `knowledge_search`, `knowledge_create_note`, `knowledge_get_note`, and `knowledge_list_tags` to autonomous agent planning loops and external MCP clients (Cursor / Claude Desktop).
 
+## Dynamic Configuration & Encrypted Credentials Vault
+
+The system provides dynamic configuration management, hot-reloading, and authenticated credential storage without service restarts (`domain/config/`, `application/config/`, `infrastructure/postgres/repositories/{app_settings,provider_secrets,config_audit}.rs`, `interface/http/admin/`, `frontend/src/modules/admin/`):
+
+- **Pure Domain (`domain/config/`):**
+  - `SettingKey`: 32 catalogued configuration keys across categories (`General`, `Registration`, `Llm`, `Search`, `Inference`, `Channels`).
+  - `SettingValue`: Strongly typed values (`String`, `Integer`, `Float`, `Boolean`, `Json`) validated against defined bounds and schemas.
+  - `SettingRegistry`: Central registry defining default values, types, categories, and hot-reloadability.
+  - `SecretValue`: Secret container with automatic zeroization (`Zeroize` trait) on drop to prevent heap memory exposure.
+  - `AccountRole`: Role enum (`User` vs `Admin`) on accounts; only `Admin` can inspect or alter system settings and credentials.
+- **Authenticated Encryption at Rest (`infrastructure/crypto/`):**
+  - `AesGcmSecretProtector`: AES-256-GCM encryption with 96-bit CSPRNG nonces and Additional Authenticated Data (AAD) binding (`{provider}:{name}:{key_version}`). Master key loaded from `SECRETS_ENCRYPTION_KEY` (32 bytes base64/hex). Supports dual-key decryption during rotation via `SECRETS_ENCRYPTION_KEY_OLD`.
+  - `FailClosedSecretProtector`: In development without `SECRETS_ENCRYPTION_KEY`, rejects encryption/decryption operations with typed errors while leaving non-secret configuration and environment fallbacks functional. In production, missing key halts boot.
+  - Plaintext and ciphertext are write-only and never exposed in REST responses, DOM, logs, or audit records. Only masked previews (`sk-...9999`) are exposed.
+- **Lock-Free Hot-Reloading (`application/config/runtime.rs`):**
+  - `ArcSwap<RuntimeConfigSnapshot>` holds the active configuration snapshot in memory, updated atomically without lock contention.
+  - Live reloads trigger on transactional outbox events (`ConfigUpdated`, `SecretChanged`), event listener reconnections, and a periodic 60s background safety interval.
+- **Layered Precedence Resolution:**
+  - AI requests resolve with exact precedence: `AiUserConfig > Runtime Snapshot (app_settings + provider_secrets) > Environment (AiEnvConfig) > Defaults`.
+  - Settings marked `hot_reloadable: true` take effect immediately on subsequent requests; `hot_reloadable: false` take effect upon process restart.
+- **Admin Endpoints & Step-Up (`interface/http/admin/`):**
+  - Handlers mounted at `/api/v1/admin/{settings,secrets,config-status,audit-logs}`.
+  - Protected by `AdminUser` extractor requiring both `role == 'admin'` and WebAuthn passkey step-up within 5 minutes.
+  - Append-only audit logging (`config_audit` table) records every administrative change with actor ID, action, target, and outcome.
+- **Provider Connection Testers (`infrastructure/inference/testers/`):**
+  - Live credential verification for OpenAI, Anthropic, Tavily, Telegram, Discord, and Email.
+  - Offline/mock test keys bypass remote calls to ensure predictable and secure test suites.
+

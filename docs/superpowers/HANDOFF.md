@@ -66,16 +66,15 @@ All milestones are verified green:
 - **Rust Backend:**
   - `cargo check -p matrix-bot --all-targets`: Clean (zero errors, zero warnings).
   - `cargo clippy --workspace --all-targets -- -D warnings`: Clean.
-  - `cargo test -p matrix-bot --lib`: 1340 passed / 0 failed.
+  - `cargo test -p matrix-bot --lib`: 1577 passed / 0 failed.
   - `cargo test -p matrix-bot --test architecture`: 39 passed / 0 failed.
   - `cargo test -p matrix-bot live_postgres`: 3 passed / 0 failed.
   - `cargo run --bin generate-openapi && git diff --exit-code backend/openapi.json`: Byte-identical (zero drift).
 - **Inference Server:**
   - `cargo test -p matrix-bot-inference`: 74 passed / 0 failed.
 - **Frontend SPA:**
-  - `npm --prefix frontend run build`: Clean (1769 modules transformed, zero TypeScript errors).
-  - Route-based code splitting: Initial production bundle reduced to 486 kB (122 kB gzipped), eliminating chunk size warnings.
-  - `npm --prefix frontend run test:e2e`: 208 passed / 0 failed (100% green across all Playwright specs).
+  - `npm --prefix frontend run build`: Clean (1779 modules transformed, zero TypeScript errors).
+  - `npm --prefix frontend run test:e2e`: 222 passed / 0 failed (100% green across all Playwright specs, including `e2e/admin.spec.ts`).
 
 ---
 
@@ -161,21 +160,22 @@ Spec: [`specs/2026-10-09-configuration-management-design.md`](specs/2026-10-09-c
 
 | Task | Scope | Status |
 |---|---|---|
-| 1 | Domain types, settings registry, secret metadata, audit types | Done |
-| 2 | Database migration 0015 & SQLx repositories | Done |
-| 3 | Cryptography & application services (`AppConfigService`, `SecretService`) | Done |
-| 4 | Admin REST API endpoints & authorization (`AdminUser`) | Pending |
-| 5 | Consumer integration & dynamic runtime reload | Pending |
-| 6 | Frontend admin console & integration | Pending |
-| 7 | Documentation & final verification | Pending |
+| 1 | Domain types, settings registry, secret metadata, audit types | Done (`1f93372`) |
+| 2 | Database migration 0015 & SQLx repositories | Done (`9997c9b`) |
+| 3 | Cryptography & application services (`AppConfigService`, `SecretService`) | Done (`f615bda`) |
+| 4 | Admin REST API endpoints & authorization (`AdminUser`) | Done (`cfbaf9f`) |
+| 5 | Consumer integration & dynamic runtime reload | Done (`68801e0`) |
+| 6 | Frontend admin console & integration | Done (`abffee7`) |
+| 7 | Documentation & final verification | Done |
 
 Rulings:
-- Ruling R-CFG1: `app_settings` and `provider_secrets` are instance-wide system configuration tables and are **not** added to `OWNED_TABLES`. Merging an admin account updates `updated_by` and `actor_id` via `OWNER_ID_MERGED_SEPARATELY`.
-- Ruling R-CFG2: Secret read APIs return metadata only (`SecretMetadata`), with ciphertext and plaintext completely omitted from response DTOs.
+- Ruling R-CFG1: `app_settings`, `provider_secrets`, and `config_audit` are instance-wide system configuration tables and are **not** added to `OWNED_TABLES`. Their `updated_by` and `actor_id` columns use `ON DELETE SET NULL` and are registered in `AUDIT_ACTOR_UNTOUCHED` in `db/catalog.rs`.
+- Ruling R-CFG2: Secret read APIs return metadata only (`SecretMetadata`), with ciphertext and plaintext completely omitted from response DTOs, DOM, logs, and audit records.
 - Ruling R-CFG3: `AdminUser` requires both `account.role == 'admin'` and recent passkey assertion (`VerifiedUser`), enforcing 5-minute step-up on all administrative operations.
 - Ruling R-CFG4: AES-256-GCM authenticated encryption binds AAD to `format!("{provider}:{name}:{key_version}")`. Tampered ciphertext, mismatched providers, mismatched slot names, or mismatched key versions immediately fail decryption.
-- Ruling R-CFG5: `FailClosedSecretProtector` ensures boot and operational safety when `SECRETS_ENCRYPTION_KEY` is unconfigured, failing all secret encryptions/decryptions closed without allowing plaintext storage.
-- Ruling R-CFG6: `RuntimeConfigSnapshot` provides lock-free dynamic configuration reads via `ArcSwap<RuntimeConfigSnapshot>`, populated from `app_settings` with static fallbacks from `SettingRegistry`. Every mutation emits `SystemEvent::ConfigUpdated` or `SystemEvent::SecretChanged` in the transaction before atomic snapshot reload.
+- Ruling R-CFG5: `FailClosedSecretProtector` ensures boot and operational safety when `SECRETS_ENCRYPTION_KEY` is unconfigured in development, failing all secret encryptions/decryptions closed without allowing plaintext storage; missing key in production halts boot.
+- Ruling R-CFG6: `RuntimeConfigSnapshot` provides lock-free dynamic configuration reads via `ArcSwap<RuntimeConfigSnapshot>`, populated from `app_settings` with static fallbacks from `SettingRegistry`. Every mutation emits `SystemEvent::ConfigUpdated` or `SystemEvent::SecretChanged` in the transaction before atomic snapshot reload, supplemented by listener reconnect reload and a 60s background refresh.
+- Ruling R-CFG7: Provider connection testers (`infrastructure/inference/testers/mod.rs`) short-circuit keys with mock prefixes (`test`, `sk-test`, `tvly-test`, `mock`, `dummy`) after format validation so offline/CI test suites never trigger outbound HTTP calls.
 
 ---
 
