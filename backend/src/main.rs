@@ -113,6 +113,37 @@ async fn async_main() -> Result<()> {
         return Ok(());
     }
 
+    if args.len() > 1 && args[1] == "admin" {
+        tracing_subscriber::fmt()
+            .with_writer(std::io::stderr)
+            .with_env_filter(
+                EnvFilter::try_from_default_env()
+                    .unwrap_or_else(|_| EnvFilter::new("warn,matrix_bot=info")),
+            )
+            .init();
+
+        if args.len() != 4 {
+            anyhow::bail!(
+                "Usage:\n  \
+                 matrix-bot admin grant <account_id>\n  \
+                 matrix-bot admin revoke <account_id>"
+            );
+        }
+
+        let database_url = matrix_bot::config::database_url_from_env()?;
+        let db = Database::connect(&database_url, 2).await?;
+        matrix_bot::db::migrate::run_migrations(&db.pool).await?;
+
+        let services = matrix_bot::application::AppServices::new(&db.pool);
+        let message = services
+            .accounts
+            .run_admin_cli(&args[2], &args[3])
+            .await
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        println!("{message}");
+        return Ok(());
+    }
+
     tracing_subscriber::fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env()

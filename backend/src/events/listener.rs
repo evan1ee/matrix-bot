@@ -25,16 +25,10 @@ pub(crate) async fn run(
     // Seeded once, on the first successful connect: later connects must
     // replay what the outage missed, not skip it.
     let mut needs_seed = true;
-    let mut ttl_interval = tokio::time::interval(std::time::Duration::from_secs(60));
-    ttl_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
     loop {
         tokio::select! {
             _ = shutdown.cancelled() => return,
-            _ = ttl_interval.tick() => {
-                // Safety net: periodic background snapshot reload (spec §11.2)
-                let _ = app_config.reload().await;
-            }
             result = listen(&pool, &hub, &wake, &app_config, &config, &mut needs_seed) => {
                 let Err(err) = result;
                 warn!(error = %err, "Outbox LISTEN failed; SSE pauses, deliveries fall back to polling");
@@ -63,25 +57,39 @@ async fn listen(
     }
     wake.notify_waiters();
     hub.replay(config.replay_window, config.replay_limit).await;
-    let _ = app_config.reload().await;
+    if let Err(err) = app_config.reload().await {
+        warn!(error = %err, "Failed to reload runtime configuration snapshot on LISTEN connect");
+    }
+
+    let mut ttl_interval = tokio::time::interval(std::time::Duration::from_secs(60));
+    ttl_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    // Consume the initial immediate tick so the periodic loop waits 60s.
+    ttl_interval.tick().await;
+
     loop {
-        match listener.next().await? {
-            OutboxSignal::Event(id, account) => {
-                hub.on_notification(id, account).await;
-                wake.notify_waiters();
-                if let Ok(Some(ev)) = hub.outbox().load(id).await {
-                    if ev.event_type == "ConfigUpdated" || ev.event_type == "SecretChanged" {
-                        let _ = app_config.reload().await;
-                    }
+        tokio::select! {
+            _ = ttl_interval.tick() => {
+                if let Err(err) = app_config.reload().await {
+                    warn!(error = %err, "Periodic runtime configuration snapshot reload failed");
                 }
             }
-            OutboxSignal::Reconnected => {
-                warn!("Outbox LISTEN connection was lost and re-established; replaying");
-                wake.notify_waiters();
-                hub.replay(config.replay_window, config.replay_limit).await;
-                let _ = app_config.reload().await;
+            signal = listener.next() => {
+                match signal? {
+                    OutboxSignal::Event(id, account) => {
+                        hub.on_notification(id, account).await;
+                        wake.notify_waiters();
+                    }
+                    OutboxSignal::Reconnected => {
+                        warn!("Outbox LISTEN connection was lost and re-established; replaying");
+                        wake.notify_waiters();
+                        hub.replay(config.replay_window, config.replay_limit).await;
+                        if let Err(err) = app_config.reload().await {
+                            warn!(error = %err, "Failed to reload runtime configuration snapshot after reconnect");
+                        }
+                    }
+                    OutboxSignal::Malformed => {}
+                }
             }
-            OutboxSignal::Malformed => {}
         }
     }
 }

@@ -15,8 +15,8 @@ use sqlx::PgPool;
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
 use crate::domain::config::{
-    ConfigAuditAction, ConfigAuditOutcome, ConfigAuditTarget, ConfigError, SettingKey,
-    SettingRegistry, SettingType, SettingValue,
+    ConfigAuditAction, ConfigAuditEntry, ConfigAuditOutcome, ConfigAuditTarget, ConfigError,
+    SettingDefinition, SettingKey, SettingRegistry, SettingType, SettingValue,
 };
 use crate::domain::events::SystemEvent;
 use crate::infrastructure::postgres::repositories::{
@@ -51,12 +51,40 @@ pub struct ConfigurationStatusDto {
     pub last_reload_at: DateTime<Utc>,
 }
 
+fn parse_validated_setting(
+    def: &SettingDefinition,
+    raw: serde_json::Value,
+) -> Option<SettingValue> {
+    match serde_json::from_value::<SettingValue>(raw) {
+        Ok(val) => match SettingRegistry::validate(def.key, &val) {
+            Ok(()) => Some(val),
+            Err(e) => {
+                tracing::warn!(
+                    key = %def.key,
+                    error = %e,
+                    "Ignoring invalid persisted setting value; falling back to default"
+                );
+                None
+            }
+        },
+        Err(e) => {
+            tracing::warn!(
+                key = %def.key,
+                error = %e,
+                "Failed to deserialize persisted setting value; falling back to default"
+            );
+            None
+        }
+    }
+}
+
 /// Dynamic application configuration service.
 #[derive(Clone)]
 pub struct AppConfigService {
     pool: PgPool,
     snapshot: Arc<ArcSwap<RuntimeConfigSnapshot>>,
     last_reload_at: Arc<ArcSwap<DateTime<Utc>>>,
+    reload_lock: Arc<tokio::sync::Mutex<()>>,
 }
 
 impl AppConfigService {
@@ -66,6 +94,7 @@ impl AppConfigService {
             pool,
             snapshot: Arc::new(ArcSwap::from_pointee(RuntimeConfigSnapshot::default())),
             last_reload_at: Arc::new(ArcSwap::from_pointee(Utc::now())),
+            reload_lock: Arc::new(tokio::sync::Mutex::new(())),
         }
     }
 
@@ -77,6 +106,7 @@ impl AppConfigService {
             pool,
             snapshot: Arc::new(ArcSwap::from_pointee(snap)),
             last_reload_at: Arc::new(ArcSwap::from_pointee(Utc::now())),
+            reload_lock: Arc::new(tokio::sync::Mutex::new(())),
         })
     }
 
@@ -85,8 +115,9 @@ impl AppConfigService {
         self.snapshot.load_full()
     }
 
-    /// Reloads the in-memory snapshot from the database.
+    /// Reloads the in-memory snapshot from the database, serialized to prevent concurrent races.
     pub async fn reload(&self) -> Result<(), AppError> {
+        let _guard = self.reload_lock.lock().await;
         let rows = app_settings::list_settings(&self.pool).await?;
         let new_snap = RuntimeConfigSnapshot::from_persisted(&rows);
         self.snapshot.store(Arc::new(new_snap));
@@ -96,12 +127,12 @@ impl AppConfigService {
 
     /// Reads a single effective setting value.
     pub async fn get_setting(&self, key: SettingKey) -> Result<SettingValue, AppError> {
+        let def = SettingRegistry::definition(key);
         if let Some(row) = app_settings::get_setting(&self.pool, key.as_str()).await? {
-            if let Ok(val) = serde_json::from_value::<SettingValue>(row.value) {
+            if let Some(val) = parse_validated_setting(def, row.value) {
                 return Ok(val);
             }
         }
-        let def = SettingRegistry::definition(key);
         Ok(def.default_value.clone())
     }
 
@@ -120,9 +151,11 @@ impl AppConfigService {
             let key_str = def.key.as_str();
             let (val, is_custom, updated_at, updated_by) =
                 if let Some(row) = row_map.remove(key_str) {
-                    let parsed = serde_json::from_value::<SettingValue>(row.value)
-                        .unwrap_or_else(|_| def.default_value.clone());
-                    (parsed, true, Some(row.updated_at), row.updated_by)
+                    if let Some(parsed) = parse_validated_setting(def, row.value) {
+                        (parsed, true, Some(row.updated_at), row.updated_by)
+                    } else {
+                        (def.default_value.clone(), false, None, None)
+                    }
                 } else {
                     (def.default_value.clone(), false, None, None)
                 };
@@ -149,34 +182,33 @@ impl AppConfigService {
         let def = SettingRegistry::definition(key);
         let key_str = def.key.as_str();
         if let Some(row) = app_settings::get_setting(&self.pool, key_str).await? {
-            let parsed = serde_json::from_value::<SettingValue>(row.value)
-                .unwrap_or_else(|_| def.default_value.clone());
-            Ok(SettingItem {
-                key: key_str.to_string(),
-                value: parsed,
-                default_value: def.default_value.clone(),
-                value_type: def.value_type,
-                description: def.description.to_string(),
-                is_custom: true,
-                hot_reloadable: def.hot_reloadable,
-                category: category_for_key(&def.key).to_string(),
-                updated_at: Some(row.updated_at),
-                updated_by: row.updated_by,
-            })
-        } else {
-            Ok(SettingItem {
-                key: key_str.to_string(),
-                value: def.default_value.clone(),
-                default_value: def.default_value.clone(),
-                value_type: def.value_type,
-                description: def.description.to_string(),
-                is_custom: false,
-                hot_reloadable: def.hot_reloadable,
-                category: category_for_key(&def.key).to_string(),
-                updated_at: None,
-                updated_by: None,
-            })
+            if let Some(parsed) = parse_validated_setting(def, row.value) {
+                return Ok(SettingItem {
+                    key: key_str.to_string(),
+                    value: parsed,
+                    default_value: def.default_value.clone(),
+                    value_type: def.value_type,
+                    description: def.description.to_string(),
+                    is_custom: true,
+                    hot_reloadable: def.hot_reloadable,
+                    category: category_for_key(&def.key).to_string(),
+                    updated_at: Some(row.updated_at),
+                    updated_by: row.updated_by,
+                });
+            }
         }
+        Ok(SettingItem {
+            key: key_str.to_string(),
+            value: def.default_value.clone(),
+            default_value: def.default_value.clone(),
+            value_type: def.value_type,
+            description: def.description.to_string(),
+            is_custom: false,
+            hot_reloadable: def.hot_reloadable,
+            category: category_for_key(&def.key).to_string(),
+            updated_at: None,
+            updated_by: None,
+        })
     }
 
     /// Fetches a paginated slice of configuration audit entries and total count.
@@ -184,22 +216,32 @@ impl AppConfigService {
         &self,
         limit: i64,
         offset: i64,
-    ) -> Result<(Vec<crate::domain::config::ConfigAuditEntry>, i64), AppError> {
+    ) -> Result<(Vec<ConfigAuditEntry>, i64), AppError> {
         let rows = config_audit::list_audit_entries(&self.pool, limit, offset).await?;
         let total = config_audit::count_audit_entries(&self.pool).await?;
 
         let entries = rows
             .into_iter()
             .map(|r| {
-                let action = r
-                    .action
-                    .parse::<ConfigAuditAction>()
-                    .unwrap_or(ConfigAuditAction::SettingUpdated);
-                let outcome = r
-                    .outcome
-                    .parse::<ConfigAuditOutcome>()
-                    .unwrap_or(ConfigAuditOutcome::Success);
-                crate::domain::config::ConfigAuditEntry {
+                let action = r.action.parse::<ConfigAuditAction>().unwrap_or_else(|e| {
+                    tracing::warn!(
+                        audit_id = r.id,
+                        raw_action = %r.action,
+                        error = %e,
+                        "Unknown audit action in config_audit_log; falling back to setting_updated"
+                    );
+                    ConfigAuditAction::SettingUpdated
+                });
+                let outcome = r.outcome.parse::<ConfigAuditOutcome>().unwrap_or_else(|e| {
+                    tracing::warn!(
+                        audit_id = r.id,
+                        raw_outcome = %r.outcome,
+                        error = %e,
+                        "Unknown audit outcome in config_audit_log; falling back to success"
+                    );
+                    ConfigAuditOutcome::Success
+                });
+                ConfigAuditEntry {
                     id: Some(r.id),
                     actor_id: r.actor_id.map(AccountId::new),
                     action,
@@ -232,19 +274,25 @@ impl AppConfigService {
             .map_err(|e| AppError::Validation(format!("Failed to serialize setting value: {e}")))?;
         app_settings::upsert_setting(&mut *tx, key.as_str(), &json_val, Some(actor)).await?;
 
-        // 3. Record audit entry
-        let detail = serde_json::json!({
-            "key": key.as_str(),
-            "new_value": value,
-        });
+        // 3. Record sanitized audit entry
+        let audit_entry = ConfigAuditEntry::new(
+            Some(*actor),
+            ConfigAuditAction::SettingUpdated,
+            ConfigAuditTarget::Setting(key.as_str().to_string()),
+            ConfigAuditOutcome::Success,
+            Some(serde_json::json!({
+                "key": key.as_str(),
+                "new_value": value,
+            })),
+        );
         config_audit::insert_audit_entry(
             &mut *tx,
             Some(actor),
-            ConfigAuditAction::SettingUpdated.as_str(),
-            ConfigAuditTarget::Setting(key.as_str().to_string()).target_type(),
-            key.as_str(),
-            ConfigAuditOutcome::Success.as_str(),
-            Some(&detail),
+            audit_entry.action.as_str(),
+            &audit_entry.target_type,
+            &audit_entry.target_key,
+            audit_entry.outcome.as_str(),
+            audit_entry.detail.as_ref(),
         )
         .await?;
 
@@ -272,20 +320,27 @@ impl AppConfigService {
 
         let mut tx = self.pool.begin().await?;
 
-        app_settings::delete_setting(&mut *tx, key.as_str()).await?;
+        let was_custom = app_settings::delete_setting(&mut *tx, key.as_str()).await?;
 
-        let detail = serde_json::json!({
-            "key": key.as_str(),
-            "reset_to_default": def.default_value,
-        });
+        let audit_entry = ConfigAuditEntry::new(
+            Some(*actor),
+            ConfigAuditAction::SettingReset,
+            ConfigAuditTarget::Setting(key.as_str().to_string()),
+            ConfigAuditOutcome::Success,
+            Some(serde_json::json!({
+                "key": key.as_str(),
+                "was_custom": was_custom,
+                "reset_to_default": def.default_value,
+            })),
+        );
         config_audit::insert_audit_entry(
             &mut *tx,
             Some(actor),
-            ConfigAuditAction::SettingReset.as_str(),
-            ConfigAuditTarget::Setting(key.as_str().to_string()).target_type(),
-            key.as_str(),
-            ConfigAuditOutcome::Success.as_str(),
-            Some(&detail),
+            audit_entry.action.as_str(),
+            &audit_entry.target_type,
+            &audit_entry.target_key,
+            audit_entry.outcome.as_str(),
+            audit_entry.detail.as_ref(),
         )
         .await?;
 
@@ -311,7 +366,8 @@ impl AppConfigService {
         encryption_configured: bool,
     ) -> Result<ConfigurationStatusDto, AppError> {
         let settings = app_settings::list_settings(&self.pool).await?;
-        let custom_count = settings.len();
+        let snap = RuntimeConfigSnapshot::from_persisted(&settings);
+        let custom_count = snap.customized_count();
         let total_settings = SettingRegistry::all().len();
 
         let secrets_meta = provider_secrets::list_secret_metadata(&self.pool).await?;
@@ -339,8 +395,6 @@ fn category_for_key(key: &SettingKey) -> &'static str {
         "search"
     } else if k.starts_with("inference.") {
         "inference"
-    } else if k.starts_with("channels.") {
-        "channels"
     } else if k.starts_with("registration.") {
         "registration"
     } else {

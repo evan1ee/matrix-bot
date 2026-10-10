@@ -83,10 +83,6 @@ impl Hub {
         }
     }
 
-    pub fn outbox(&self) -> &OutboxService {
-        &self.outbox
-    }
-
     pub fn subscribe(&self, account: AccountId) -> Subscription {
         let (tx, rx) = mpsc::channel(self.capacity);
         let key = {

@@ -3,7 +3,7 @@
 //! Provides lock-free, zero-allocation runtime setting lookups with fallback
 //! to static defaults defined in `SettingRegistry`.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::domain::config::{SettingKey, SettingRegistry, SettingValue};
 use crate::infrastructure::postgres::repositories::app_settings::SettingRow;
@@ -12,6 +12,7 @@ use crate::infrastructure::postgres::repositories::app_settings::SettingRow;
 #[derive(Debug, Clone)]
 pub struct RuntimeConfigSnapshot {
     values: HashMap<SettingKey, SettingValue>,
+    customized: HashSet<SettingKey>,
 }
 
 impl Default for RuntimeConfigSnapshot {
@@ -24,22 +25,58 @@ impl RuntimeConfigSnapshot {
     /// Builds a snapshot from persisted database rows, falling back to registry defaults.
     pub fn from_persisted(rows: &[SettingRow]) -> Self {
         let mut values = HashMap::new();
+        let mut customized = HashSet::new();
 
         // 1. Initialize with all registered defaults
         for def in SettingRegistry::all() {
             values.insert(def.key, def.default_value.clone());
         }
 
-        // 2. Override with persisted rows
+        // 2. Override with persisted rows after validating against registry rules
         for row in rows {
-            if let Ok(key) = row.key.parse::<SettingKey>() {
-                if let Ok(val) = serde_json::from_value::<SettingValue>(row.value.clone()) {
-                    values.insert(key, val);
+            match row.key.parse::<SettingKey>() {
+                Ok(key) => match serde_json::from_value::<SettingValue>(row.value.clone()) {
+                    Ok(val) => match SettingRegistry::validate(key, &val) {
+                        Ok(()) => {
+                            values.insert(key, val);
+                            customized.insert(key);
+                        }
+                        Err(e) => {
+                            tracing::warn!(
+                                key = %row.key,
+                                error = %e,
+                                "Ignoring invalid persisted setting value; falling back to default"
+                            );
+                        }
+                    },
+                    Err(e) => {
+                        tracing::warn!(
+                            key = %row.key,
+                            error = %e,
+                            "Failed to deserialize persisted setting value; falling back to default"
+                        );
+                    }
+                },
+                Err(_) => {
+                    tracing::warn!(
+                        key = %row.key,
+                        "Ignoring unknown persisted setting key in app_settings"
+                    );
                 }
             }
         }
 
-        Self { values }
+        Self { values, customized }
+    }
+
+    /// Returns whether a setting has an explicit database override.
+    pub fn is_customized(&self, key: SettingKey) -> bool {
+        self.customized.contains(&key)
+    }
+
+    /// Returns the count of valid customized settings currently active in the snapshot.
+    pub fn customized_count(&self) -> usize {
+        self.customized.len()
     }
 
     /// Fetches the effective value for a setting key.
@@ -118,6 +155,16 @@ impl RuntimeConfigSnapshot {
         self.get_str(SettingKey::InferenceSttBaseUrl).unwrap_or("")
     }
 
+    pub fn inference_stt_model(&self) -> &str {
+        self.get_str(SettingKey::InferenceSttModel)
+            .unwrap_or("sensevoice-small")
+    }
+
+    pub fn inference_stt_language(&self) -> &str {
+        self.get_str(SettingKey::InferenceSttLanguage)
+            .unwrap_or("auto")
+    }
+
     pub fn inference_tts_enabled(&self) -> bool {
         self.get_bool(SettingKey::InferenceTtsEnabled)
     }
@@ -126,26 +173,23 @@ impl RuntimeConfigSnapshot {
         self.get_str(SettingKey::InferenceTtsBaseUrl).unwrap_or("")
     }
 
+    pub fn inference_tts_model(&self) -> &str {
+        self.get_str(SettingKey::InferenceTtsModel)
+            .unwrap_or("kokoro")
+    }
+
+    pub fn inference_tts_voice(&self) -> &str {
+        self.get_str(SettingKey::InferenceTtsVoice).unwrap_or("0")
+    }
+
+    pub fn inference_tts_dialect(&self) -> &str {
+        self.get_str(SettingKey::InferenceTtsDialect)
+            .unwrap_or("openai")
+    }
+
     pub fn inference_embedding_base_url(&self) -> &str {
         self.get_str(SettingKey::InferenceEmbeddingBaseUrl)
             .unwrap_or("")
-    }
-
-    pub fn inference_embedding_model(&self) -> &str {
-        self.get_str(SettingKey::InferenceEmbeddingModel)
-            .unwrap_or("multilingual-e5-small")
-    }
-
-    pub fn channels_discord_enabled(&self) -> bool {
-        self.get_bool(SettingKey::ChannelsDiscordEnabled)
-    }
-
-    pub fn channels_telegram_enabled(&self) -> bool {
-        self.get_bool(SettingKey::ChannelsTelegramEnabled)
-    }
-
-    pub fn channels_email_enabled(&self) -> bool {
-        self.get_bool(SettingKey::ChannelsEmailEnabled)
     }
 
     pub fn registration_allow_link_signup(&self) -> bool {
@@ -165,7 +209,7 @@ mod tests {
         assert_eq!(snapshot.llm_default_model(), "gpt-4o-mini");
         assert_eq!(snapshot.llm_request_timeout_seconds(), 60);
         assert!(snapshot.search_tavily_enabled());
-        assert!(!snapshot.channels_discord_enabled());
+        assert!(snapshot.registration_allow_link_signup());
     }
 
     #[test]
@@ -178,8 +222,8 @@ mod tests {
                 updated_by: None,
             },
             SettingRow {
-                key: "channels.discord.enabled".to_string(),
-                value: serde_json::json!(true),
+                key: "registration.allow_link_signup".to_string(),
+                value: serde_json::json!(false),
                 updated_at: Utc::now(),
                 updated_by: None,
             },
@@ -187,7 +231,7 @@ mod tests {
 
         let snapshot = RuntimeConfigSnapshot::from_persisted(&rows);
         assert_eq!(snapshot.llm_default_model(), "claude-3-5-sonnet");
-        assert!(snapshot.channels_discord_enabled());
+        assert!(!snapshot.registration_allow_link_signup());
         // Defaults preserved for unchanged settings
         assert_eq!(snapshot.llm_default_provider(), "openai");
     }

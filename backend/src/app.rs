@@ -202,7 +202,15 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
             }
         };
 
+    let app_config = crate::application::config::AppConfigService::load(db.pool.clone())
+        .await
+        .unwrap_or_else(|e| {
+            warn!("Failed to preload app_settings on startup ({e}); using defaults");
+            crate::application::config::AppConfigService::new(db.pool.clone())
+        });
+
     let services = AppServices::new(&db.pool)
+        .with_app_config(app_config)
         .with_secret_protector(secret_protector)
         .with_link_config(config.web_url.clone(), config.link_signup_allowlist.clone())
         .with_storage(storage)

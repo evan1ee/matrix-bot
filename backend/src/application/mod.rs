@@ -147,7 +147,9 @@ impl AppServices {
         let life = LifeService::new(pool.clone());
         // Boot wiring replaces this with the deployment's `WEB_URL` and
         // allowlist through `with_link_config`.
-        let link = LinkService::new(pool.clone(), String::new(), Default::default());
+        let app_config = AppConfigService::new(pool.clone());
+        let link = LinkService::new(pool.clone(), String::new(), Default::default())
+            .with_app_config(app_config.clone());
         let llm = LlmService::new(pool.clone());
         let mcp = McpService::new(pool.clone());
         let rooms = RoomService::new(pool.clone(), settings.clone(), identity.clone());
@@ -158,7 +160,6 @@ impl AppServices {
         let webhooks = WebhookService::new(pool.clone());
         let portfolio = PortfolioService::new(pool.clone());
         let outbox = OutboxService::new(pool.clone());
-        let app_config = AppConfigService::new(pool.clone());
         let protector: Arc<dyn crate::infrastructure::crypto::SecretProtector> =
             Arc::new(crate::infrastructure::crypto::FailClosedSecretProtector);
         let secrets = SecretService::new(pool.clone(), protector);
@@ -207,7 +208,8 @@ impl AppServices {
                 Arc::new(
                     crate::infrastructure::inference::embedding::MockEmbeddingProvider::default(),
                 ),
-            ),
+            )
+            .with_app_config(app_config.clone()),
             app_config,
             secrets,
         }
@@ -258,6 +260,8 @@ impl AppServices {
 
     /// Sets a pre-loaded application configuration service.
     pub fn with_app_config(mut self, app_config: AppConfigService) -> Self {
+        self.link = self.link.with_app_config(app_config.clone());
+        self.knowledge_search = self.knowledge_search.with_app_config(app_config.clone());
         self.app_config = app_config;
         self
     }
