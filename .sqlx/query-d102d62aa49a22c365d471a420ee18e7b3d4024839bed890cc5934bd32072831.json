@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE config_audit_log SET actor_id = $1 WHERE actor_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "d102d62aa49a22c365d471a420ee18e7b3d4024839bed890cc5934bd32072831"
+}

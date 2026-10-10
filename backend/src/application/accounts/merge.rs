@@ -81,6 +81,12 @@ impl MergeService {
             repo_merge::discard_account_table(tx, table, from).await?;
         }
 
+        // Remap administrative audit log and settings ownership
+        crate::infrastructure::postgres::repositories::config_audit::remap_admin_audit_and_settings(
+            tx, from, into,
+        )
+        .await?;
+
         repo_merge::delete_account(tx, from).await?;
 
         Ok(MergeOutcome { moved, discarded })

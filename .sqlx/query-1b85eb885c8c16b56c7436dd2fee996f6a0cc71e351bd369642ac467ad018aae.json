@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE app_settings SET updated_by = $1 WHERE updated_by = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1b85eb885c8c16b56c7436dd2fee996f6a0cc71e351bd369642ac467ad018aae"
+}

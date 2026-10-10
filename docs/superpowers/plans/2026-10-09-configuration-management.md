@@ -94,20 +94,20 @@ Pure domain code; zero SQL, zero external network, zero crypto implementations i
 
 ### Task 2: Database Migration 0014 and Repositories (§5, §9.1, Phase 2)
 
-- [ ] Write `backend/migrations/0014_configuration_and_secrets.sql`:
+- [x] Write `backend/migrations/0015_configuration_and_secrets.sql` (0014 taken by notes):
   - Add `role` column to `accounts` (`role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin'))`).
   - Create table `app_settings` (`key TEXT PRIMARY KEY`, `value JSONB NOT NULL`, `updated_at TIMESTAMPTZ`, `updated_by UUID REFERENCES accounts(id) ON DELETE SET NULL`).
   - Create table `provider_secrets` (`id UUID PRIMARY KEY DEFAULT gen_random_uuid()`, `provider TEXT NOT NULL`, `name TEXT NOT NULL DEFAULT 'default'`, `secret_ciphertext BYTEA NOT NULL`, `nonce BYTEA NOT NULL`, `key_version INT NOT NULL DEFAULT 1`, `status TEXT NOT NULL DEFAULT 'active'`, `created_at TIMESTAMPTZ`, `updated_at TIMESTAMPTZ`, `updated_by UUID REFERENCES accounts(id) ON DELETE SET NULL`, `last_tested_at TIMESTAMPTZ`, `last_test_status TEXT`, `last_test_error TEXT`, `metadata JSONB`, `CONSTRAINT uq_provider_secrets_slot UNIQUE (provider, name)`).
   - Create table `config_audit_log` (`id BIGSERIAL PRIMARY KEY`, `actor_id UUID REFERENCES accounts(id) ON DELETE SET NULL`, `action TEXT NOT NULL`, `target_type TEXT NOT NULL`, `target_key TEXT NOT NULL`, `outcome TEXT NOT NULL`, `detail JSONB`, `created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP`).
-- [ ] Verify `OWNED_TABLES` invariants: neither `app_settings` nor `provider_secrets` is in `OWNED_TABLES` (global tables).
-- [ ] Update `domain/accounts/merge.rs`:
+- [x] Verify `OWNED_TABLES` invariants: neither `app_settings` nor `provider_secrets` is in `OWNED_TABLES` (global tables).
+- [x] Update `domain/accounts/merge.rs` & `application/accounts/merge.rs`:
   - Remap `config_audit_log.actor_id`, `app_settings.updated_by`, and `provider_secrets.updated_by` to the winning account on admin merge.
-- [ ] Repository `infrastructure/postgres/repositories/app_settings.rs`:
+- [x] Repository `infrastructure/postgres/repositories/app_settings.rs`:
   - `get_setting(executor, key) -> Result<Option<SettingRow>>`
   - `list_settings(executor) -> Result<Vec<SettingRow>>`
   - `upsert_setting(executor, key, value, updated_by) -> Result<()>`
   - `delete_setting(executor, key) -> Result<bool>`
-- [ ] Repository `infrastructure/postgres/repositories/provider_secrets.rs`:
+- [x] Repository `infrastructure/postgres/repositories/provider_secrets.rs`:
   - `list_secret_metadata(executor) -> Result<Vec<SecretMetadataRow>>`
   - `get_secret_by_id(executor, id) -> Result<Option<EncryptedSecretRow>>`
   - `get_secret_by_provider(executor, provider, name) -> Result<Option<EncryptedSecretRow>>`
@@ -115,15 +115,15 @@ Pure domain code; zero SQL, zero external network, zero crypto implementations i
   - `update_secret(executor, id, ciphertext, nonce, key_version, updated_by) -> Result<()>`
   - `update_test_status(executor, id, status, error, tested_at) -> Result<()>`
   - `delete_secret(executor, id) -> Result<bool>`
-- [ ] Repository `infrastructure/postgres/repositories/config_audit.rs`:
+- [x] Repository `infrastructure/postgres/repositories/config_audit.rs`:
   - `insert_audit_entry(executor, entry) -> Result<()>`
   - `list_audit_entries(executor, limit, offset) -> Result<Vec<ConfigAuditRow>>`
-- [ ] Integration tests in `infrastructure/postgres/repositories/` against PostgreSQL test schema:
+- [x] Integration tests in `infrastructure/postgres/repositories/` against PostgreSQL test schema:
   - Setting upsert and delete round-trips.
   - Secret unique constraint `(provider, name)` violation handling.
   - Audit log insertions with null and non-null actor IDs.
-- [ ] Run `cargo sqlx prepare --workspace --check -- -p matrix-bot --all-targets` and commit `.sqlx/`.
-- [ ] Gates: `cargo test -p matrix-bot live_postgres -- --ignored --test-threads=1`, `cargo clippy`.
+- [x] Run `cargo sqlx prepare --workspace --check -- -p matrix-bot --all-targets` and commit `.sqlx/`.
+- [x] Gates: `cargo test -p matrix-bot live_postgres -- --ignored --test-threads=1`, `cargo clippy`.
 
 ---
 

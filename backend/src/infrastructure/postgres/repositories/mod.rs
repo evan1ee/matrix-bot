@@ -4,7 +4,9 @@
 
 pub mod accounts;
 pub mod agent;
+pub mod app_settings;
 pub mod bookmarks;
+pub mod config_audit;
 pub mod finance;
 pub mod footprints;
 pub mod habits;
@@ -17,6 +19,7 @@ pub mod llm;
 pub mod mcp;
 pub mod outbox;
 pub mod portfolio;
+pub mod provider_secrets;
 pub mod reaction_targets;
 pub mod recurring_bills;
 pub mod reminders;

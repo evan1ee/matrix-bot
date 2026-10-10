@@ -245,7 +245,9 @@ impl std::str::FromStr for AccountRole {
         match s {
             "user" => Ok(Self::User),
             "admin" => Ok(Self::Admin),
-            _ => Err(AccountsError::Validation(format!("unknown account role: {s}"))),
+            _ => Err(AccountsError::Validation(format!(
+                "unknown account role: {s}"
+            ))),
         }
     }
 }
@@ -277,12 +279,20 @@ impl Account {
 }
 
 /// Checks whether an account id or platform identity is in the admin allowlist string (comma-separated).
-pub fn is_admin_in_allowlist(admin_users_cfg: &str, account_id: &AccountId, identities: &[&str]) -> bool {
+pub fn is_admin_in_allowlist(
+    admin_users_cfg: &str,
+    account_id: &AccountId,
+    identities: &[&str],
+) -> bool {
     let trimmed = admin_users_cfg.trim();
     if trimmed.is_empty() {
         return false;
     }
-    for entry in trimmed.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+    for entry in trimmed
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+    {
         if let Ok(parsed_id) = entry.parse::<AccountId>() {
             if parsed_id == *account_id {
                 return true;
@@ -765,7 +775,15 @@ mod tests {
 
         let cfg = format!("{},@superadmin:matrix.org", admin_id);
         assert!(is_admin_in_allowlist(&cfg, &admin_id, &[]));
-        assert!(is_admin_in_allowlist(&cfg, &other_id, &["@superadmin:matrix.org"]));
-        assert!(!is_admin_in_allowlist(&cfg, &other_id, &["@regular:matrix.org"]));
+        assert!(is_admin_in_allowlist(
+            &cfg,
+            &other_id,
+            &["@superadmin:matrix.org"]
+        ));
+        assert!(!is_admin_in_allowlist(
+            &cfg,
+            &other_id,
+            &["@regular:matrix.org"]
+        ));
     }
 }

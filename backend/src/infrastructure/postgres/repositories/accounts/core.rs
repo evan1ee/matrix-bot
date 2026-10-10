@@ -7,6 +7,7 @@ struct AccountRow {
     id: uuid::Uuid,
     display_name: String,
     status: String,
+    role: String,
     created_at: Option<DateTime<Utc>>,
 }
 
@@ -16,8 +17,8 @@ impl From<AccountRow> for Account {
             id: AccountId::new(row.id),
             display_name: row.display_name,
             status: row.status,
+            role: row.role.parse().unwrap_or_default(),
             created_at: row.created_at,
-            role: crate::domain::accounts::AccountRole::User,
         }
     }
 }
@@ -82,12 +83,28 @@ pub async fn find(
 ) -> Result<Option<Account>, sqlx::Error> {
     let row = sqlx::query_as!(
         AccountRow,
-        "SELECT id, display_name, status, created_at FROM accounts WHERE id = $1",
+        "SELECT id, display_name, status, role, created_at FROM accounts WHERE id = $1",
         account_id.as_uuid(),
     )
     .fetch_optional(conn)
     .await?;
     Ok(row.map(Into::into))
+}
+
+/// Updates an account's role.
+pub async fn update_role(
+    conn: impl sqlx::PgExecutor<'_>,
+    account_id: &AccountId,
+    role: crate::domain::accounts::AccountRole,
+) -> Result<bool, sqlx::Error> {
+    let res = sqlx::query!(
+        "UPDATE accounts SET role = $1 WHERE id = $2",
+        role.as_str(),
+        account_id.as_uuid(),
+    )
+    .execute(conn)
+    .await?;
+    Ok(res.rows_affected() > 0)
 }
 
 /// Takes the account row lock for the rest of the transaction, serialising

@@ -168,7 +168,10 @@ pub fn sanitize_audit_detail(val: &serde_json::Value) -> serde_json::Value {
                     || lower.contains("ciphertext")
                     || lower.contains("nonce")
                 {
-                    sanitized.insert(k.clone(), serde_json::Value::String("[REDACTED]".to_string()));
+                    sanitized.insert(
+                        k.clone(),
+                        serde_json::Value::String("[REDACTED]".to_string()),
+                    );
                 } else {
                     sanitized.insert(k.clone(), sanitize_audit_detail(v));
                 }

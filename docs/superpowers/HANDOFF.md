@@ -162,7 +162,7 @@ Spec: [`specs/2026-10-09-configuration-management-design.md`](specs/2026-10-09-c
 | Task | Scope | Status |
 |---|---|---|
 | 1 | Domain types, settings registry, secret metadata, audit types | Done |
-| 2 | Database migration 0015 & SQLx repositories | Pending |
+| 2 | Database migration 0015 & SQLx repositories | Done |
 | 3 | Cryptography & application services (`AppConfigService`, `SecretService`) | Pending |
 | 4 | Admin REST API endpoints & authorization (`AdminUser`) | Pending |
 | 5 | Consumer integration & dynamic runtime reload | Pending |

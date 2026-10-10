@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE provider_secrets SET updated_by = $1 WHERE updated_by = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2fb3de5fb4c579317ecff71b17c17b82e79e42ecc208da8bacb843e71655a97e"
+}

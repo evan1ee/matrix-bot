@@ -327,10 +327,7 @@ pub enum ConfigError {
     },
 
     #[error("Validation failed for {key}: {reason}")]
-    Validation {
-        key: String,
-        reason: String,
-    },
+    Validation { key: String, reason: String },
 }
 
 #[cfg(test)]
