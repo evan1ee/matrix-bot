@@ -40,7 +40,33 @@ pub async fn run_turn(
     let user_config = llm_repo::get_user_config(ctx.pool, ctx.owner_id)
         .await
         .map_err(|e| AiError::Db(e.to_string()))?;
-    let resolved_config = ResolvedAiConfig::from_user_config(ctx.config, user_config.as_ref());
+
+    let snapshot = ctx.services.app_config.snapshot();
+    let provider_secret_key = {
+        let provider_name = snapshot.llm_default_provider();
+        let provider_opt = match provider_name.to_lowercase().as_str() {
+            "anthropic" => Some(crate::domain::secrets::SecretProvider::Anthropic),
+            "openai" => Some(crate::domain::secrets::SecretProvider::OpenAi),
+            _ => None,
+        };
+        if let Some(p) = provider_opt {
+            ctx.services
+                .secrets
+                .get_decrypted_secret(p, "default")
+                .await
+                .ok()
+                .flatten()
+                .map(|sec| sec.expose_secret().to_string())
+        } else {
+            None
+        }
+    };
+    let resolved_config = ResolvedAiConfig::resolve(
+        ctx.config,
+        Some(&snapshot),
+        provider_secret_key.as_deref(),
+        user_config.as_ref(),
+    );
 
     let conversation = if let Some(conv_id) = conversation_id_override {
         llm_repo::get_conversation(ctx.pool, conv_id, ctx.owner_id)

@@ -470,3 +470,6 @@ mod tests {
         assert_eq!(status.settings_count, SettingRegistry::all().len());
     }
 }
+
+#[cfg(test)]
+mod runtime_tests;

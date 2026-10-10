@@ -16,23 +16,28 @@ pub struct ResolvedAiConfig {
     pub max_tokens: i64,
 }
 
+use crate::application::config::RuntimeConfigSnapshot;
+
 impl ResolvedAiConfig {
     pub fn from_user_config(
         ai: &crate::config::AiEnvConfig,
+        user_config: Option<&AiUserConfig>,
+    ) -> Self {
+        Self::resolve(ai, None, None, user_config)
+    }
+
+    /// Resolves active AI configuration enforcing precedence:
+    /// User Config > Runtime Snapshot (app_settings + provider_secrets) > Environment (AiEnvConfig) > Defaults
+    pub fn resolve(
+        ai: &crate::config::AiEnvConfig,
+        snapshot: Option<&RuntimeConfigSnapshot>,
+        provider_secret_key: Option<&str>,
         user_config: Option<&AiUserConfig>,
     ) -> Self {
         let env_base = ai
             .base_url
             .clone()
             .unwrap_or_else(|| "https://api.openai.com/v1".to_string());
-        let env_key = ai.api_key.clone();
-        let env_model = ai.model.clone().unwrap_or_else(|| {
-            if env_base.contains("x.ai") {
-                "grok-4.6".to_string()
-            } else {
-                "gpt-4o-mini".to_string()
-            }
-        });
 
         let api_base_url = user_config
             .and_then(|c| c.api_base_url.as_ref())
@@ -44,27 +49,40 @@ impl ResolvedAiConfig {
             .and_then(|c| c.api_key.as_ref())
             .filter(|s| !s.trim().is_empty())
             .cloned()
-            .or(env_key);
+            .or_else(|| provider_secret_key.map(|s| s.to_string()))
+            .or_else(|| ai.api_key.clone());
+
+        let default_model_from_snapshot = snapshot.map(|s| s.llm_default_model().to_string());
+        let env_or_default_model = ai.model.clone().unwrap_or_else(|| {
+            if api_base_url.contains("x.ai") {
+                "grok-4.6".to_string()
+            } else {
+                "gpt-4o-mini".to_string()
+            }
+        });
 
         let model_name = user_config
             .and_then(|c| c.model_name.as_ref())
             .filter(|s| !s.trim().is_empty())
             .cloned()
-            .unwrap_or(env_model);
+            .or(default_model_from_snapshot)
+            .unwrap_or(env_or_default_model);
 
         let system_prompt = user_config
             .and_then(|c| c.system_prompt.as_ref())
             .filter(|s| !s.trim().is_empty())
             .cloned();
 
+        let default_temperature = snapshot.map(|s| s.llm_default_temperature()).unwrap_or(0.7);
         let temperature = user_config
             .and_then(|c| c.temperature)
-            .unwrap_or(0.7)
+            .unwrap_or(default_temperature)
             .clamp(0.0, 2.0);
 
+        let default_max_tokens = snapshot.map(|s| s.llm_default_max_tokens()).unwrap_or(2048);
         let max_tokens = user_config
             .and_then(|c| c.max_tokens)
-            .unwrap_or(2048)
+            .unwrap_or(default_max_tokens)
             .clamp(64, 8192);
 
         Self {
@@ -172,6 +190,67 @@ mod tests {
             ..config.clone()
         };
         assert_eq!(keyless.endpoint().api_key, None);
+    }
+
+    #[test]
+    fn test_resolution_precedence() {
+        use crate::infrastructure::postgres::repositories::app_settings::SettingRow;
+        use chrono::Utc;
+
+        let ai_env = crate::config::AiEnvConfig {
+            base_url: Some("https://api.env.com/v1".to_string()),
+            api_key: Some("env-key".to_string()),
+            model: Some("env-model".to_string()),
+            proxy: None,
+            allow_private_base_url: false,
+        };
+
+        let rows = vec![
+            SettingRow {
+                key: "llm.default_model".to_string(),
+                value: serde_json::json!("snapshot-model"),
+                updated_at: Utc::now(),
+                updated_by: None,
+            },
+            SettingRow {
+                key: "llm.default_temperature".to_string(),
+                value: serde_json::json!(0.2),
+                updated_at: Utc::now(),
+                updated_by: None,
+            },
+        ];
+        let snapshot = RuntimeConfigSnapshot::from_persisted(&rows);
+
+        // 1. Snapshot overrides env model, provider secret overrides env key
+        let resolved =
+            ResolvedAiConfig::resolve(&ai_env, Some(&snapshot), Some("secret-key"), None);
+        assert_eq!(resolved.model_name, "snapshot-model");
+        assert_eq!(resolved.api_key.as_deref(), Some("secret-key"));
+        assert_eq!(resolved.temperature, 0.2);
+
+        // 2. User config overrides snapshot and secret
+        let user_config = AiUserConfig {
+            owner_id: "u1".to_string(),
+            api_base_url: None,
+            api_key: Some("user-key".to_string()),
+            model_name: Some("user-model".to_string()),
+            system_prompt: None,
+            temperature: Some(0.9),
+            max_tokens: Some(4000),
+            max_history_turns: None,
+            updated_at: Utc::now().to_rfc3339(),
+            has_api_key: true,
+        };
+        let resolved_user = ResolvedAiConfig::resolve(
+            &ai_env,
+            Some(&snapshot),
+            Some("secret-key"),
+            Some(&user_config),
+        );
+        assert_eq!(resolved_user.model_name, "user-model");
+        assert_eq!(resolved_user.api_key.as_deref(), Some("user-key"));
+        assert_eq!(resolved_user.temperature, 0.9);
+        assert_eq!(resolved_user.max_tokens, 4000);
     }
 
     #[ignore]

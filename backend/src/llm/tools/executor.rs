@@ -42,7 +42,7 @@ pub async fn execute(
         if query.is_empty() {
             return Err("Missing 'query' parameter for web_search".to_string());
         }
-        return crate::llm::search::execute_web_search(query).await;
+        return crate::llm::search::execute_web_search_with_services(services, query).await;
     }
 
     if name == "x_search" {

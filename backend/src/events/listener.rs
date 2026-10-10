@@ -18,16 +18,24 @@ pub(crate) async fn run(
     pool: PgPool,
     hub: Hub,
     wake: Arc<Notify>,
+    app_config: crate::application::config::AppConfigService,
     config: Arc<EventsConfig>,
     shutdown: CancellationToken,
 ) {
     // Seeded once, on the first successful connect: later connects must
     // replay what the outage missed, not skip it.
     let mut needs_seed = true;
+    let mut ttl_interval = tokio::time::interval(std::time::Duration::from_secs(60));
+    ttl_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
     loop {
         tokio::select! {
             _ = shutdown.cancelled() => return,
-            result = listen(&pool, &hub, &wake, &config, &mut needs_seed) => {
+            _ = ttl_interval.tick() => {
+                // Safety net: periodic background snapshot reload (spec §11.2)
+                let _ = app_config.reload().await;
+            }
+            result = listen(&pool, &hub, &wake, &app_config, &config, &mut needs_seed) => {
                 let Err(err) = result;
                 warn!(error = %err, "Outbox LISTEN failed; SSE pauses, deliveries fall back to polling");
             }
@@ -43,6 +51,7 @@ async fn listen(
     pool: &PgPool,
     hub: &Hub,
     wake: &Notify,
+    app_config: &crate::application::config::AppConfigService,
     config: &EventsConfig,
     needs_seed: &mut bool,
 ) -> sqlx::Result<std::convert::Infallible> {
@@ -54,16 +63,23 @@ async fn listen(
     }
     wake.notify_waiters();
     hub.replay(config.replay_window, config.replay_limit).await;
+    let _ = app_config.reload().await;
     loop {
         match listener.next().await? {
             OutboxSignal::Event(id, account) => {
                 hub.on_notification(id, account).await;
                 wake.notify_waiters();
+                if let Ok(Some(ev)) = hub.outbox().load(id).await {
+                    if ev.event_type == "ConfigUpdated" || ev.event_type == "SecretChanged" {
+                        let _ = app_config.reload().await;
+                    }
+                }
             }
             OutboxSignal::Reconnected => {
                 warn!("Outbox LISTEN connection was lost and re-established; replaying");
                 wake.notify_waiters();
                 hub.replay(config.replay_window, config.replay_limit).await;
+                let _ = app_config.reload().await;
             }
             OutboxSignal::Malformed => {}
         }

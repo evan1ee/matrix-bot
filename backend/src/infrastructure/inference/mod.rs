@@ -7,6 +7,7 @@ pub mod embedding;
 pub mod llm;
 pub mod ocr;
 pub mod stt;
+pub mod testers;
 pub mod tts;
 
 #[cfg(test)]

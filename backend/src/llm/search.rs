@@ -96,6 +96,49 @@ pub fn get_tavily_api_key() -> Option<String> {
         .filter(|k| !k.is_empty())
 }
 
+/// Executes a live web search using active application services.
+///
+/// Inspects `search.tavily.enabled` and decrypted secret key from `services.secrets`
+/// before falling back to `TAVILY_API_KEY` environment variable or DuckDuckGo.
+pub async fn execute_web_search_with_services(
+    services: &crate::application::AppServices,
+    query: &str,
+) -> Result<String, String> {
+    let query_trimmed = query.trim();
+    if query_trimmed.is_empty() {
+        return Err("Search query cannot be empty".to_string());
+    }
+
+    let snapshot = services.app_config.snapshot();
+    let tavily_enabled = snapshot.search_tavily_enabled();
+    let timeout_secs = snapshot.search_timeout_seconds().clamp(1, 120) as u64;
+
+    if tavily_enabled {
+        let tavily_key = match services
+            .secrets
+            .get_decrypted_secret(crate::domain::secrets::SecretProvider::Tavily, "default")
+            .await
+        {
+            Ok(Some(sec)) => Some(sec.expose_secret().to_string()),
+            _ => get_tavily_api_key(),
+        };
+
+        if let Some(api_key) = tavily_key {
+            tracing::info!(
+                "Executing web search via Tavily API for query: '{}'",
+                query_trimmed
+            );
+            return execute_tavily_search_with_timeout(query_trimmed, &api_key, timeout_secs).await;
+        }
+    }
+
+    tracing::info!(
+        "Tavily disabled or API key absent; using DuckDuckGo fallback for: '{}'",
+        query_trimmed
+    );
+    execute_duckduckgo_search(query_trimmed).await
+}
+
 /// Executes a live web search, using Tavily if `TAVILY_API_KEY` is set,
 /// otherwise falling back to DuckDuckGo HTML scraping.
 pub async fn execute_web_search(query: &str) -> Result<String, String> {
@@ -146,7 +189,15 @@ fn build_search_http_client(timeout_secs: u64) -> Result<reqwest::Client, String
 
 /// Executes a web search via the Tavily API (optimized for AI/LLM consumption).
 async fn execute_tavily_search(query: &str, api_key: &str) -> Result<String, String> {
-    let client = build_search_http_client(15)?;
+    execute_tavily_search_with_timeout(query, api_key, 15).await
+}
+
+async fn execute_tavily_search_with_timeout(
+    query: &str,
+    api_key: &str,
+    timeout_secs: u64,
+) -> Result<String, String> {
+    let client = build_search_http_client(timeout_secs)?;
 
     let body = serde_json::json!({
         "api_key": api_key,

@@ -111,6 +111,7 @@ impl EventsRuntime {
             self.pool.clone(),
             self.hub.clone(),
             wake.clone(),
+            self.services.app_config.clone(),
             self.config.clone(),
             shutdown.clone(),
         ));

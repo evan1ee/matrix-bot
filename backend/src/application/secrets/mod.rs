@@ -341,9 +341,59 @@ impl SecretService {
             key_version: existing.key_version,
         };
 
-        // Decrypt credential to verify authenticity and integrity
+        // Decrypt credential to verify authenticity and integrity, then test connectivity
         let (status, error) = match self.protector.decrypt(provider, &existing.name, &encrypted) {
-            Ok(_) => ("healthy".to_string(), None),
+            Ok(secret) => {
+                let test_res = match provider {
+                    SecretProvider::OpenAi => {
+                        crate::infrastructure::inference::testers::test_llm_credential(
+                            "https://api.openai.com/v1",
+                            secret.expose_secret(),
+                        )
+                        .await
+                    }
+                    SecretProvider::Anthropic => {
+                        crate::infrastructure::inference::testers::test_llm_credential(
+                            "https://api.anthropic.com/v1",
+                            secret.expose_secret(),
+                        )
+                        .await
+                    }
+                    SecretProvider::Tavily => {
+                        crate::infrastructure::inference::testers::test_tavily_credential(
+                            secret.expose_secret(),
+                        )
+                        .await
+                    }
+                    SecretProvider::Telegram => {
+                        crate::infrastructure::inference::testers::test_telegram_credential(
+                            secret.expose_secret(),
+                        )
+                        .await
+                    }
+                    SecretProvider::Discord => {
+                        crate::infrastructure::inference::testers::test_discord_credential(
+                            secret.expose_secret(),
+                        )
+                        .await
+                    }
+                    SecretProvider::Email => {
+                        crate::infrastructure::inference::testers::test_email_credential(
+                            secret.expose_secret(),
+                        )
+                        .await
+                    }
+                    SecretProvider::Stt
+                    | SecretProvider::Tts
+                    | SecretProvider::TelegramWebhook
+                    | SecretProvider::S3
+                    | SecretProvider::Generic => Ok(()),
+                };
+                match test_res {
+                    Ok(()) => ("healthy".to_string(), None),
+                    Err(e) => ("unhealthy".to_string(), Some(e)),
+                }
+            }
             Err(e) => ("failed".to_string(), Some(e.to_string())),
         };
 
