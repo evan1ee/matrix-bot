@@ -89,6 +89,7 @@ impl JobHandler for AgentExecuteRunHandler {
         if run.status.is_terminal() || run.status == RunStatus::WaitingApproval {
             return Ok(());
         }
+        let allowed_tools = self.services.agent.tool_policy(&run);
 
         let user_config = self
             .services
@@ -156,7 +157,7 @@ impl JobHandler for AgentExecuteRunHandler {
                 room_id: p.origin_conversation.as_deref().unwrap_or("agent:internal"),
                 goal: &run.goal,
                 steps: &steps,
-                allowed_tools: None,
+                allowed_tools: allowed_tools.as_deref(),
                 custom_sensitive_tools: None,
                 max_steps: budget,
                 config: &resolved_config,
@@ -963,6 +964,152 @@ mod tests {
         assert!(
             second.iter().any(|m| m["role"] == "tool"),
             "the failure is shown as a tool result"
+        );
+    }
+
+    /// A scheduled run of `habit_consistency_review`, started the way the
+    /// scheduler starts it. That task may only call `get_my_habits` and
+    /// `get_daily_log`.
+    async fn scheduled_fixture(
+        seed: &str,
+        replies: Vec<serde_json::Value>,
+    ) -> (
+        AgentExecuteRunHandler,
+        AppServices,
+        AccountId,
+        AgentRunId,
+        crate::llm::test_support::Seen,
+    ) {
+        use crate::llm::test_support::*;
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let services = AppServices::new(&pool);
+        let owner = AccountId::from_seed(seed);
+        crate::db::pool::seed_account(&pool, &owner).await;
+        let (url, seen) = scripted_replies(replies).await;
+        let handler = AgentExecuteRunHandler::new(
+            services.clone(),
+            pool.clone(),
+            FakeOutbound::connected(),
+            ReActEngine::from_proxy(None),
+            test_config(url),
+        );
+        services
+            .agent
+            .schedule_task(
+                &owner,
+                crate::domain::agent::TaskId::new("habit_consistency_review").unwrap(),
+                "0 20 * * 0",
+                serde_json::json!({}),
+                crate::utils::time::now_at_storage_precision() - chrono::Duration::minutes(1),
+            )
+            .await
+            .unwrap();
+        services.agent.enqueue_due_scheduled_tasks().await.unwrap();
+        let run = services
+            .agent
+            .get_active_run(&owner)
+            .await
+            .unwrap()
+            .expect("the scheduler started a run");
+        assert!(run.scheduled_task_id.is_some());
+        (handler, services, owner, run.id, seen)
+    }
+
+    #[tokio::test]
+    async fn scheduled_run_cannot_call_a_tool_outside_its_whitelist() {
+        use crate::llm::test_support::{text_reply, tool_reply};
+        let (handler, services, owner, run_id, seen) = scheduled_fixture(
+            "agent-whitelist-fresh",
+            vec![
+                tool_reply("add_todo", serde_json::json!({"text": "injected"})),
+                text_reply("unused"),
+            ],
+        )
+        .await;
+
+        run_job(&handler, owner, run_id).await;
+
+        let todos = services
+            .todos
+            .list(&owner, None, None, 10, 0)
+            .await
+            .unwrap();
+        assert!(todos.is_empty(), "the call outside the whitelist never ran");
+        let run = services.agent.get_run_internal(run_id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Failed);
+        assert!(
+            run.error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("not allowed by task policy"),
+            "{:?}",
+            run.error
+        );
+        let requests = seen.lock().unwrap();
+        let offered: Vec<&str> = requests[0]["tools"]
+            .as_array()
+            .map(|tools| {
+                tools
+                    .iter()
+                    .filter_map(|t| t["function"]["name"].as_str())
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert!(
+            offered
+                .iter()
+                .all(|n| ["get_my_habits", "get_daily_log"].contains(n)),
+            "only whitelisted tools are offered: {offered:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn resume_refuses_an_approved_call_outside_the_task_whitelist() {
+        use crate::llm::test_support::text_reply;
+        let (handler, services, owner, run_id, _seen) =
+            scheduled_fixture("agent-whitelist-resume", vec![text_reply("unused")]).await;
+        // A held, approved deposit, e.g. one approved before the whitelist
+        // was enforced.
+        let call = serde_json::json!({"amount": "100", "currency": "USD"});
+        let held = AgentStep::new(
+            run_id,
+            1,
+            None,
+            Some("deposit_portfolio_cash".to_string()),
+            Some(call.clone()),
+            None,
+            StepStatus::Blocked,
+            0,
+            crate::utils::time::now_at_storage_precision(),
+        );
+        services.agent.record_step(run_id, &held).await.unwrap();
+        let approval = services
+            .agent
+            .require_approval(run_id, "deposit_portfolio_cash", call)
+            .await
+            .unwrap();
+        services
+            .agent
+            .approve_action(&owner, approval.id)
+            .await
+            .unwrap();
+
+        run_job(&handler, owner, run_id).await;
+
+        assert!(
+            cash_minor(&services, &owner).await.is_empty(),
+            "nothing ran"
+        );
+        let run = services.agent.get_run_internal(run_id).await.unwrap();
+        assert_eq!(run.status, RunStatus::Failed);
+        assert!(
+            run.error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("not allowed by task policy"),
+            "{:?}",
+            run.error
         );
     }
 }

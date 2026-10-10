@@ -120,6 +120,7 @@ impl AgentExecuteRunHandler {
             return Ok(Resume::Stop);
         }
 
+        let allowed_tools = self.services.agent.tool_policy(run);
         let step_ctx = StepContext {
             account_id: owner,
             room_id: payload
@@ -128,7 +129,7 @@ impl AgentExecuteRunHandler {
                 .unwrap_or("agent:internal"),
             goal: &run.goal,
             steps,
-            allowed_tools: None,
+            allowed_tools: allowed_tools.as_deref(),
             custom_sensitive_tools: None,
             max_steps: run.max_steps,
             config,

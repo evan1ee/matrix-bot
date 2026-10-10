@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use super::AgentError;
+use super::{AgentError, AgentRun};
 use crate::domain::accounts::AccountId;
 
 /// Validated identifier for a scheduled or built-in task plugin (e.g. `weekly_bookmark_digest`).
@@ -128,6 +128,24 @@ impl ScheduledTaskRegistry {
         self.tasks.get(task_id).cloned()
     }
 
+    /// The tools `run` may call.
+    ///
+    /// A user-started run is not restricted here (`None`): sensitive tools
+    /// still need the user's approval. A scheduled run runs unattended on
+    /// prompts that can carry untrusted content, so it is held to its task's
+    /// whitelist. If its task is no longer registered, or its stored name is
+    /// not a valid id, it gets no tools at all rather than every tool.
+    pub fn tool_policy(&self, run: &AgentRun) -> Option<Vec<String>> {
+        run.scheduled_task_id?;
+        let task = TaskId::new(&run.task_name)
+            .ok()
+            .and_then(|id| self.get(&id));
+        match task {
+            Some(task) => task.allowed_tools(),
+            None => Some(Vec::new()),
+        }
+    }
+
     /// Lists all registered task plugin definitions.
     pub fn list(&self) -> Vec<Arc<dyn ScheduledAgentTask>> {
         self.tasks.values().cloned().collect()
@@ -135,7 +153,7 @@ impl ScheduledTaskRegistry {
 }
 
 // ===========================================================================
-// Built-in Task Plugins (Stubbed as TODO Extensions)
+// Built-in task plugins. Each one is a goal prompt plus a tool whitelist.
 // ===========================================================================
 
 /// [TODO Extension] Weekly digest summarizing unread bookmarks with AI metadata.
@@ -338,5 +356,52 @@ mod tests {
         let goal = bookmark_task.formulate_goal(&serde_json::json!({"limit": 5, "tag": "rust"}));
         assert!(goal.contains("tagged with 'rust'"));
         assert!(goal.contains("5 items"));
+    }
+
+    use crate::domain::agent::AgentRun;
+
+    fn run_for(task_name: &str, scheduled: bool) -> AgentRun {
+        let mut run = AgentRun::new(
+            AccountId::from_seed("acct_task_policy"),
+            task_name,
+            "Goal",
+            None,
+            None,
+            Utc::now(),
+        )
+        .unwrap();
+        run.scheduled_task_id = scheduled.then(Uuid::new_v4);
+        run
+    }
+
+    #[test]
+    fn user_run_is_not_restricted() {
+        let registry = ScheduledTaskRegistry::with_builtins();
+        assert_eq!(registry.tool_policy(&run_for("user_goal", false)), None);
+    }
+
+    #[test]
+    fn scheduled_run_is_held_to_its_task_whitelist() {
+        let registry = ScheduledTaskRegistry::with_builtins();
+        assert_eq!(
+            registry.tool_policy(&run_for("habit_consistency_review", true)),
+            Some(vec![
+                "get_my_habits".to_string(),
+                "get_daily_log".to_string()
+            ])
+        );
+    }
+
+    #[test]
+    fn unknown_scheduled_task_gets_no_tools() {
+        let registry = ScheduledTaskRegistry::with_builtins();
+        assert_eq!(
+            registry.tool_policy(&run_for("removed_task", true)),
+            Some(Vec::new())
+        );
+        assert_eq!(
+            registry.tool_policy(&run_for("Not A Valid Id!", true)),
+            Some(Vec::new())
+        );
     }
 }

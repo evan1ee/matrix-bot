@@ -97,4 +97,21 @@ mod tests {
         let custom = vec!["custom_risky_tool".to_string()];
         assert!(is_sensitive_tool("custom_risky_tool", Some(&custom)));
     }
+
+    #[test]
+    fn every_builtin_whitelist_names_registered_tools() {
+        let registered: Vec<String> = crate::llm::tools::ToolRegistry::get_tool_definitions()
+            .into_iter()
+            .map(|t| t.function.name)
+            .collect();
+        for task in crate::domain::agent::ScheduledTaskRegistry::with_builtins().list() {
+            for tool in task.allowed_tools().unwrap_or_default() {
+                assert!(
+                    registered.contains(&tool),
+                    "task {} whitelists unknown tool {tool}",
+                    task.task_id()
+                );
+            }
+        }
+    }
 }

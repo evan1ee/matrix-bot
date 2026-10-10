@@ -254,9 +254,9 @@ impl ReActEngine {
     /// no model call and no sensitivity check (the user just decided). What
     /// constrains it is the stored call itself (the job checks it against the
     /// approval the user saw) and the owner, taken from the run's account as
-    /// for any call. The whitelist check below is a no-op today: the job
-    /// passes `allowed_tools: None` (a HANDOFF follow-up wires task
-    /// whitelists in).
+    /// for any call. The whitelist is checked again here: a scheduled run's
+    /// held call must still be one its task may make, even after the user
+    /// approved it.
     pub async fn execute_approved(
         &self,
         services: &AppServices,

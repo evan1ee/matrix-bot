@@ -12,25 +12,25 @@ Evidence came from the code, not from memory: production line counts (lines befo
 
 ## Prioritized register
 
-| ID | Item | Category | I | R | E | Priority | Phase |
-|---|---|---|---|---|---|---|---|
-| TD-01 | Scheduled agent tasks ignore their tool whitelist | Code / security | 3 | 5 | 2 | **32** | 0 |
-| TD-03 | Playwright e2e is not run in CI | Test / infra | 4 | 4 | 2 | **32** | 1 |
-| TD-02 | Config-management review findings not yet committed | Code / security | 4 | 5 | 3 | **27** | 0 |
-| TD-04 | Completed plans left in `docs/superpowers/plans/` | Documentation | 3 | 2 | 1 | **25** | 1 |
-| TD-05 | Hand-written e2e fakes and frontend types drift from OpenAPI | Test | 3 | 4 | 3 | **21** | 1 |
-| TD-06 | Doc drift in AGENTS.md and the reference docs | Documentation | 2 | 2 | 1 | **20** | 1 |
-| TD-07 | `domain/` imports `sha2` against the layer rule | Architecture | 2 | 2 | 2 | **16** | 1 |
-| TD-08 | `application/secrets/mod.rs` over the 500-line cap; many files close to it | Code | 2 | 2 | 2 | **16** | 1 |
-| TD-09 | `#[allow]`s with no reason, and dead code | Code | 2 | 1 | 1 | **15** | 1 |
-| TD-10 | Three `reqwest` / two `hyper` stacks; direct `reqwest 0.11` | Dependency | 2 | 3 | 3 | **15** | 2 |
-| TD-11 | No integration test for the portfolio price-refresh snapshot | Test | 1 | 2 | 1 | **15** | 1 |
-| TD-12 | Frontend has no unit tests; large components | Test / code | 2 | 2 | 3 | **12** | 2 |
-| TD-13 | Deferred edge cases: `SyncHealth` parse, briefing window wrap-around | Code | 1 | 2 | 2 | **12** | 2 |
-| TD-14 | 23 `too_many_arguments` sites | Code | 2 | 1 | 3 | **9** | 2 |
-| TD-15 | Any quoted message taints the AI turn, so quote-based confirmation fails | Code / UX | 2 | 1 | 3 | **9** | 3 |
-| TD-16 | Major-version lag: axum 0.7, utoipa 4, tower-http 0.5, thiserror 1 | Dependency | 2 | 2 | 4 | **8** | 3 |
-| TD-17 | Built-in agent tasks are stubs marked `[TODO Extension]` | Code | 2 | 2 | 4 | **8** | 3 |
+| ID | Item | Category | I | R | E | Priority | Phase | Status |
+|---|---|---|---|---|---|---|---|---|
+| TD-01 | Scheduled agent tasks ignore their tool whitelist | Code / security | 3 | 5 | 2 | **32** | 0 | **Done** |
+| TD-03 | Playwright e2e is not run in CI | Test / infra | 4 | 4 | 2 | **32** | 1 | Open |
+| TD-02 | Config-management review findings not yet committed | Code / security | 4 | 5 | 3 | **27** | 0 | **Done** |
+| TD-04 | Completed plans left in `docs/superpowers/plans/` | Documentation | 3 | 2 | 1 | **25** | 1 | Open |
+| TD-05 | Hand-written e2e fakes and frontend types drift from OpenAPI | Test | 3 | 4 | 3 | **21** | 1 | Open |
+| TD-06 | Doc drift in AGENTS.md and the reference docs | Documentation | 2 | 2 | 1 | **20** | 1 | Open |
+| TD-07 | `domain/` imports `sha2` against the layer rule | Architecture | 2 | 2 | 2 | **16** | 1 | Open |
+| TD-08 | `application/secrets/mod.rs` over the 500-line cap; many files close to it | Code | 2 | 2 | 2 | **16** | 1 | Open |
+| TD-09 | `#[allow]`s with no reason, and dead code | Code | 2 | 1 | 1 | **15** | 1 | Open |
+| TD-10 | Three `reqwest` / two `hyper` stacks; direct `reqwest 0.11` | Dependency | 2 | 3 | 3 | **15** | 2 | Open |
+| TD-11 | No integration test for the portfolio price-refresh snapshot | Test | 1 | 2 | 1 | **15** | 1 | Open |
+| TD-12 | Frontend has no unit tests; large components | Test / code | 2 | 2 | 3 | **12** | 2 | Open |
+| TD-13 | Deferred edge cases: `SyncHealth` parse, briefing window wrap-around | Code | 1 | 2 | 2 | **12** | 2 | Open |
+| TD-14 | 23 `too_many_arguments` sites | Code | 2 | 1 | 3 | **9** | 2 | Open |
+| TD-15 | Any quoted message taints the AI turn, so quote-based confirmation fails | Code / UX | 2 | 1 | 3 | **9** | 3 | Open |
+| TD-16 | Major-version lag: axum 0.7, utoipa 4, tower-http 0.5, thiserror 1 | Dependency | 2 | 2 | 4 | **8** | 3 | Open |
+| TD-17 | Built-in agent tasks are stubs marked `[TODO Extension]` | Code | 2 | 2 | 4 | **8** | 3 | Open |
 
 ---
 

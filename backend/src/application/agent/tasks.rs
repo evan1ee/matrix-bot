@@ -47,6 +47,12 @@ impl AgentService {
         Ok(tasks)
     }
 
+    /// The tool whitelist the run executes under (see
+    /// `ScheduledTaskRegistry::tool_policy`).
+    pub fn tool_policy(&self, run: &AgentRun) -> Option<Vec<String>> {
+        self.registry.tool_policy(run)
+    }
+
     /// Sweeps due scheduled tasks and enqueues execution runs.
     pub async fn enqueue_due_scheduled_tasks(&self) -> Result<usize, AppError> {
         let now = now_at_storage_precision();

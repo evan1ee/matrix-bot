@@ -124,29 +124,28 @@ Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in sequence:
 
 ### Track 2: Post-Cutover Enhancements & Technical Debt
 
-1. **Wire Scheduled Agent Task Tool Whitelist (`backend/src/interface/jobs/agent.rs`):**
-   - `ScheduledTaskDefinition::allowed_tools()` is defined in the domain, but the job handler currently passes `allowed_tools: None` to `evaluate_step` and `execute_approved`. Wire the task's tool whitelist through the job execution context.
+- Tech-debt register and phased plan: [reviews/2026-10-10-tech-debt-audit.md](reviews/2026-10-10-tech-debt-audit.md); execution plan: [plans/2026-10-11-tech-debt-phase-0-1.md](plans/2026-10-11-tech-debt-phase-0-1.md).
 
-2. **Quote-Based AI Confirmation Without Taint:**
+1. **Quote-Based AI Confirmation Without Taint:**
    - Every quoted message currently taints the AI turn (including quotes of the bot's own messages, since webhook alerts and notices also come from the bot account). Users confirming a sensitive action in clients that auto-quote replies must send an unquoted message. To allow quote-based confirmation safely, track authentic AI reply event IDs (in-memory bounded set or an `ai_reply_messages` table).
 
-3. **Deep Procedural Pipelines for Built-in Agent Tasks (`backend/src/domain/agent/task.rs`):**
+2. **Deep Procedural Pipelines for Built-in Agent Tasks (`backend/src/domain/agent/task.rs`):**
    - Expand specialized procedural workflows for the 5 built-in task plugins (`WeeklyBookmarkDigestTask`, `MonthlyFinancialAuditTask`, `PortfolioRebalanceAlertTask`, `BillDueDigestTask`, `HabitConsistencyReviewTask`):
      - Direct Kokoro TTS audio compilation for weekly bookmark digests.
      - Deterministic mathematical portfolio drift calculation before invoking LLM synthesis.
 
-4. **Discord Channel Capabilities Expansion:**
+3. **Discord Channel Capabilities Expansion:**
    - Add interactive ActionRow buttons for task completion (matching Telegram's inline keyboard "Done" buttons).
    - Add typed slash command options (in addition to the single `args` string fast-path).
    - Inbound receipt/image attachment ingestion over Discord DMs (saving to `StorageService` and enqueuing `media.process_receipt`).
 
-5. **WebAuthn Conditional UI (Passkey Autofill):**
+4. **WebAuthn Conditional UI (Passkey Autofill):**
    - Implement passkey autofill on the web sign-in form using the WebAuthn Conditional UI standard (`mediation: 'conditional'`) for seamless page-load sign-in.
 
-6. **Integration Test for Portfolio Price Refresh Snapshot:**
+5. **Integration Test for Portfolio Price Refresh Snapshot:**
    - Add an integration test asserting that `RefreshPricesHandler` persists today's USD snapshot row in `portfolio_daily_snapshots` (currently tested at the service layer in `application/portfolio/mod.rs`).
 
-7. **Minor Deferred Edge Cases:**
+6. **Minor Deferred Edge Cases:**
    - `SyncHealth`: Add fallback handling if Matrix sync timestamp string fails to parse.
    - Morning briefing window: Wrap-around logic for target briefing windows close to the hour boundary (`:58`–`:02`).
 
