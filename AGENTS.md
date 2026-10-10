@@ -233,7 +233,7 @@ npm --prefix frontend run build                             # tsc + vite build (
 npm --prefix frontend run test:e2e                          # Playwright; required before shipping a UI change
 ```
 
-Single tests: `cargo test -p matrix-bot <name>` or a module path such as `interface::chat::todos::`. After any `#[utoipa::path]`/`ToSchema` change also run `npm --prefix frontend run generate-api`. CI (`.github/workflows/ci.yml`) runs `backend`, `inference` and `frontend` jobs; clippy is a required local gate but not yet a CI job.
+Single tests: `cargo test -p matrix-bot <name>` or a module path such as `interface::chat::todos::`. After any `#[utoipa::path]`/`ToSchema` change also run `npm --prefix frontend run generate-api`. CI (`.github/workflows/ci.yml`) runs `backend` (fmt, clippy, sqlx check, tests), `inference`, `frontend` (generated-types drift check, build) and `frontend-e2e` (Playwright against the fake API).
 
 **Checklist by change type**
 

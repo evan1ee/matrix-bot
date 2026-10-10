@@ -15,7 +15,7 @@ Evidence came from the code, not from memory: production line counts (lines befo
 | ID | Item | Category | I | R | E | Priority | Phase | Status |
 |---|---|---|---|---|---|---|---|---|
 | TD-01 | Scheduled agent tasks ignore their tool whitelist | Code / security | 3 | 5 | 2 | **32** | 0 | **Done** |
-| TD-03 | Playwright e2e is not run in CI | Test / infra | 4 | 4 | 2 | **32** | 1 | Open |
+| TD-03 | Playwright e2e is not run in CI | Test / infra | 4 | 4 | 2 | **32** | 1 | **Done** |
 | TD-02 | Config-management review findings not yet committed | Code / security | 4 | 5 | 3 | **27** | 0 | **Done** |
 | TD-04 | Completed plans left in `docs/superpowers/plans/` | Documentation | 3 | 2 | 1 | **25** | 1 | Open |
 | TD-05 | Hand-written e2e fakes and frontend types drift from OpenAPI | Test | 3 | 4 | 3 | **21** | 1 | Open |

@@ -252,5 +252,43 @@ jobs:
       - name: Install dependencies
         run: npm --prefix frontend ci
 
+      # The generated client types must match the committed OpenAPI spec, or
+      # the modules and e2e fakes are typed against an API that does not exist.
+      - name: Generated API types match openapi.json
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          npm --prefix frontend run generate-api
+          git diff --exit-code frontend/src/types/api.ts
+
       - name: Frontend build
         run: npm --prefix frontend run build
+
+  frontend-e2e:
+    name: Frontend e2e (Playwright)
+    runs-on: ubuntu-latest
+    # The official image carries Node and the browser with its system
+    # libraries, so the job neither needs sudo nor assumes the runner image:
+    # the same reason the backend job is pinned into a container. Its tag must
+    # match @playwright/test in frontend/package-lock.json.
+    container: mcr.microsoft.com/playwright:v1.62.1-noble
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: npm --prefix frontend ci
+
+      # The specs run against e2e/fake-api.ts: no backend, no database.
+      - name: Playwright
+        env:
+          CI: "true"
+        run: npm --prefix frontend run test:e2e
+
+      # If the Gitea runner rejects upload-artifact@v4 (older Gitea versions
+      # do), use actions/upload-artifact@v3 with the same inputs.
+      - name: Upload traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-traces
+          path: frontend/test-results/
+          retention-days: 7
