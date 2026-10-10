@@ -56,7 +56,7 @@ Task 7: Documentation, Runbooks & Final Verification
 
 Pure domain code; zero SQL, zero external network, zero crypto implementations in domain.
 
-- [ ] `domain/config/mod.rs` & `registry.rs`:
+- [x] `domain/config/mod.rs` & `registry.rs`:
   - `SettingKey` enum representing all supported keys:
     `LlmDefaultProvider`, `LlmDefaultModel`, `LlmRequestTimeoutSeconds`, `LlmDefaultTemperature`, `LlmDefaultMaxTokens`,
     `SearchTavilyEnabled`, `SearchTimeoutSeconds`,
@@ -69,26 +69,26 @@ Pure domain code; zero SQL, zero external network, zero crypto implementations i
   - `SettingValue` enum (`String`, `Integer(i64)`, `Float(f64)`, `Boolean(bool)`).
   - `SettingDefinition`: holds key, default value, validation function, and `hot_reloadable: bool`.
   - `SettingRegistry`: lookup by key, validation, unknown key rejection.
-- [ ] `domain/secrets/mod.rs`:
+- [x] `domain/secrets/mod.rs`:
   - `SecretId(uuid::Uuid)` newtype.
   - `SecretProvider` enum (`OpenAi`, `Anthropic`, `Tavily`, `Stt`, `Tts`, `Discord`, `Telegram`, `TelegramWebhook`, `Email`, `S3`, `Generic`).
   - `SecretStatus` enum (`Active`, `Disabled`, `Revoked`).
   - `SecretMetadata`: public non-sensitive representation (`id`, `provider`, `name`, `status`, `key_version`, `masked_preview`, `last_tested_at`, `last_test_status`, `last_test_error`, `created_at`, `updated_at`).
   - `EncryptedSecret`: struct holding ciphertext bytes, nonce bytes, and key version.
   - `SecretValue`: wraps plaintext string with `Drop` memory zeroization and redacted `Debug`/`Display` returning `"[REDACTED]"`. Explicit `expose_secret(&self) -> &str`.
-- [ ] `domain/config/audit.rs`:
+- [x] `domain/config/audit.rs`:
   - `ConfigAuditAction` enum (`SettingUpdated`, `SettingReset`, `SecretCreated`, `SecretUpdated`, `SecretDeleted`, `SecretTested`, `ConfigReloaded`).
   - `ConfigAuditTarget` enum (`Setting(String)`, `Secret(uuid::Uuid)`, `System`).
   - `ConfigAuditEntry` struct. Enforces invariant that no secret ciphertext or plaintext is stored.
-- [ ] `domain/accounts/`:
+- [x] `domain/accounts/`:
   - Add `AccountRole` enum (`User`, `Admin`) and `role: AccountRole` to `Account`.
   - Add `Config::admin_users` allowlist check.
-- [ ] Unit tests in each module:
+- [x] Unit tests in each module:
   - Validation of setting bounds (e.g., timeouts, temperatures, port numbers, URLs).
   - Rejection of unknown setting keys.
   - `SecretValue` redaction in `format!("{val}")` and `format!("{val:?}")`.
   - `ConfigAuditEntry` sanitization assertions.
-- [ ] Gates: `cargo test -p matrix-bot --lib`, `cargo test -p matrix-bot --test architecture`, `cargo clippy`.
+- [x] Gates: `cargo test -p matrix-bot --lib`, `cargo test -p matrix-bot --test architecture`, `cargo clippy`.
 
 ---
 

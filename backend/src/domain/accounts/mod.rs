@@ -220,18 +220,86 @@ pub const ACCOUNT_ID_DISCARDED: &[&str] = &[
 /// Tables carrying `account_id` that a merge deliberately leaves alone.
 pub const ACCOUNT_ID_UNTOUCHED: &[&str] = &["web_users"];
 
+/// Role granted to an account for authorization.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AccountRole {
+    #[default]
+    User,
+    Admin,
+}
+
+impl AccountRole {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::User => "user",
+            Self::Admin => "admin",
+        }
+    }
+}
+
+impl std::str::FromStr for AccountRole {
+    type Err = AccountsError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "user" => Ok(Self::User),
+            "admin" => Ok(Self::Admin),
+            _ => Err(AccountsError::Validation(format!("unknown account role: {s}"))),
+        }
+    }
+}
+
+impl std::fmt::Display for AccountRole {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Account {
     pub id: AccountId,
     pub display_name: String,
     pub status: String,
     pub created_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub role: AccountRole,
 }
 
 impl Account {
     pub fn is_unclaimed(&self) -> bool {
         self.status == STATUS_UNCLAIMED
     }
+
+    pub fn is_admin(&self) -> bool {
+        self.role == AccountRole::Admin
+    }
+}
+
+/// Checks whether an account id or platform identity is in the admin allowlist string (comma-separated).
+pub fn is_admin_in_allowlist(admin_users_cfg: &str, account_id: &AccountId, identities: &[&str]) -> bool {
+    let trimmed = admin_users_cfg.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    for entry in trimmed.split(',').map(|s| s.trim()).filter(|s| !s.is_empty()) {
+        if let Ok(parsed_id) = entry.parse::<AccountId>() {
+            if parsed_id == *account_id {
+                return true;
+            }
+        }
+        if let Ok(parsed_uuid) = uuid::Uuid::parse_str(entry) {
+            if parsed_uuid == account_id.uuid() {
+                return true;
+            }
+        }
+        for &ident in identities {
+            if entry.eq_ignore_ascii_case(ident) {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// A Matrix user ID bound to an account.
@@ -683,5 +751,21 @@ mod tests {
         let mut idle = session.clone();
         idle.last_seen_at = now - Duration::days(31);
         assert!(!idle.is_live(now));
+    }
+
+    #[test]
+    fn test_account_role_and_allowlist() {
+        assert_eq!(AccountRole::default(), AccountRole::User);
+        assert_eq!("admin".parse::<AccountRole>().unwrap(), AccountRole::Admin);
+        assert_eq!("user".parse::<AccountRole>().unwrap(), AccountRole::User);
+        assert!("invalid".parse::<AccountRole>().is_err());
+
+        let admin_id = AccountId::from_seed("admin_user");
+        let other_id = AccountId::from_seed("other_user");
+
+        let cfg = format!("{},@superadmin:matrix.org", admin_id);
+        assert!(is_admin_in_allowlist(&cfg, &admin_id, &[]));
+        assert!(is_admin_in_allowlist(&cfg, &other_id, &["@superadmin:matrix.org"]));
+        assert!(!is_admin_in_allowlist(&cfg, &other_id, &["@regular:matrix.org"]));
     }
 }

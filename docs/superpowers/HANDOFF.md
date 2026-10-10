@@ -155,6 +155,29 @@ Local test DB note: `CREATE EXTENSION vector` / `pg_trgm` race between parallel 
 
 ---
 
+## 3c. Configuration Management & Secret Credential Storage (branch `feat/config-management`)
+
+Spec: [`specs/2026-10-09-configuration-management-design.md`](specs/2026-10-09-configuration-management-design.md) (approved 2026-10-09), Plan: [`plans/2026-10-09-configuration-management.md`](plans/2026-10-09-configuration-management.md), branch `feat/config-management`.
+
+| Task | Scope | Status |
+|---|---|---|
+| 1 | Domain types, settings registry, secret metadata, audit types | Done |
+| 2 | Database migration 0015 & SQLx repositories | Pending |
+| 3 | Cryptography & application services (`AppConfigService`, `SecretService`) | Pending |
+| 4 | Admin REST API endpoints & authorization (`AdminUser`) | Pending |
+| 5 | Consumer integration & dynamic runtime reload | Pending |
+| 6 | Frontend admin console & integration | Pending |
+| 7 | Documentation & final verification | Pending |
+
+Rulings:
+- Ruling R-CFG1: `app_settings` and `provider_secrets` are instance-wide system configuration tables and are **not** added to `OWNED_TABLES`. Merging an admin account updates `updated_by` and `actor_id` via `OWNER_ID_MERGED_SEPARATELY`.
+- Ruling R-CFG2: Secret read APIs return metadata only (`SecretMetadata`), with ciphertext and plaintext completely omitted from response DTOs.
+- Ruling R-CFG3: `AdminUser` requires both `account.role == 'admin'` and recent passkey assertion (`VerifiedUser`), enforcing 5-minute step-up on all administrative operations.
+- Ruling R-CFG4: Missing `SECRETS_ENCRYPTION_KEY` fails closed for secret management operations; unencrypted fallback storage is prohibited.
+- Ruling R-CFG5: Runtime configuration snapshot is stored in an `ArcSwap<RuntimeConfigSnapshot>`, guaranteeing zero-locking lock-free reads on request and AI turn paths.
+
+---
+
 ## 4. Remaining Tasks & Action Plan
 
 ### Track 1: Production Cutover & Deployment (Human Operator / User-Gated)

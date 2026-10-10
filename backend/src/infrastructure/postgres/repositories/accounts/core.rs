@@ -17,6 +17,7 @@ impl From<AccountRow> for Account {
             display_name: row.display_name,
             status: row.status,
             created_at: row.created_at,
+            role: crate::domain::accounts::AccountRole::User,
         }
     }
 }
