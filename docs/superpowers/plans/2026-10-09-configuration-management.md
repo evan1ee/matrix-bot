@@ -129,31 +129,33 @@ Pure domain code; zero SQL, zero external network, zero crypto implementations i
 
 ### Task 3: Cryptography & Application Services (§6, §8, §9.2, Phase 3)
 
-- [ ] Add `aes-gcm = "0.10"` dependency to `backend/Cargo.toml`.
-- [ ] `infrastructure/crypto/aes_gcm.rs`:
+- [x] Add `aes-gcm = "0.10"`, `arc-swap = "1.7"`, and `hex = "0.4"` dependencies to `backend/Cargo.toml`.
+- [x] `infrastructure/crypto/aes_gcm.rs`:
   - `AesGcmSecretProtector` struct implementing AES-256-GCM authenticated encryption.
   - Generates unique 96-bit CSPRNG nonces per encryption.
   - Binds AAD `format!("{provider}:{name}:{key_version}")`.
-  - `MasterKeyProvider`: loads 256-bit symmetric key from `SECRETS_ENCRYPTION_KEY` env var. Fails closed with `CryptoError::KeyUnavailable` if missing.
+  - `MasterKeyProvider`: loads 256-bit symmetric key from `SECRETS_ENCRYPTION_KEY` env var. Fails closed with `CryptoError::KeyUnavailable` if missing. Supports versioned keys.
+  - `FailClosedSecretProtector`: safe fallback when encryption key is unconfigured.
   - Comprehensive unit tests: encryption/decryption round trips, corrupted ciphertext detection, AAD mismatch detection, nonce uniqueness.
-- [ ] `application/config/mod.rs` (`AppConfigService`):
+- [x] `application/config/mod.rs` (`AppConfigService`):
   - `get_setting(&self, key: SettingKey) -> Result<SettingValue, AppError>`
   - `list_settings(&self) -> Result<Vec<SettingItem>, AppError>`
   - `update_setting(&self, actor: &AccountId, key: SettingKey, value: SettingValue) -> Result<(), AppError>`:
     Opens transaction, validates value, writes to `app_settings`, logs to `config_audit_log`, publishes `SystemEvent::ConfigUpdated`, commits, updates snapshot.
   - `reset_setting(&self, actor: &AccountId, key: SettingKey) -> Result<(), AppError>`
   - `get_status(&self) -> Result<ConfigurationStatusDto, AppError>`
-  - In-memory `ArcSwap<RuntimeConfigSnapshot>` for lock-free snapshot access.
-- [ ] `application/secrets/mod.rs` (`SecretService`):
+  - In-memory `ArcSwap<RuntimeConfigSnapshot>` for lock-free snapshot access (`snapshot.rs`).
+- [x] `application/secrets/mod.rs` (`SecretService`):
   - `list_metadata(&self) -> Result<Vec<SecretMetadata>, AppError>`
   - `store_secret(&self, actor: &AccountId, provider: SecretProvider, name: &str, secret: SecretValue, metadata: Option<Value>) -> Result<SecretId, AppError>`:
     Encrypts secret with `AesGcmSecretProtector`, writes to `provider_secrets`, logs non-sensitive audit entry, commits.
   - `replace_secret(&self, actor: &AccountId, id: SecretId, secret: SecretValue) -> Result<(), AppError>`
   - `delete_secret(&self, actor: &AccountId, id: SecretId) -> Result<(), AppError>`
   - `get_decrypted_secret(&self, provider: SecretProvider, name: &str) -> Result<Option<SecretValue>, AppError>`
-- [ ] Wire `app_config` and `secrets` into `AppServices` (`application/mod.rs` and `AppServices::new`).
-- [ ] Application service tests (mid-transaction failure, outbox event verification, audit log verification).
-- [ ] Gates: `cargo test -p matrix-bot --lib`, `cargo test -p matrix-bot live_postgres`, `cargo clippy`.
+  - `test_credential(&self, actor: &AccountId, id: SecretId) -> Result<TestResultDto, AppError>`
+- [x] Wire `app_config` and `secrets` into `AppServices` (`application/mod.rs` and `AppServices::new`).
+- [x] Application service tests (atomicity, outbox event verification, audit log verification).
+- [x] Gates: `cargo test -p matrix-bot --lib`, `cargo test -p matrix-bot live_postgres`, `cargo clippy`, `cargo test --test architecture`.
 
 ---
 

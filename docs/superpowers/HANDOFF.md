@@ -163,7 +163,7 @@ Spec: [`specs/2026-10-09-configuration-management-design.md`](specs/2026-10-09-c
 |---|---|---|
 | 1 | Domain types, settings registry, secret metadata, audit types | Done |
 | 2 | Database migration 0015 & SQLx repositories | Done |
-| 3 | Cryptography & application services (`AppConfigService`, `SecretService`) | Pending |
+| 3 | Cryptography & application services (`AppConfigService`, `SecretService`) | Done |
 | 4 | Admin REST API endpoints & authorization (`AdminUser`) | Pending |
 | 5 | Consumer integration & dynamic runtime reload | Pending |
 | 6 | Frontend admin console & integration | Pending |
@@ -173,8 +173,9 @@ Rulings:
 - Ruling R-CFG1: `app_settings` and `provider_secrets` are instance-wide system configuration tables and are **not** added to `OWNED_TABLES`. Merging an admin account updates `updated_by` and `actor_id` via `OWNER_ID_MERGED_SEPARATELY`.
 - Ruling R-CFG2: Secret read APIs return metadata only (`SecretMetadata`), with ciphertext and plaintext completely omitted from response DTOs.
 - Ruling R-CFG3: `AdminUser` requires both `account.role == 'admin'` and recent passkey assertion (`VerifiedUser`), enforcing 5-minute step-up on all administrative operations.
-- Ruling R-CFG4: Missing `SECRETS_ENCRYPTION_KEY` fails closed for secret management operations; unencrypted fallback storage is prohibited.
-- Ruling R-CFG5: Runtime configuration snapshot is stored in an `ArcSwap<RuntimeConfigSnapshot>`, guaranteeing zero-locking lock-free reads on request and AI turn paths.
+- Ruling R-CFG4: AES-256-GCM authenticated encryption binds AAD to `format!("{provider}:{name}:{key_version}")`. Tampered ciphertext, mismatched providers, mismatched slot names, or mismatched key versions immediately fail decryption.
+- Ruling R-CFG5: `FailClosedSecretProtector` ensures boot and operational safety when `SECRETS_ENCRYPTION_KEY` is unconfigured, failing all secret encryptions/decryptions closed without allowing plaintext storage.
+- Ruling R-CFG6: `RuntimeConfigSnapshot` provides lock-free dynamic configuration reads via `ArcSwap<RuntimeConfigSnapshot>`, populated from `app_settings` with static fallbacks from `SettingRegistry`. Every mutation emits `SystemEvent::ConfigUpdated` or `SystemEvent::SecretChanged` in the transaction before atomic snapshot reload.
 
 ---
 

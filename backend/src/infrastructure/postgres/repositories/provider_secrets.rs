@@ -84,6 +84,7 @@ pub async fn get_secret_by_provider(
 }
 
 /// Inserts a new encrypted secret row, returning its ID.
+#[allow(clippy::too_many_arguments)]
 pub async fn insert_secret(
     conn: impl PgExecutor<'_>,
     provider: &str,
@@ -113,6 +114,7 @@ pub async fn insert_secret(
 }
 
 /// Updates ciphertext, nonce, key version, status, and metadata for an existing secret.
+#[allow(clippy::too_many_arguments)]
 pub async fn update_secret(
     conn: impl PgExecutor<'_>,
     id: uuid::Uuid,

@@ -193,6 +193,15 @@ pub enum SystemEvent {
         total_tokens: i32,
         error: Option<String>,
     },
+    ConfigUpdated {
+        actor_id: AccountId,
+        key: String,
+    },
+    SecretChanged {
+        actor_id: AccountId,
+        provider: String,
+        name: String,
+    },
 }
 
 impl SystemEvent {
@@ -260,6 +269,8 @@ impl SystemEvent {
             SystemEvent::AgentStepCompleted { owner_id, .. } => owner_id,
             SystemEvent::AgentApprovalRequired { owner_id, .. } => owner_id,
             SystemEvent::AgentRunCompleted { owner_id, .. } => owner_id,
+            SystemEvent::ConfigUpdated { actor_id, .. } => actor_id,
+            SystemEvent::SecretChanged { actor_id, .. } => actor_id,
         }
     }
 
@@ -323,6 +334,8 @@ impl SystemEvent {
             SystemEvent::AgentStepCompleted { .. } => "AgentStepCompleted",
             SystemEvent::AgentApprovalRequired { .. } => "AgentApprovalRequired",
             SystemEvent::AgentRunCompleted { .. } => "AgentRunCompleted",
+            SystemEvent::ConfigUpdated { .. } => "ConfigUpdated",
+            SystemEvent::SecretChanged { .. } => "SecretChanged",
         }
     }
 
@@ -774,12 +787,21 @@ mod tests {
                 user_id: "42".to_string(),
                 conversation: "telegram:42".to_string(),
             },
+            SystemEvent::ConfigUpdated {
+                actor_id: o,
+                key: s(),
+            },
+            SystemEvent::SecretChanged {
+                actor_id: o,
+                provider: s(),
+                name: s(),
+            },
         ]
     }
 
     /// Bump when a variant is added; `event_type` and `owner_id` have no
     /// wildcard, so the compiler already forces their arms.
-    const VARIANT_COUNT: usize = 49;
+    const VARIANT_COUNT: usize = 51;
 
     #[test]
     fn event_type_matches_the_serde_tag_for_every_variant() {

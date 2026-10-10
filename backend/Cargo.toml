@@ -66,6 +66,9 @@ pgvector = { version = "0.4.2", features = ["sqlx", "serde"] }
 pulldown-cmark = { version = "0.13.4", default-features = false }
 zip = { version = "9.0.0", default-features = false, features = ["deflate"] }
 serde_yaml_ng = "0.10.0"
+aes-gcm = "0.10"
+arc-swap = "1.7"
+hex = "0.4"
 
 [dev-dependencies]
 tower = { version = "0.5.3", features = ["util"] }

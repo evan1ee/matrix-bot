@@ -8,6 +8,7 @@ pub mod accounts;
 pub mod agent;
 pub mod bookmarks;
 pub mod briefing;
+pub mod config;
 pub mod finance;
 pub mod footprints;
 pub mod habits;
@@ -21,6 +22,7 @@ pub mod portfolio;
 pub mod recurring_bills;
 pub mod reminders;
 pub mod rooms;
+pub mod secrets;
 pub mod settings;
 pub mod todos;
 pub mod webhooks;
@@ -35,6 +37,7 @@ use self::accounts::AccountService;
 use self::agent::AgentService;
 use self::bookmarks::BookmarkService;
 use self::briefing::BriefingService;
+use self::config::AppConfigService;
 use self::finance::FinanceService;
 use self::footprints::FootprintService;
 use self::habits::HabitService;
@@ -48,6 +51,7 @@ use self::portfolio::PortfolioService;
 use self::recurring_bills::RecurringBillsService;
 use self::reminders::ReminderService;
 use self::rooms::RoomService;
+use self::secrets::SecretService;
 use self::settings::SettingsService;
 use self::todos::TodoService;
 use self::webhooks::WebhookService;
@@ -122,6 +126,8 @@ pub struct AppServices {
     pub webhooks: WebhookService,
     pub notes: NoteService,
     pub knowledge_search: SearchService,
+    pub app_config: AppConfigService,
+    pub secrets: SecretService,
 }
 
 impl AppServices {
@@ -152,6 +158,13 @@ impl AppServices {
         let webhooks = WebhookService::new(pool.clone());
         let portfolio = PortfolioService::new(pool.clone());
         let outbox = OutboxService::new(pool.clone());
+        let app_config = AppConfigService::new(pool.clone());
+        let protector: Arc<dyn crate::infrastructure::crypto::SecretProtector> =
+            match crate::infrastructure::crypto::AesGcmSecretProtector::from_env() {
+                Ok(p) => Arc::new(p),
+                Err(_) => Arc::new(crate::infrastructure::crypto::FailClosedSecretProtector),
+            };
+        let secrets = SecretService::new(pool.clone(), protector);
         let storage = crate::infrastructure::storage::LocalStorageService::new(
             "data/storage",
             None,
@@ -198,6 +211,8 @@ impl AppServices {
                     crate::infrastructure::inference::embedding::MockEmbeddingProvider::default(),
                 ),
             ),
+            app_config,
+            secrets,
         }
     }
 
@@ -232,6 +247,21 @@ impl AppServices {
         embedder: Arc<dyn crate::infrastructure::inference::embedding::EmbeddingProvider>,
     ) -> Self {
         self.knowledge_search = self.knowledge_search.with_embedder(embedder);
+        self
+    }
+
+    /// Configures the secret protector used for credential encryption and decryption.
+    pub fn with_secret_protector(
+        mut self,
+        protector: Arc<dyn crate::infrastructure::crypto::SecretProtector>,
+    ) -> Self {
+        self.secrets = self.secrets.with_protector(protector);
+        self
+    }
+
+    /// Sets a pre-loaded application configuration service.
+    pub fn with_app_config(mut self, app_config: AppConfigService) -> Self {
+        self.app_config = app_config;
         self
     }
 }
