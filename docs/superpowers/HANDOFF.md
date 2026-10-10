@@ -171,16 +171,4 @@ Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in sequence:
 
 Note for fresh local test PostgreSQL servers: create `vector` and `pg_trgm` extensions once in `public` (`CREATE EXTENSION IF NOT EXISTS vector SCHEMA public; CREATE EXTENSION IF NOT EXISTS pg_trgm SCHEMA public;`) before running parallel tests.
 
-Run these commands before any commit:
-
-```bash
-cargo fmt --all -- --check
-cargo check -p matrix-bot --all-targets
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test -p matrix-bot --lib -- --test-threads=4
-cargo test -p matrix-bot --test architecture
-cargo test -p matrix-bot live_postgres -- --ignored --test-threads=1
-cargo run --bin generate-openapi && git diff --exit-code backend/openapi.json
-npm --prefix frontend run build
-npm --prefix frontend run test:e2e
-```
+The verification gates are listed once, in [AGENTS.md §8](../../AGENTS.md#8-verification). Run them from the repository root.

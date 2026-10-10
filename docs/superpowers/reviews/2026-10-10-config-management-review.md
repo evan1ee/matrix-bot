@@ -2,7 +2,7 @@
 
 Point-in-time pre-merge review, 2026-10-10. Branch head `ade0288`, merge base `47c0398`.
 Scope: 8 commits, 97 files, +9271/−167 (configuration registry, encrypted secret vault, admin REST API, runtime reload, admin console).
-Intent reference: [`plans/2026-10-09-configuration-management.md`](../plans/2026-10-09-configuration-management.md).
+Intent reference: the configuration-management plan, since deleted (shipped; see HANDOFF).
 
 **Verdict: Request changes.** Mechanical gates are green and the core design is sound (layering, AES-GCM with AAD, transactional audit + outbox, step-up on mutations). But the branch has two ways to leak secrets, one behaviour regression for existing deployments, one crashing UI tab, and a reconnect loop in the event listener. Fix the blockers in §3 before merging. Everything else can follow in a tracked cleanup.
 
