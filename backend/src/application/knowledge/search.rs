@@ -22,6 +22,7 @@ pub struct SearchService {
     /// part in vector search. Changing it re-embeds everything via the backfill.
     pub(super) model: String,
     pub(super) embed_timeout: Duration,
+    pub(super) app_config: Option<crate::application::config::AppConfigService>,
 }
 
 impl SearchService {
@@ -31,6 +32,7 @@ impl SearchService {
             embedder,
             model: DEFAULT_EMBEDDING_MODEL.to_string(),
             embed_timeout: DEFAULT_EMBED_TIMEOUT,
+            app_config: None,
         }
     }
 
@@ -47,6 +49,35 @@ impl SearchService {
             model: model.into(),
             ..self.clone()
         }
+    }
+
+    /// Attaches the dynamic runtime configuration service for `inference.embedding.base_url`.
+    pub fn with_app_config(
+        &self,
+        app_config: crate::application::config::AppConfigService,
+    ) -> Self {
+        Self {
+            app_config: Some(app_config),
+            ..self.clone()
+        }
+    }
+
+    /// Resolves the active embedding provider, applying a hot-reloaded
+    /// `inference.embedding.base_url` override when customized in `app_settings`.
+    pub(super) fn active_embedder(&self) -> Arc<dyn EmbeddingProvider> {
+        if let Some(cfg) = &self.app_config {
+            let snap = cfg.snapshot();
+            if snap.is_customized(crate::domain::config::SettingKey::InferenceEmbeddingBaseUrl) {
+                let url = snap.inference_embedding_base_url().trim();
+                return Arc::new(
+                    crate::infrastructure::inference::embedding::LocalOnnxEmbeddingClient::new(
+                        (!url.is_empty()).then(|| url.to_string()),
+                        Some(self.model.clone()),
+                    ),
+                );
+            }
+        }
+        self.embedder.clone()
     }
 
     /// Overrides the embed timeout; tests use it to exercise the slow path.

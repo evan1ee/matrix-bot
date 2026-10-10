@@ -144,6 +144,36 @@ impl TtsClient {
         }
     }
 
+    /// Returns a cloned client with dynamic runtime overrides applied when provided.
+    pub fn with_overrides(
+        &self,
+        base_url: Option<&str>,
+        api_key: Option<String>,
+        model: Option<&str>,
+        dialect: Option<TtsDialect>,
+    ) -> Self {
+        let base_url = base_url
+            .map(|u| u.trim().trim_end_matches('/').to_string())
+            .filter(|u| !u.is_empty())
+            .or_else(|| self.base_url.clone());
+        let api_key = api_key
+            .map(|k| k.trim().to_string())
+            .filter(|k| !k.is_empty())
+            .or_else(|| self.api_key.clone());
+        let model = model
+            .map(|m| m.trim().to_string())
+            .filter(|m| !m.is_empty())
+            .unwrap_or_else(|| self.model.clone());
+        let dialect = dialect.unwrap_or(self.dialect);
+        Self {
+            base_url,
+            api_key,
+            model,
+            dialect,
+            http: self.http.clone(),
+        }
+    }
+
     /// Shapes the outgoing request per `self.dialect`.
     fn build_request(
         &self,

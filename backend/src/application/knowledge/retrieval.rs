@@ -257,7 +257,8 @@ impl SearchService {
     ) -> Result<Option<Vec<VectorHit>>, AppError> {
         // No embedder configured is a standing condition, not a failure worth
         // a warning per search.
-        if !self.embedder.is_available() {
+        let embedder = self.active_embedder();
+        if !embedder.is_available() {
             return Ok(None);
         }
         let started = Instant::now();
@@ -265,7 +266,7 @@ impl SearchService {
         // passage; the prefix is for the embedder only.
         let query_input = format!("{}{text}", embedding_prefixes(&self.model).query);
         let embedded =
-            tokio::time::timeout(self.embed_timeout, self.embedder.embed(&[query_input])).await;
+            tokio::time::timeout(self.embed_timeout, embedder.embed(&[query_input])).await;
         let degraded = |error_kind: &str| {
             warn!(
                 operation = "knowledge.search",

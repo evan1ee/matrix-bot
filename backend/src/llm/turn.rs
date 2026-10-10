@@ -42,29 +42,46 @@ pub async fn run_turn(
         .map_err(|e| AiError::Db(e.to_string()))?;
 
     let snapshot = ctx.services.app_config.snapshot();
-    let provider_secret_key = {
-        let provider_name = snapshot.llm_default_provider();
-        let provider_opt = match provider_name.to_lowercase().as_str() {
-            "anthropic" => Some(crate::domain::secrets::SecretProvider::Anthropic),
-            "openai" => Some(crate::domain::secrets::SecretProvider::OpenAi),
-            _ => None,
-        };
-        if let Some(p) = provider_opt {
-            ctx.services
-                .secrets
-                .get_decrypted_secret(p, "default")
-                .await
-                .ok()
-                .flatten()
-                .map(|sec| sec.expose_secret().to_string())
-        } else {
+    let provider_name = snapshot.llm_default_provider();
+    if snapshot.is_customized(crate::domain::config::SettingKey::LlmDefaultProvider)
+        && provider_name.eq_ignore_ascii_case("custom")
+        && ctx
+            .config
+            .base_url
+            .as_deref()
+            .is_none_or(|s| s.trim().is_empty())
+        && user_config
+            .as_ref()
+            .and_then(|u| u.api_base_url.as_deref())
+            .is_none_or(|s| s.trim().is_empty())
+    {
+        return Err(AiError::Validation(
+            "Custom LLM provider requires AI_ENDPOINT or a user API base URL".to_string(),
+        ));
+    }
+
+    let (secret_provider, secret_slot) = ResolvedAiConfig::secret_slot_for_provider(provider_name);
+    let provider_secret = match ctx
+        .services
+        .secrets
+        .get_decrypted_secret(secret_provider, secret_slot)
+        .await
+    {
+        Ok(sec) => sec,
+        Err(e) => {
+            warn!(
+                provider = %secret_provider,
+                slot = secret_slot,
+                error = %e,
+                "Failed to decrypt LLM provider secret from vault"
+            );
             None
         }
     };
     let resolved_config = ResolvedAiConfig::resolve(
         ctx.config,
         Some(&snapshot),
-        provider_secret_key.as_deref(),
+        provider_secret.as_ref().map(|s| s.expose_secret()),
         user_config.as_ref(),
     );
 
@@ -190,6 +207,7 @@ pub async fn run_turn(
     let mut tainted = ctx.untrusted_input;
     let mut any_tool_succeeded = false;
     let mut corrected = false;
+    let request_timeout = std::time::Duration::from_secs(resolved_config.request_timeout_seconds);
 
     while iteration < max_iterations {
         iteration += 1;
@@ -203,14 +221,25 @@ pub async fn run_turn(
             stream: Some(false),
         };
 
-        match super::stream::execute_stream_or_complete(
-            &client,
-            &resolved_config,
-            &request,
-            ctx.progress,
+        let step_result = match tokio::time::timeout(
+            request_timeout,
+            super::stream::execute_stream_or_complete(
+                &client,
+                &resolved_config,
+                &request,
+                ctx.progress,
+            ),
         )
         .await
         {
+            Ok(res) => res,
+            Err(_) => Err(format!(
+                "LLM request timed out after {}s",
+                resolved_config.request_timeout_seconds
+            )),
+        };
+
+        match step_result {
             Ok((content, tool_calls)) => {
                 if !tool_calls.is_empty() {
                     let tool_desc = content.trim();
@@ -340,11 +369,14 @@ pub async fn run_turn(
             tool_choice: None,
             stream: Some(ctx.progress.is_some()),
         };
-        if let Ok((content, _)) = super::stream::execute_stream_or_complete(
-            &client,
-            &resolved_config,
-            &final_req,
-            ctx.progress,
+        if let Ok(Ok((content, _))) = tokio::time::timeout(
+            request_timeout,
+            super::stream::execute_stream_or_complete(
+                &client,
+                &resolved_config,
+                &final_req,
+                ctx.progress,
+            ),
         )
         .await
         {

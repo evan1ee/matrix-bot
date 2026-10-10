@@ -35,7 +35,13 @@ pub async fn transcribe_voice(
     State(state): State<ApiState>,
     mut multipart: Multipart,
 ) -> Result<Json<VoiceTranscribeResponse>, ApiError> {
-    if !state.voice_config.enabled {
+    let (effective_config, effective_stt) = crate::interface::chat::voice::resolve_runtime_stt(
+        &state.services,
+        &state.voice_config,
+        &state.stt,
+    )
+    .await;
+    if !effective_config.enabled {
         return Err(ApiError::service_unavailable(
             "Voice transcription is disabled in server configuration",
         ));
@@ -66,12 +72,11 @@ pub async fn transcribe_voice(
 
     info!("Transcribing voice audio ({} bytes)", bytes.len());
 
-    let result: VoiceTranscriptionResult = state
-        .stt
+    let result: VoiceTranscriptionResult = effective_stt
         .transcribe(
             bytes,
             content_type.as_deref(),
-            state.voice_config.language_hint(),
+            effective_config.language_hint(),
         )
         .await
         .map_err(voice_error_response)?

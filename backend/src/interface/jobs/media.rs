@@ -92,7 +92,15 @@ impl JobHandler for ProcessReceiptHandler {
             }
         };
 
-        if !self.ocr.is_configured() {
+        let snapshot = self.services.app_config.snapshot();
+        let ocr_disabled_by_setting = snapshot
+            .is_customized(crate::domain::config::SettingKey::InferenceOcrEnabled)
+            && !snapshot.inference_ocr_enabled();
+        let effective_ocr = self.ocr.with_base_url_override(
+            Some(snapshot.inference_ocr_base_url()).filter(|s| !s.is_empty()),
+        );
+
+        if ocr_disabled_by_setting || !effective_ocr.is_configured() {
             warn!(
                 %owner,
                 storage_key = %p.storage_key,
@@ -108,7 +116,7 @@ impl JobHandler for ProcessReceiptHandler {
         }
 
         // Run OCR scan
-        let scan = match self.ocr.scan(bytes.to_vec()).await {
+        let scan = match effective_ocr.scan(bytes.to_vec()).await {
             Ok(s) => s,
             Err(OcrServiceError::NotConfigured) => {
                 warn!(%owner, "OCR service reported not configured");

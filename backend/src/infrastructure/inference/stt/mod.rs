@@ -84,6 +84,33 @@ impl SttClient {
         &self.model
     }
 
+    /// Returns a cloned client with dynamic runtime overrides applied when provided.
+    pub fn with_overrides(
+        &self,
+        base_url: Option<&str>,
+        api_key: Option<String>,
+        model: Option<&str>,
+    ) -> Self {
+        let base_url = base_url
+            .map(|u| u.trim().trim_end_matches('/').to_string())
+            .filter(|u| !u.is_empty())
+            .or_else(|| self.base_url.clone());
+        let api_key = api_key
+            .map(|k| k.trim().to_string())
+            .filter(|k| !k.is_empty())
+            .or_else(|| self.api_key.clone());
+        let model = model
+            .map(|m| m.trim().to_string())
+            .filter(|m| !m.is_empty())
+            .unwrap_or_else(|| self.model.clone());
+        Self {
+            base_url,
+            api_key,
+            model,
+            http: self.http.clone(),
+        }
+    }
+
     /// Sends the audio untouched and returns its transcription.
     ///
     /// The part's filename carries an extension derived from `mime_type`,

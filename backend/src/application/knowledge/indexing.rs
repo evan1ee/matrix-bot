@@ -45,7 +45,7 @@ impl SearchService {
     ) -> Result<IndexOutcome, AppError> {
         // Without an embedder there is nothing true to store; leave the item
         // unindexed so it is picked up once one is configured.
-        if !self.embedder.is_available() {
+        if !self.active_embedder().is_available() {
             return Ok(IndexOutcome::Skipped);
         }
         match item_type {
@@ -168,13 +168,14 @@ impl SearchService {
     /// Embeds stored text. The model's passage prefix goes into the embedder's
     /// input only; the stored snippet stays as written.
     async fn embed_passages(&self, chunks: &[String]) -> Result<Vec<Vec<f32>>, AppError> {
+        let embedder = self.active_embedder();
         let prefix = embedding_prefixes(&self.model).passage;
         let inputs: Vec<String> = chunks.iter().map(|c| format!("{prefix}{c}")).collect();
         // A 100,000-character note is hundreds of chunks; the inference service
         // bounds a request, so send them in slices.
         let mut embeddings = Vec::with_capacity(inputs.len());
         for slice in inputs.chunks(EMBED_BATCH) {
-            embeddings.extend(self.embedder.embed(slice).await.map_err(external)?);
+            embeddings.extend(embedder.embed(slice).await.map_err(external)?);
         }
         if embeddings.len() != chunks.len() {
             return Err(external(format!(
@@ -196,7 +197,7 @@ impl SearchService {
     /// instead of re-reading the same head of the list every run. Returns how
     /// many jobs it queued; does nothing without an embedder.
     pub async fn backfill_embeddings(&self, page_size: i64) -> Result<usize, AppError> {
-        if !self.embedder.is_available() {
+        if !self.active_embedder().is_available() {
             return Ok(0);
         }
         let page_size = page_size.max(1);

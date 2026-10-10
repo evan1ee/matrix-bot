@@ -48,7 +48,14 @@ pub async fn scan_image(
     State(state): State<ApiState>,
     mut multipart: Multipart,
 ) -> Result<Json<OcrScanResponse>, ApiError> {
-    if !state.ocr_config.enabled {
+    let snapshot = state.services.app_config.snapshot();
+    let ocr_enabled =
+        if snapshot.is_customized(crate::domain::config::SettingKey::InferenceOcrEnabled) {
+            snapshot.inference_ocr_enabled()
+        } else {
+            state.ocr_config.enabled
+        };
+    if !ocr_enabled {
         return Err(ApiError::service_unavailable(
             "OCR service is disabled in server configuration",
         ));
@@ -78,7 +85,11 @@ pub async fn scan_image(
 
     info!("Running web OCR scan on {} image bytes", bytes.len());
 
-    let ocr_result = match state.ocr.scan(bytes).await {
+    let effective_ocr = state
+        .ocr
+        .with_base_url_override(Some(snapshot.inference_ocr_base_url()).filter(|s| !s.is_empty()));
+
+    let ocr_result = match effective_ocr.scan(bytes).await {
         Ok(scan) => scan,
         Err(err) => return Err(ocr_error_response(err)),
     };

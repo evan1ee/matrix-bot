@@ -81,10 +81,49 @@ impl TtsModule {
             ));
         }
 
-        let settings = services.settings.get_or_default(&ctx.owner_id).await;
-        let voice = resolve_voice(&self.default_voice, settings.tts_voice.as_deref());
+        let snapshot = services.app_config.snapshot();
+        if snapshot.is_customized(crate::domain::config::SettingKey::InferenceTtsEnabled)
+            && !snapshot.inference_tts_enabled()
+        {
+            return Reply::from(failure_message(&TtsServiceError::NotConfigured));
+        }
 
-        let speech = match self.tts.synthesize(&text, &voice).await {
+        let house_voice =
+            if snapshot.is_customized(crate::domain::config::SettingKey::InferenceTtsVoice) {
+                snapshot.inference_tts_voice()
+            } else {
+                &self.default_voice
+            };
+        let settings = services.settings.get_or_default(&ctx.owner_id).await;
+        let voice = resolve_voice(house_voice, settings.tts_voice.as_deref());
+
+        let base_url = Some(snapshot.inference_tts_base_url()).filter(|s| !s.is_empty());
+        let model = if snapshot.is_customized(crate::domain::config::SettingKey::InferenceTtsModel)
+        {
+            Some(snapshot.inference_tts_model())
+        } else {
+            None
+        };
+        let dialect =
+            if snapshot.is_customized(crate::domain::config::SettingKey::InferenceTtsDialect) {
+                crate::infrastructure::inference::tts::TtsDialect::parse(
+                    snapshot.inference_tts_dialect(),
+                )
+                .ok()
+            } else {
+                None
+            };
+        let api_key = services
+            .secrets
+            .get_decrypted_secret(crate::domain::secrets::SecretProvider::Tts, "default")
+            .await
+            .ok()
+            .flatten()
+            .map(|s| s.expose_secret().to_string());
+
+        let effective_tts = self.tts.with_overrides(base_url, api_key, model, dialect);
+
+        let speech = match effective_tts.synthesize(&text, &voice).await {
             Ok(speech) => speech,
             Err(err) => {
                 warn!("TTS synthesis failed: {}", err);

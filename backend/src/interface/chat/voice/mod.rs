@@ -21,6 +21,49 @@ fn resolve_duration_secs(provider: Option<f32>, event: Option<std::time::Duratio
 
 use crate::domain::accounts::AccountId;
 
+/// Resolves the effective runtime `VoiceConfig` and `SttClient` from `AppConfigService`
+/// and `SecretService` (`SecretProvider::Stt`), falling back to environment defaults.
+pub async fn resolve_runtime_stt(
+    services: &crate::application::AppServices,
+    fallback_config: &VoiceConfig,
+    fallback_client: &crate::infrastructure::inference::stt::SttClient,
+) -> (
+    VoiceConfig,
+    crate::infrastructure::inference::stt::SttClient,
+) {
+    use crate::domain::config::SettingKey;
+    use crate::domain::secrets::SecretProvider;
+
+    let snapshot = services.app_config.snapshot();
+    let enabled = if snapshot.is_customized(SettingKey::InferenceSttEnabled) {
+        snapshot.inference_stt_enabled()
+    } else {
+        fallback_config.enabled
+    };
+    let language = if snapshot.is_customized(SettingKey::InferenceSttLanguage) {
+        snapshot.inference_stt_language().to_string()
+    } else {
+        fallback_config.language.clone()
+    };
+    let base_url = Some(snapshot.inference_stt_base_url()).filter(|s| !s.is_empty());
+    let model = if snapshot.is_customized(SettingKey::InferenceSttModel) {
+        Some(snapshot.inference_stt_model())
+    } else {
+        None
+    };
+    let api_key = services
+        .secrets
+        .get_decrypted_secret(SecretProvider::Stt, "default")
+        .await
+        .ok()
+        .flatten()
+        .map(|s| s.expose_secret().to_string());
+
+    let effective_config = VoiceConfig { enabled, language };
+    let effective_client = fallback_client.with_overrides(base_url, api_key, model);
+    (effective_config, effective_client)
+}
+
 /// Processes an incoming audio or voice note message, whatever channel it came from:
 /// 1. Sends the audio to the configured speech-to-text service.
 /// 2. Builds a structured semantic intent prompt with the transcription.
@@ -48,6 +91,14 @@ pub async fn process_audio(
             .into();
     }
 
+    let (effective_config, effective_stt) = resolve_runtime_stt(services, config, stt).await;
+    if !effective_config.enabled {
+        return voice_error_message(
+            &crate::infrastructure::inference::stt::SttServiceError::NotConfigured,
+        )
+        .into();
+    }
+
     if let Some(progress) = progress {
         progress.report_stage("🎧 正在转写语音...").await;
     }
@@ -59,8 +110,12 @@ pub async fn process_audio(
         audio_bytes.len()
     );
 
-    let transcription: VoiceTranscriptionResult = match stt
-        .transcribe(audio_bytes.to_vec(), mime_type, config.language_hint())
+    let transcription: VoiceTranscriptionResult = match effective_stt
+        .transcribe(
+            audio_bytes.to_vec(),
+            mime_type,
+            effective_config.language_hint(),
+        )
         .await
     {
         Ok(t) => {
@@ -105,7 +160,7 @@ pub async fn process_audio(
         crate::llm::LlmTurnContext::new(services, &db.pool, ai, owner_id, conversation, progress);
     match crate::llm::run_turn(&turn_ctx, &ai_prompt, None).await {
         Ok(ai_turn) => MediaReply {
-            html: format_voice_turn_response(&ai_turn, &transcription, stt.model()),
+            html: format_voice_turn_response(&ai_turn, &transcription, effective_stt.model()),
             tool_results: ai_turn.tool_results,
         },
         Err(err) => {

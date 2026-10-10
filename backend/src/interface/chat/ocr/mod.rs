@@ -38,6 +38,18 @@ pub async fn process_image(
             .into();
     }
 
+    let snapshot = services.app_config.snapshot();
+    if snapshot.is_customized(crate::domain::config::SettingKey::InferenceOcrEnabled)
+        && !snapshot.inference_ocr_enabled()
+    {
+        return ocr_error_message(
+            &crate::infrastructure::inference::ocr::OcrServiceError::NotConfigured,
+        )
+        .into();
+    }
+    let effective_ocr = ocr
+        .with_base_url_override(Some(snapshot.inference_ocr_base_url()).filter(|s| !s.is_empty()));
+
     if let Some(progress) = progress {
         progress.report_stage("🔍 正在识别图片文字 (OCR)...").await;
     }
@@ -49,7 +61,7 @@ pub async fn process_image(
         image_bytes.len()
     );
 
-    let ocr_result: OcrResult = match ocr.scan(image_bytes.to_vec()).await {
+    let ocr_result: OcrResult = match effective_ocr.scan(image_bytes.to_vec()).await {
         Ok(scan) => scan.into(),
         Err(err) => {
             warn!("OCR extraction failed for owner {}: {:?}", owner_id, err);

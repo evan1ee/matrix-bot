@@ -120,7 +120,14 @@ pub async fn execute_web_search_with_services(
             .await
         {
             Ok(Some(sec)) => Some(sec.expose_secret().to_string()),
-            _ => get_tavily_api_key(),
+            Ok(None) => get_tavily_api_key(),
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "Failed to decrypt Tavily secret from vault; falling back to environment"
+                );
+                get_tavily_api_key()
+            }
         };
 
         if let Some(api_key) = tavily_key {
@@ -134,29 +141,6 @@ pub async fn execute_web_search_with_services(
 
     tracing::info!(
         "Tavily disabled or API key absent; using DuckDuckGo fallback for: '{}'",
-        query_trimmed
-    );
-    execute_duckduckgo_search(query_trimmed).await
-}
-
-/// Executes a live web search, using Tavily if `TAVILY_API_KEY` is set,
-/// otherwise falling back to DuckDuckGo HTML scraping.
-pub async fn execute_web_search(query: &str) -> Result<String, String> {
-    let query_trimmed = query.trim();
-    if query_trimmed.is_empty() {
-        return Err("Search query cannot be empty".to_string());
-    }
-
-    if let Some(api_key) = get_tavily_api_key() {
-        tracing::info!(
-            "Executing web search via Tavily API for query: '{}'",
-            query_trimmed
-        );
-        return execute_tavily_search(query_trimmed, &api_key).await;
-    }
-
-    tracing::info!(
-        "No Tavily API key set (checked TAVILY_API_KEY); using DuckDuckGo fallback for: '{}'",
         query_trimmed
     );
     execute_duckduckgo_search(query_trimmed).await
@@ -185,11 +169,6 @@ fn build_search_http_client(timeout_secs: u64) -> Result<reqwest::Client, String
     builder
         .build()
         .map_err(|e| format!("Failed to build HTTP client: {}", e))
-}
-
-/// Executes a web search via the Tavily API (optimized for AI/LLM consumption).
-async fn execute_tavily_search(query: &str, api_key: &str) -> Result<String, String> {
-    execute_tavily_search_with_timeout(query, api_key, 15).await
 }
 
 async fn execute_tavily_search_with_timeout(
@@ -432,6 +411,7 @@ mod tests {
             system_prompt: None,
             temperature: 0.7,
             max_tokens: 2048,
+            request_timeout_seconds: 60,
         }
     }
 

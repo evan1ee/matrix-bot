@@ -334,7 +334,15 @@ pub async fn capture_photo_note(
     media_bytes: &[u8],
     ocr: &crate::infrastructure::inference::ocr::OcrClient,
 ) -> String {
-    let text = match ocr.scan(media_bytes.to_vec()).await {
+    let snapshot = services.app_config.snapshot();
+    if snapshot.is_customized(crate::domain::config::SettingKey::InferenceOcrEnabled)
+        && !snapshot.inference_ocr_enabled()
+    {
+        return "⚠️ <b>图片识别不可用</b><br/>• <b>原因:</b> OCR 识别服务暂时不可用。".to_string();
+    }
+    let effective_ocr = ocr
+        .with_base_url_override(Some(snapshot.inference_ocr_base_url()).filter(|s| !s.is_empty()));
+    let text = match effective_ocr.scan(media_bytes.to_vec()).await {
         Ok(s) if !s.text.trim().is_empty() => s.text.trim().to_string(),
         Ok(_) => {
             return "⚠️ <b>图片识别失败</b><br/>• <b>原因:</b> 未能从图片中识别出有效文字。"
@@ -397,11 +405,20 @@ pub async fn capture_voice_note(
     stt: &crate::infrastructure::inference::stt::SttClient,
     progress: Option<&dyn crate::llm::progress::ProgressSink>,
 ) -> String {
+    let (effective_config, effective_stt) =
+        crate::interface::chat::voice::resolve_runtime_stt(services, voice_config, stt).await;
+    if !effective_config.enabled {
+        return "⚠️ <b>语音识别不可用</b><br/>• <b>原因:</b> STT 服务暂时不可用。".to_string();
+    }
     if let Some(progress) = progress {
         progress.report_stage("🎧 正在转写语音笔记...").await;
     }
-    let transcription = match stt
-        .transcribe(media_bytes.to_vec(), mimetype, voice_config.language_hint())
+    let transcription = match effective_stt
+        .transcribe(
+            media_bytes.to_vec(),
+            mimetype,
+            effective_config.language_hint(),
+        )
         .await
     {
         Ok(t) if !t.text.trim().is_empty() => t.text.trim().to_string(),

@@ -60,6 +60,20 @@ impl OcrClient {
         self.base_url.is_some()
     }
 
+    /// Returns a cloned client with a dynamic base URL override when non-empty.
+    pub fn with_base_url_override(&self, override_url: Option<&str>) -> Self {
+        let cleaned = override_url
+            .map(|u| u.trim().trim_end_matches('/').to_string())
+            .filter(|u| !u.is_empty());
+        match cleaned {
+            Some(url) => Self {
+                base_url: Some(url),
+                http: self.http.clone(),
+            },
+            None => self.clone(),
+        }
+    }
+
     /// Sends the image bytes untouched and returns the recognised text.
     pub async fn scan(&self, image_bytes: Vec<u8>) -> Result<OcrScan, OcrServiceError> {
         let base = self
