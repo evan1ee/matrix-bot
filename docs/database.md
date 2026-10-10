@@ -149,26 +149,27 @@ Migration `0011_knowledge_base` introduces the personal knowledge base and vecto
 
 ## Configuration Management and Encrypted Secrets (`0015_configuration_and_secrets.sql`)
 
-Migration `0015_configuration_and_secrets` introduces system-wide dynamic configuration, an encrypted credentials vault, and an administrative audit log:
+Migration `0015_configuration_and_secrets` introduces system-wide dynamic configuration, an encrypted credentials vault, and an administrative audit log. Migration `0016_config_review_followups` widens the audit `target_type` CHECK with `account`, recreates the `accounts.role` CHECK per schema and drops three indexes nothing used; the list below is the schema after both:
 
-- **`accounts.role` column:** `TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin'))`. Only `admin` accounts can read or write system settings and secrets.
+- **`accounts.role` column:** `TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin'))`. Only `admin` accounts (granted via `matrix-bot admin grant <account_id>` or SQL, and enrolled with at least one passkey) can read or write system settings and secrets.
 - **`app_settings` table:**
-  - `key TEXT PRIMARY KEY` (validated against the 32-key `SettingKey` enum)
-  - `value JSONB NOT NULL`, `value_type TEXT NOT NULL CHECK (value_type IN ('string', 'integer', 'float', 'boolean', 'json'))`
-  - `description TEXT NOT NULL DEFAULT ''`, `is_sensitive BOOLEAN NOT NULL DEFAULT FALSE`, `hot_reloadable BOOLEAN NOT NULL DEFAULT TRUE`, `category TEXT NOT NULL DEFAULT 'general'`
-  - `updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`, `updated_by UUID REFERENCES accounts(id) ON DELETE SET NULL`
+  - `key TEXT PRIMARY KEY` (validated in application code against the 20-key `SettingKey` enum and `SettingRegistry`)
+  - `value JSONB NOT NULL` (typed in domain as `SettingValue::{String, Integer, Float, Boolean}`)
+  - `updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP`, `updated_by UUID REFERENCES accounts(id) ON DELETE SET NULL`
+  - Index: `idx_app_settings_updated_at (updated_at)`
 - **`provider_secrets` table:**
   - `id UUID PRIMARY KEY DEFAULT gen_random_uuid()`
-  - `provider TEXT NOT NULL`, `name TEXT NOT NULL DEFAULT 'default'` with `UNIQUE (provider, name)`
-  - `encrypted_value BYTEA NOT NULL` (AES-256-GCM ciphertext + 16-byte authentication tag), `nonce BYTEA NOT NULL` (12-byte CSPRNG nonce, `CHECK (octet_length(nonce) = 12)`), `key_version INTEGER NOT NULL DEFAULT 1`
-  - `status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled', 'invalid', 'expired'))`
-  - `masked_preview TEXT`, `metadata JSONB NOT NULL DEFAULT '{}'`, `last_tested_at TIMESTAMPTZ`, `last_test_status TEXT`, `last_test_error TEXT`
-  - `created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`, `updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`, `updated_by UUID REFERENCES accounts(id) ON DELETE SET NULL`
-- **`config_audit` table:**
+  - `provider TEXT NOT NULL`, `name TEXT NOT NULL DEFAULT 'default'` with `CONSTRAINT uq_provider_secrets_slot UNIQUE (provider, name)`
+  - `secret_ciphertext BYTEA NOT NULL` (AES-256-GCM ciphertext + 16-byte authentication tag), `nonce BYTEA NOT NULL` (12-byte nonce), `key_version INT NOT NULL DEFAULT 1`
+  - `status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled', 'revoked'))`
+  - `metadata JSONB`, `last_tested_at TIMESTAMPTZ`, `last_test_status TEXT CHECK (last_test_status IN ('healthy', 'unhealthy', 'failed', 'unknown'))`, `last_test_error TEXT`
+  - `created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP`, `updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP`, `updated_by UUID REFERENCES accounts(id) ON DELETE SET NULL`
+- **`config_audit_log` table:**
   - `id BIGSERIAL PRIMARY KEY`, `actor_id UUID REFERENCES accounts(id) ON DELETE SET NULL`
-  - `action TEXT NOT NULL`, `target_type TEXT NOT NULL CHECK (target_type IN ('setting', 'secret'))`, `target_key TEXT NOT NULL`, `outcome TEXT NOT NULL CHECK (outcome IN ('success', 'failure'))`
-  - `detail JSONB`, `created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
-- **Global Scope:** These three tables are system-global rather than per-account owned data; `updated_by` and `actor_id` use `ON DELETE SET NULL` and are registered in `AUDIT_ACTOR_UNTOUCHED` in `db/catalog.rs`.
+  - `action TEXT NOT NULL`, `target_type TEXT NOT NULL CHECK (target_type IN ('setting', 'secret', 'system', 'account'))`, `target_key TEXT NOT NULL`, `outcome TEXT NOT NULL CHECK (outcome IN ('success', 'failure'))`
+  - `detail JSONB`, `created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP`
+  - Indexes: `idx_config_audit_log_created_at (created_at DESC)`, `idx_config_audit_log_target (target_type, target_key)`
+- **Global Scope & Account Merge:** These three tables are instance-wide rather than per-account owned data and are therefore not in `OWNED_TABLES`. When an account is merged (`infrastructure/postgres/merge.rs` and `application/accounts/merge.rs`), `app_settings.updated_by`, `provider_secrets.updated_by`, and `config_audit_log.actor_id` are remapped to the surviving account, and `role = 'admin'` is preserved on the surviving account if either merged account held `admin`.
 
 ## Migrations
 

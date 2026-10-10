@@ -36,11 +36,11 @@ The system enables authorized administrators to configure runtime settings and m
 | **D5** | **Precedence Order:** `Persisted Runtime Setting > Process Environment Variable > Built-in Code Default`. | Allows admins to override deployment defaults on the fly while maintaining zero-config startup defaults and preserving existing `.env` workflows. | Overrides take effect immediately for hot-reloadable components. |
 | **D6** | **Matrix cryptographic sessions remain untouched.** Matrix login tokens, cross-signing keys, and SQLite crypto stores (`data/bot_store/`) remain managed by `matrix-sdk`. | Migrating Matrix device crypto into a generic provider table violates Matrix SDK invariants and hard safety rules. | Low; keeps Matrix crypto isolated and safe. |
 | **D7** | **Atomic In-Memory Configuration Snapshot (`ArcSwap<RuntimeConfigSnapshot>`).** Configuration is reloaded atomically into an immutable snapshot. Components read the snapshot without lock contention. | Zero locking overhead on request paths; guarantees callers never observe partially applied configuration updates. | Snapshot generation must be efficient. |
-| **D8** | **Explicit Hot-Reload vs. Restart-Required Tagging.** Each setting and secret in the status API declares its reload capability (`hot_reloadable: true/false`). | Channels with long-lived background sockets (Discord Gateway, Telegram polling, IMAP poller) cannot always be safely reconstructed mid-flight without reconnect logic. Accurately informing the operator avoids false security. | Admin UI displays a clear "Restart required" badge for cold settings. |
+| **D8** | **Hot-Reloadable Registry Only; Restart-Required Settings Stay in `.env`.** Only settings with live hot-reloadable runtime consumers (20 keys) live in `app_settings` / `SettingRegistry`. | Channels with long-lived background sockets (Discord Gateway, Telegram polling, IMAP poller) and `EMBEDDING_MODEL` require a restart or background re-index. Keeping restart-required settings in `.env` avoids misleading Admin UI controls and keeps `domain/config/registry.rs` focused. | Admin Console displays only hot-reloadable runtime settings (`hot_reloadable: true`). |
 | **D9** | **Dedicated Administrative Audit Log (`config_audit_log`).** Global configuration changes are tracked separately from per-account security events (`security_events`). | Global config affects the entire instance and multiple tenants. Blending them into per-user security events complicates auditability and account merge semantics. | Separate audit table with retention controls. |
-| **D10** | **Bootstrap Administrator via Deployment Allowlist (`ADMIN_USERS`).** Accounts granted the `admin` role are initialized via deployment config (`ADMIN_USERS` comma-separated UUIDs/MXIDs) or stored `role` column. | Guarantees the instance owner has access even before the web console is configured, preventing admin lockout. | Deployment config remains authoritative for bootstrapping. |
+| **D10** | **Controlled CLI / SQL Bootstrap Administrator (`matrix-bot admin grant|revoke <account_id>`).** Public registration and passkey enrollment never promote an account to `admin` automatically. Admin role is granted via CLI or SQL only after the account has enrolled at least one passkey. | Eliminates first-user race conditions and ensures every administrator account is backed by WebAuthn passkey authentication before accessing admin endpoints. | Operator runs `matrix-bot admin grant <account_id>` once after enrolling their passkey. |
 | **D11** | **Write-Only Secrets in API and UI.** `GET /api/v1/admin/secrets` returns only metadata (`id`, `provider`, `name`, `status`, `key_version`, `last_tested_at`, `last_test_status`, `updated_at`). Ciphertext and plaintext are never returned. | Complete immunity against browser-side credential exfiltration, XSS credential scraping, and shoulder surfing. | Users cannot view an existing secret value; they can only replace it. |
-| **D12** | **Redacted in-memory Secret Types (`SecretValue`).** Wraps secret strings with `Zeroize` on drop and custom `Debug`/`Display` implementations rendering `[REDACTED]`. | Eliminates accidental secret exposure in `tracing` logs, backtraces, panic outputs, and format strings. | Developers must call `.expose_secret()` explicitly when passing credentials to HTTP client builders. |
+| **D12** | **Redacted in-memory Secret Types (`SecretValue`).** Wraps secret strings with buffer zeroization on `Drop` and custom `Debug`/`Display` implementations rendering `[REDACTED]`. | Eliminates accidental secret exposure in `tracing` logs, backtraces, panic outputs, and format strings. | Developers must call `.expose_secret()` explicitly when passing credentials to HTTP client builders. |
 
 ---
 
@@ -48,7 +48,7 @@ The system enables authorized administrators to configure runtime settings and m
 
 Every variable in the workspace is assigned to exactly one category:
 
-### 3.1 Deployment Configuration (Environment Only)
+### 3.1 Deployment & Restart-Required Configuration (Environment Only)
 
 Loaded during application boot via `Config::from_env()`. Immutable at runtime. Never persisted in PostgreSQL settings tables.
 
@@ -60,7 +60,7 @@ Loaded during application boot via `Config::from_env()`. Immutable at runtime. N
 | `API_HOST` | String | HTTP server bind address. Default: `0.0.0.0`. |
 | `API_PORT` | u16 | HTTP server port. Default: `8080`. |
 | `SECRETS_ENCRYPTION_KEY` | String | **New.** 256-bit AES master key in hex (64 chars) or base64. Fails closed if missing for secret operations. |
-| `ADMIN_USERS` | String | **New.** Comma-separated list of account UUIDs or platform identities (`@admin:server`) granted administrative rights. |
+| `SECRETS_ENCRYPTION_KEYS` | String | **New.** Optional versioned keys (`1:<key1>,2:<key2>`) for key rotation. |
 | `INVITE_SECRET` / `API_REGISTRATION_SECRET` | String | Secret required to register a new account when registration is closed. |
 | `REGISTRATION_OPEN` / `ALLOW_OPEN_REGISTRATION` | bool | Whether public registration is enabled without an invite secret. |
 | `WEBAUTHN_RP_ID` | String | Relying Party ID (bare hostname, e.g., `localhost` or `bot.example.com`). Baked into passkeys. |
@@ -77,61 +77,50 @@ Loaded during application boot via `Config::from_env()`. Immutable at runtime. N
 | `MATRIX_PASSWORD` | String | Bot Matrix account password (deployment credential for bot login). |
 | `MATRIX_RECOVERY_KEY` | String | Matrix security recovery key for E2EE device verification. |
 | `MATRIX_VERIFICATION_ALLOWLIST` | List | MXIDs permitted to auto-verify with the bot. |
+| `EMBEDDING_MODEL` | String | Knowledge embedding model (`multilingual-e5-small`); changing it re-tags and re-embeds chunks in the background. |
+| `DISCORD_TOKEN`, `DISCORD_GUILD_ID` | String/u64 | Discord adapter boot configuration (restart required). |
+| `TELEGRAM_BOT_TOKEN`, `TELEGRAM_MODE`, `TELEGRAM_WEBHOOK_SECRET` | String | Telegram adapter boot configuration (restart required). |
+| `EMAIL_IMAP_URL`, `EMAIL_SMTP_URL`, `EMAIL_USERNAME`, `EMAIL_PASSWORD`, `EMAIL_FROM`, `EMAIL_AUTHSERV_ID`, `EMAIL_POLL_SECONDS`, `EMAIL_PROCESSED_FOLDER` | String/u64 | Email adapter boot configuration (restart required). |
 
-### 3.2 Runtime Application Settings (`app_settings`)
+### 3.2 Runtime Application Settings (`app_settings` — 20 Hot-Reloadable Keys)
 
-Non-secret configuration managed via Admin API / UI. Persisted in PostgreSQL. Validated against domain schemas. Documented defaults and environment fallbacks.
+Non-secret hot-reloadable configuration managed via Admin API / UI. Persisted in PostgreSQL. Validated against domain schemas. Documented defaults and environment fallbacks.
 
 | Setting Identifier (`key`) | Value Type | Default | Hot Reload? | Description |
 |---|---|---|---|---|
 | `llm.default_provider` | String | `"openai"` | Yes | Active default LLM provider integration (`openai`, `anthropic`, `xai`, `deepseek`, `ollama`, `custom`). |
 | `llm.default_model` | String | `"gpt-4o-mini"` | Yes | Default model name passed in inference requests. |
-| `llm.request_timeout_seconds` | u64 | `60` | Yes | HTTP client timeout for LLM calls (5–300 seconds). |
-| `llm.default_temperature` | f64 | `0.7` | Yes | Default sampling temperature (0.0–2.0). |
-| `llm.default_max_tokens` | i64 | `2048` | Yes | Max completion tokens (64–8192). |
-| `search.tavily.enabled` | bool | `true` | Yes | Whether Tavily web search is used when configured. |
-| `search.timeout_seconds` | u64 | `15` | Yes | Web search request timeout (3–60 seconds). |
-| `inference.ocr.enabled` | bool | `true` | Yes | Enable/disable OCR image text recognition. |
-| `inference.ocr.base_url` | String | `None` | Yes | Base URL for OCR inference service. |
-| `inference.stt.enabled` | bool | `true` | Yes | Enable/disable speech-to-text audio transcription. |
-| `inference.stt.base_url` | String | `None` | Yes | Base URL for STT inference service. |
+| `llm.request_timeout_seconds` | Integer | `60` | Yes | HTTP client timeout for LLM calls (5–300 seconds). |
+| `llm.default_temperature` | Float | `0.7` | Yes | Default sampling temperature (0.0–2.0). |
+| `llm.default_max_tokens` | Integer | `2048` | Yes | Max completion tokens (64–8192). |
+| `search.tavily_enabled` | Boolean | `true` | Yes | Whether Tavily web search is used when configured. |
+| `search.brave_enabled` | Boolean | `false` | Yes | Whether Brave web search is used when configured. |
+| `search.timeout_seconds` | Integer | `15` | Yes | Web search request timeout (3–60 seconds). |
+| `inference.ocr.enabled` | Boolean | `true` | Yes | Enable/disable OCR image text recognition. |
+| `inference.ocr.base_url` | String | `""` | Yes | Base URL for OCR inference service. |
+| `inference.stt.enabled` | Boolean | `true` | Yes | Enable/disable speech-to-text audio transcription. |
+| `inference.stt.base_url` | String | `""` | Yes | Base URL for STT inference service. |
 | `inference.stt.model` | String | `"sensevoice-small"` | Yes | STT transcription model name. |
 | `inference.stt.language` | String | `"auto"` | Yes | Default language hint for speech recognition. |
-| `inference.tts.enabled` | bool | `true` | Yes | Enable/disable `!say` text-to-speech audio synthesis. |
-| `inference.tts.base_url` | String | `None` | Yes | Base URL for TTS inference service. |
+| `inference.tts.enabled` | Boolean | `true` | Yes | Enable/disable `!say` text-to-speech audio synthesis. |
+| `inference.tts.base_url` | String | `""` | Yes | Base URL for TTS inference service. |
 | `inference.tts.model` | String | `"kokoro"` | Yes | Text-to-speech model name. |
 | `inference.tts.voice` | String | `"0"` | Yes | House default TTS speaker voice. |
 | `inference.tts.dialect` | String | `"openai"` | Yes | Dialect format (`openai` or `elevenlabs`). |
-| `inference.embedding.base_url`| String | `None` | Yes | Base URL for knowledge embedding inference. |
-| `inference.embedding.model` | String | `"multilingual-e5-small"`| No (triggers backfill) | Active embedding model for note indexing. |
-| `channels.discord.enabled` | bool | `false` | No (restart/reconnect) | Enable/disable Discord adapter. |
-| `channels.discord.guild_id` | u64 | `None` | No | Target Discord Guild ID for instant slash command registration. |
-| `channels.telegram.enabled` | bool | `false` | No (restart/reconnect) | Enable/disable Telegram adapter. |
-| `channels.telegram.mode` | String | `"polling"` | No | Telegram update mode (`webhook` or `polling`). |
-| `channels.email.enabled` | bool | `false` | No (restart/reconnect) | Enable/disable Email adapter. |
-| `channels.email.imap_url` | String | `None` | No | IMAPS endpoint URL (`imaps://mail.example.com:993`). |
-| `channels.email.smtp_url` | String | `None` | No | SMTP endpoint URL (`smtps://mail.example.com:465`). |
-| `channels.email.from` | String | `None` | No | Outbound sender email address. |
-| `channels.email.authserv_id` | String | `None` | No | Mail receiving server authserv ID for DMARC validation. |
-| `channels.email.poll_seconds` | u64 | `60` | No | IMAP mailbox polling interval (seconds, min 5). |
-| `channels.email.processed_folder`| String | `None` | No | Optional IMAP folder for processed messages. |
-| `registration.allow_link_signup`| bool | `true` | Yes | Allow allowlisted chat identities to create accounts via `/link`. |
+| `inference.embedding.base_url`| String | `""` | Yes | Base URL for knowledge embedding inference. |
+| `registration.allow_link_signup`| Boolean | `true` | Yes | Allow allowlisted chat identities to create accounts via `/link`. |
 
-### 3.3 Secret Credentials (`provider_secrets`)
+### 3.3 Secret Credentials (`provider_secrets` — 6 Hot-Reloadable Providers)
 
-Sensitive credentials managed via Admin API / UI. Encrypted at rest. Never returned over read APIs.
+Sensitive hot-reloadable credentials managed via Admin API / UI. Encrypted at rest. Never returned over read APIs. Restart-required credentials (`DISCORD_TOKEN`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `EMAIL_PASSWORD`, `S3_SECRET_KEY`) remain strictly in `.env`.
 
 | Provider (`provider`) | Slot / Name | Payload Type | Description |
 |---|---|---|---|
-| `ai_default` / `openai` / `anthropic` | `"default"` | API Key | LLM provider bearer token or API key. |
+| `openai` / `anthropic` | `"default"` | API Key | LLM provider bearer token or API key. |
 | `tavily` | `"default"` | API Key | Tavily Search API key. |
 | `stt` | `"default"` | API Key | Hosted speech-to-text API token (optional for local ONNX). |
 | `tts` | `"default"` | API Key | Hosted text-to-speech API token (OpenAI or ElevenLabs). |
-| `discord` | `"default"` | Bot Token | Discord Bot authentication token (`DISCORD_TOKEN`). |
-| `telegram` | `"default"` | Bot Token | Telegram Bot token (`TELEGRAM_BOT_TOKEN`). |
-| `telegram_webhook` | `"default"` | Secret Token | Secret header token for Telegram webhook validation. |
-| `email` | `"default"` | Password | Password / App password for IMAP and SMTP auth (`EMAIL_PASSWORD`). |
-| `s3` | `"default"` | Secret Key | S3 / R2 storage secret access key (`S3_SECRET_KEY`). |
+| `generic` | `<custom_slot>` | API Key | Custom LLM provider or Brave search (`brave`) API key. |
 
 ---
 
@@ -196,12 +185,12 @@ The configuration capability integrates seamlessly into the established layer-fi
 
 ## 5. Database Schema & Migrations
 
-A single forward-only migration: `backend/migrations/0014_configuration_and_secrets.sql`.
+A single forward-only migration: `backend/migrations/0015_configuration_and_secrets.sql`.
 
 ### 5.1 Migration DDL
 
 ```sql
--- 0014_configuration_and_secrets.sql: Admin settings, encrypted secrets, audit log, and account roles.
+-- 0015_configuration_and_secrets.sql: Admin settings, encrypted secrets, audit log, and account roles.
 
 -- 1. Account Roles: Add role column to accounts table
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'user';
@@ -258,7 +247,7 @@ CREATE INDEX IF NOT EXISTS idx_config_audit_log_target ON config_audit_log(targe
 ### 5.2 Ownership & Account Merge Invariants
 
 - **`OWNED_TABLES`:** Neither `app_settings` nor `provider_secrets` is added to `OWNED_TABLES`, because they are instance-wide system configuration tables, not per-user domain assets.
-- **`OWNER_ID_MERGED_SEPARATELY`:** In `domain/accounts/merge.rs`, `config_audit_log.actor_id`, `app_settings.updated_by`, and `provider_secrets.updated_by` are remapped to the winning account when an admin account is merged, preserving audit trail integrity without row duplication.
+- **Account Merge Remapping (`infrastructure/postgres/merge.rs`):** `config_audit_log.actor_id`, `app_settings.updated_by`, and `provider_secrets.updated_by` are remapped to the surviving account when an account is merged, preserving audit trail integrity without row duplication.
 
 ---
 
@@ -335,7 +324,7 @@ Pure domain types in `backend/src/domain/config/` and `backend/src/domain/secret
 ### 7.2 Secrets Domain (`domain/secrets/`)
 
 - `SecretId(Uuid)`: Strongly typed newtype identifier.
-- `SecretProvider`: Enum of supported integrations (`OpenAi`, `Anthropic`, `Tavily`, `Discord`, `Telegram`, `Email`, `S3`, `Generic`).
+- `SecretProvider`: Enum of supported hot-reloadable integrations (`OpenAi`, `Anthropic`, `Tavily`, `Stt`, `Tts`, `Generic`).
 - `SecretStatus`: Lifecycle enum (`Active`, `Disabled`, `Revoked`).
 - `SecretMetadata`: Public representation returning ID, provider, slot name, status, key version, masked preview (e.g., `sk-...4a1b`), validation status, and timestamps.
 - `EncryptedSecret`: Domain value object containing ciphertext, nonce, and key version.
@@ -416,11 +405,8 @@ Built in `AppServices::new(pool)` using dependency injection.
 
 `infrastructure/inference/testers/`:
 Modular test routines that verify external credentials without side effects:
-- `test_llm_credential(endpoint: &str, api_key: &str) -> Result<(), String>`: Submits a minimalist 1-token request (`models` or ping).
-- `test_tavily_credential(api_key: &str) -> Result<(), String>`: Executes a lightweight query or validation probe.
-- `test_telegram_credential(token: &str) -> Result<(), String>`: Calls Telegram `getMe`.
-- `test_discord_credential(token: &str) -> Result<(), String>`: Calls Discord `GET /users/@me`.
-- `test_email_credential(config: &EmailConfig) -> Result<(), String>`: Tests IMAP TLS handshake and login.
+- `test_llm_credential(endpoint: &str, api_key: &str) -> Result<(), String>`: Submits a minimalist request (`models` or ping).
+- `test_tavily_credential(api_key: &str) -> Result<(), String>`: Executes a lightweight query validation probe.
 
 ---
 
@@ -428,20 +414,19 @@ Modular test routines that verify external credentials without side effects:
 
 All administrative endpoints are placed under `/api/v1/admin/` and registered in `interface/http/routes.rs`.
 
-### 10.1 Authentication & Authorization Guard: `AdminUser`
+### 10.1 Authentication & Authorization Guards: `AdminSession` & `AdminUser`
 
-A dedicated Axum extractor:
-```rust
-pub struct AdminUser(pub VerifiedUser);
-```
-Enforces:
-1. Valid session cookie or bearer token resolved to `AuthUser`.
-2. Session is live and not expired.
-3. User account has `role == "admin"` in `accounts` table.
-4. Passkey step-up is satisfied within the last 5 minutes (`VerifiedUser`), refusing stale or unconfirmed sessions with `403 Forbidden ("Confirm with your passkey to continue")`.
-5. Origin CSRF check is verified for mutating methods (`POST`, `PUT`, `DELETE`, `PATCH`).
+Two dedicated Axum extractors in `interface/http/auth/extractor.rs`:
+- **`AdminSession`** (used by ordinary admin `GET` endpoints):
+  1. Valid session cookie or bearer token resolved to `AuthUser`.
+  2. Rejects MCP machine tokens (`mb_mcp_…`) and recovery-restricted sessions.
+  3. Verifies `user.role == "admin"` in `accounts` and that the account has at least one enrolled passkey (`has_passkey`).
+- **`AdminUser`** (used by all admin write operations `PUT`/`POST`/`DELETE` and `POST /api/v1/admin/secrets/:id/test`):
+  1. Enforces all `AdminSession` checks above.
+  2. Requires fresh WebAuthn passkey step-up within the last 5 minutes (`STEP_UP_WINDOW_MINUTES = 5`), refusing stale sessions with `403 Forbidden ("Confirm with your passkey to continue")`.
+  3. Origin CSRF check is verified for mutating methods (`POST`, `PUT`, `DELETE`, `PATCH`).
 
-All admin routes are registered in `SENSITIVE` routes list in `interface/http/mod.rs` for automated step-up test enforcement.
+All admin write and secret-testing routes are registered in the `SENSITIVE` routes list in `interface/http/mod.rs` for automated step-up test enforcement.
 
 ### 10.2 Endpoint Catalog
 
@@ -523,11 +508,11 @@ Continuous polling of PostgreSQL adds connection pool overhead. On the other han
   `User Config > Runtime Snapshot (app_settings + provider_secrets) > Environment (AiEnvConfig) > Defaults`.
   Model and provider switches take effect on the very next chat turn or agent step.
 - **Web Search (`llm/search.rs`):**
-  Inspects the active snapshot for `search.tavily.enabled` and decrypted Tavily API key before falling back to environment or DuckDuckGo.
-- **Inference Clients (STT / TTS / OCR / Embeddings):**
-  Inference clients inspect the snapshot for base URLs and model tags.
-- **Channel Adapters (Matrix, Discord, Telegram, Email):**
-  Long-running socket connections (Discord Gateway, Telegram long-poll, IMAP poll) inspect snapshot credentials upon reconnect. Settings marked `hot_reloadable: false` inform the admin in the UI that a graceful restart is required.
+  Inspects the active snapshot for `search.tavily_enabled`, `search.brave_enabled`, `search.timeout_seconds`, and decrypted Tavily/Brave API keys before falling back to environment or DuckDuckGo.
+- **Inference Clients (STT / TTS / OCR / Embedding Base URL) & Link Signup (`application/identity/link.rs`):**
+  Inference clients inspect the snapshot for `inference.ocr.*`, `inference.stt.*`, `inference.tts.*`, and `inference.embedding.base_url`. `LinkService` inspects `registration.allow_link_signup`.
+- **Restart-Required Settings (`.env`):**
+  Channel adapters (`DISCORD_*`, `TELEGRAM_*`, `EMAIL_*`) and `EMBEDDING_MODEL` remain configured in `.env`.
 
 ---
 
@@ -544,13 +529,12 @@ A dedicated **Configuration & Admin** module in the React SPA (`frontend/src/mod
 
 ```text
 Admin Console
-├── 1. Overview & Status   (Service health, effective config, reload status, restart notices)
-├── 2. General Settings    (Timeouts, limits, registration policies, feature toggles)
-├── 3. LLM & AI Models     (Default provider, models, temperature, max tokens, test connection)
-├── 4. Search & Inference  (Tavily search, STT, TTS, OCR, Embedding inference status & keys)
-├── 5. Channels            (Matrix, Discord, Telegram, Email status, credentials, restart tags)
-├── 6. Credentials Vault   (Encrypted secret metadata table, replace secret modal, test probes)
-└── 7. Audit Log           (Filterable, paginated configuration change history)
+├── 1. Overview & Status   (Service health, effective config, hot-reloadable status summary)
+├── 2. General Settings    (Registration policies & link signup toggle)
+├── 3. LLM & AI Models     (Default provider, models, temperature, max tokens, timeout)
+├── 4. Search & Inference  (Tavily/Brave search, STT, TTS, OCR, Embedding base URL)
+├── 5. Credentials Vault   (Encrypted secret metadata table, replace secret modal, test probes)
+└── 6. Audit Log           (Paginated configuration & secret change history)
 ```
 
 ### 12.3 Frontend Security Safeguards

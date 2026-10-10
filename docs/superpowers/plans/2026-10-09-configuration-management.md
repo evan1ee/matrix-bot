@@ -57,32 +57,30 @@ Task 7: Documentation, Runbooks & Final Verification
 Pure domain code; zero SQL, zero external network, zero crypto implementations in domain.
 
 - [x] `domain/config/mod.rs` & `registry.rs`:
-  - `SettingKey` enum representing all supported keys:
+  - `SettingKey` enum representing the 20 hot-reloadable runtime keys:
     `LlmDefaultProvider`, `LlmDefaultModel`, `LlmRequestTimeoutSeconds`, `LlmDefaultTemperature`, `LlmDefaultMaxTokens`,
-    `SearchTavilyEnabled`, `SearchTimeoutSeconds`,
+    `SearchTavilyEnabled`, `SearchBraveEnabled`, `SearchTimeoutSeconds`,
     `InferenceOcrEnabled`, `InferenceOcrBaseUrl`, `InferenceSttEnabled`, `InferenceSttBaseUrl`, `InferenceSttModel`, `InferenceSttLanguage`,
     `InferenceTtsEnabled`, `InferenceTtsBaseUrl`, `InferenceTtsModel`, `InferenceTtsVoice`, `InferenceTtsDialect`,
-    `InferenceEmbeddingBaseUrl`, `InferenceEmbeddingModel`,
-    `ChannelsDiscordEnabled`, `ChannelsDiscordGuildId`, `ChannelsTelegramEnabled`, `ChannelsTelegramMode`,
-    `ChannelsEmailEnabled`, `ChannelsEmailImapUrl`, `ChannelsEmailSmtpUrl`, `ChannelsEmailFrom`, `ChannelsEmailAuthservId`, `ChannelsEmailPollSeconds`, `ChannelsEmailProcessedFolder`,
+    `InferenceEmbeddingBaseUrl`,
     `RegistrationAllowLinkSignup`.
   - `SettingValue` enum (`String`, `Integer(i64)`, `Float(f64)`, `Boolean(bool)`).
-  - `SettingDefinition`: holds key, default value, validation function, and `hot_reloadable: bool`.
+  - `SettingDefinition`: holds key, default value, validation function, and `hot_reloadable: bool` (`true` for all 20 registered runtime keys; restart-required keys remain in `.env`).
   - `SettingRegistry`: lookup by key, validation, unknown key rejection.
 - [x] `domain/secrets/mod.rs`:
   - `SecretId(uuid::Uuid)` newtype.
-  - `SecretProvider` enum (`OpenAi`, `Anthropic`, `Tavily`, `Stt`, `Tts`, `Discord`, `Telegram`, `TelegramWebhook`, `Email`, `S3`, `Generic`).
+  - `SecretProvider` enum (`OpenAi`, `Anthropic`, `Tavily`, `Stt`, `Tts`, `Generic`).
   - `SecretStatus` enum (`Active`, `Disabled`, `Revoked`).
   - `SecretMetadata`: public non-sensitive representation (`id`, `provider`, `name`, `status`, `key_version`, `masked_preview`, `last_tested_at`, `last_test_status`, `last_test_error`, `created_at`, `updated_at`).
   - `EncryptedSecret`: struct holding ciphertext bytes, nonce bytes, and key version.
   - `SecretValue`: wraps plaintext string with `Drop` memory zeroization and redacted `Debug`/`Display` returning `"[REDACTED]"`. Explicit `expose_secret(&self) -> &str`.
 - [x] `domain/config/audit.rs`:
-  - `ConfigAuditAction` enum (`SettingUpdated`, `SettingReset`, `SecretCreated`, `SecretUpdated`, `SecretDeleted`, `SecretTested`, `ConfigReloaded`).
-  - `ConfigAuditTarget` enum (`Setting(String)`, `Secret(uuid::Uuid)`, `System`).
+  - `ConfigAuditAction` enum (`SettingUpdated`, `SettingReset`, `SecretCreated`, `SecretUpdated`, `SecretDeleted`, `SecretTested`, `ConfigReloaded`, `AdminGranted`, `AdminRevoked`).
+  - `ConfigAuditTarget` enum (`Setting(String)`, `Secret(uuid::Uuid)`, `Account(AccountId)`, `System`).
   - `ConfigAuditEntry` struct. Enforces invariant that no secret ciphertext or plaintext is stored.
-- [x] `domain/accounts/`:
+- [x] `domain/accounts/` & `application/accounts/`:
   - Add `AccountRole` enum (`User`, `Admin`) and `role: AccountRole` to `Account`.
-  - Add `Config::admin_users` allowlist check.
+  - Controlled CLI admin bootstrap and recovery (`matrix-bot admin grant|revoke <account_id>`), requiring an enrolled passkey (`has_passkey`).
 - [x] Unit tests in each module:
   - Validation of setting bounds (e.g., timeouts, temperatures, port numbers, URLs).
   - Rejection of unknown setting keys.
@@ -161,118 +159,97 @@ Pure domain code; zero SQL, zero external network, zero crypto implementations i
 
 ### Task 4: Admin REST API Endpoints & Authorization (§10, Phase 4)
 
-- [ ] `interface/http/auth/extractor.rs`:
-  - Introduce `AdminUser(pub VerifiedUser)`.
-  - Asserts `AuthUser` is signed in, `user.role == AccountRole::Admin`, recent passkey step-up is satisfied, and mutating requests carry a valid `Origin` header.
-- [ ] Create `interface/http/admin/`:
+- [x] `interface/http/auth/extractor.rs`:
+  - Introduce `AdminSession` (ordinary admin `GET`s: requires `role == AccountRole::Admin`, enrolled passkey, non-MCP token, non-recovery-restricted session) and `AdminUser` (admin writes & secret tests: `AdminSession` + 5-minute WebAuthn passkey step-up `STEP_UP_WINDOW_MINUTES = 5`).
+- [x] Create `interface/http/admin/`:
   - `settings.rs`:
-    - `GET /api/v1/admin/settings` (`list_settings`)
-    - `GET /api/v1/admin/settings/:key` (`get_setting`)
-    - `PUT /api/v1/admin/settings/:key` (`update_setting`)
-    - `DELETE /api/v1/admin/settings/:key` (`reset_setting`)
+    - `GET /api/v1/admin/settings` (`list_settings`, `AdminSession`)
+    - `GET /api/v1/admin/settings/:key` (`get_setting`, `AdminSession`)
+    - `PUT /api/v1/admin/settings/:key` (`update_setting`, `AdminUser`)
+    - `DELETE /api/v1/admin/settings/:key` (`reset_setting`, `AdminUser`)
   - `secrets.rs`:
-    - `GET /api/v1/admin/secrets` (`list_secrets`): returns only metadata.
-    - `POST /api/v1/admin/secrets` (`create_secret`): accepts secret payload, returns metadata only.
-    - `PUT /api/v1/admin/secrets/:id` (`replace_secret`): returns metadata only.
-    - `DELETE /api/v1/admin/secrets/:id` (`delete_secret`)
-    - `POST /api/v1/admin/secrets/:id/test` (`test_secret`)
+    - `GET /api/v1/admin/secrets` (`list_secrets`, `AdminSession`): returns only metadata.
+    - `POST /api/v1/admin/secrets` (`create_secret`, `AdminUser`): accepts secret payload, returns metadata only.
+    - `PUT /api/v1/admin/secrets/:id` (`replace_secret`, `AdminUser`): returns metadata only.
+    - `DELETE /api/v1/admin/secrets/:id` (`delete_secret`, `AdminUser`)
+    - `POST /api/v1/admin/secrets/:id/test` (`test_secret`, `AdminUser`)
   - `status.rs`:
-    - `GET /api/v1/admin/config-status` (`config_status`)
+    - `GET /api/v1/admin/config-status` (`config_status`, `AdminSession`)
   - `audit.rs`:
-    - `GET /api/v1/admin/audit-logs` (`list_audit_logs`)
-- [ ] Register routes in `interface/http/routes.rs` under `/admin/...`.
-- [ ] Add all admin mutating routes to `SENSITIVE` routes list in `interface/http/mod.rs`.
-- [ ] Add unit and integration tests:
+    - `GET /api/v1/admin/audit-logs` (`list_audit_logs`, `AdminSession`)
+- [x] Register routes in `interface/http/routes.rs` under `/admin/...`.
+- [x] Add all admin mutating and secret-test routes to `SENSITIVE` routes list in `interface/http/mod.rs`.
+- [x] Add unit and integration tests:
   - Unauthorized (no cookie / token) → `401 Unauthorized`.
   - Non-admin user (`role == "user"`) → `403 Forbidden`.
-  - Admin user without step-up → `403 Forbidden ("Confirm with your passkey")`.
+  - Admin user without enrolled passkey → `403 Forbidden`.
+  - Admin user with stale step-up (> 5 min) → `200 OK` on ordinary `GET`s, `403 Forbidden ("Confirm with your passkey to continue")` on writes and secret tests.
   - Verified Admin user → `200 OK`.
   - Assert response JSON from `GET /api/v1/admin/secrets` never contains `"secret"`, `"ciphertext"`, or `"nonce"` fields.
-- [ ] Regenerate OpenAPI contract: `cargo run --bin generate-openapi && git diff --exit-code backend/openapi.json`.
-- [ ] Gates: `cargo test -p matrix-bot --all-targets`, `generate-openapi`.
+- [x] Regenerate OpenAPI contract: `cargo run --bin generate-openapi && git diff --exit-code backend/openapi.json`.
+- [x] Gates: `cargo test -p matrix-bot --all-targets`, `generate-openapi`.
 
 ---
 
 ### Task 5: Consumer Integration & Dynamic Runtime Reload (§11, §9.3, Phase 5)
 
-- [ ] LLM dynamic resolution (`backend/src/llm/resolved_config.rs`):
-  - Inject active snapshot or `AppConfigService` into resolution pipeline.
+- [x] LLM dynamic resolution (`backend/src/llm/resolved_config.rs`, `backend/src/llm/turn.rs`):
+  - Inject active snapshot into resolution pipeline (`llm.default_provider`, `llm.default_model`, `llm.default_temperature`, `llm.default_max_tokens`, `llm.request_timeout_seconds`).
   - Resolution precedence: `AiUserConfig > Runtime Snapshot (app_settings + provider_secrets) > Environment (AiEnvConfig) > Defaults`.
   - Verify model and provider updates take effect immediately on the next AI request without restart.
-- [ ] Web Search (`backend/src/llm/search.rs`):
-  - Read `search.tavily.enabled` and decrypted Tavily API key from snapshot before falling back to `TAVILY_API_KEY` env var.
-- [ ] Inference services (STT, TTS, OCR, Embedding):
-  - Inspect snapshot for base URLs and model tags.
-  - Embedding model change properly indicates backfill requirement.
-- [ ] Provider connection testers (`infrastructure/inference/testers/`):
+- [x] Web Search (`backend/src/llm/search.rs`):
+  - Read `search.tavily_enabled`, `search.brave_enabled`, `search.timeout_seconds`, and decrypted Tavily/Brave API keys from snapshot before falling back to `TAVILY_API_KEY` env var.
+- [x] Inference services (STT, TTS, OCR, Embedding Base URL) & Link Signup (`application/identity/link.rs`):
+  - Inspect snapshot for `inference.ocr.*`, `inference.stt.*`, `inference.tts.*`, `inference.embedding.base_url`, and `registration.allow_link_signup`.
+  - Keep restart-required settings and credentials (`EMBEDDING_MODEL`, `DISCORD_*`, `TELEGRAM_*`, `EMAIL_*`, `S3_*`) in `.env` only.
+- [x] Provider connection testers (`infrastructure/inference/testers/`):
   - `test_llm_credential(endpoint, key)`: validates credentials against provider ping/models endpoint.
   - `test_tavily_credential(key)`: validates Tavily search key.
-  - `test_telegram_credential(token)`: calls Telegram `getMe`.
-  - `test_discord_credential(token)`: calls Discord `GET /users/@me`.
-  - `test_email_credential(cfg)`: performs test IMAP handshake.
-- [ ] Outbox listener integration (`events/`):
-  - On `SystemEvent::ConfigUpdated`, local cache reloads snapshot.
-- [ ] Tests:
+- [x] Outbox listener integration (`events/`):
+  - On `SystemEvent::ConfigUpdated` / `SystemEvent::SecretChanged`, local cache reloads snapshot.
+- [x] Tests:
   - Changing Tavily key in `provider_secrets` immediately routes search queries using the new key.
   - Changing LLM model in `app_settings` immediately sends the updated model string in chat turns.
-  - Restart-required settings accurately report `hot_reloadable: false`.
-- [ ] Gates: `cargo test -p matrix-bot --all-targets`, `cargo clippy`.
+  - Changing `registration.allow_link_signup` immediately toggles link signup.
+  - All 20 registered settings verified as `hot_reloadable: true` and indexed consistently.
+- [x] Gates: `cargo test -p matrix-bot --all-targets`, `cargo clippy`.
 
 ---
 
 ### Task 6: Frontend Admin Console & Integration (§12, Phase 6)
 
-- [ ] Add `admin` navigation item to `frontend/src/components/Sidebar.tsx` with Shield icon, conditionally visible if `user.role === 'admin'`.
-- [ ] Create `frontend/src/modules/admin/`:
+- [x] Add `admin` navigation item to `frontend/src/components/Sidebar.tsx` with Shield icon, conditionally visible if `user.role === 'admin'`.
+- [x] Create `frontend/src/modules/admin/`:
   - `AdminModule.tsx`: main module container with tabs:
-    - **Overview**: System health cards, effective settings status, restart required notices.
-    - **General Settings**: JSON/form editors for timeouts, limits, registration policies.
-    - **LLM & Models**: Provider selection, model name, temperature, max tokens, test button.
-    - **Search & Inference**: Tavily search toggle, STT/TTS/OCR endpoints, test buttons.
-    - **Channels**: Discord, Telegram, Email status and configuration summary.
+    - **Overview**: System health cards, effective settings status, hot-reloadable configuration summary.
+    - **General Settings**: Form editors for registration policies.
+    - **LLM & Models**: Provider selection, model name, temperature, max tokens, timeout.
+    - **Search & Inference**: Tavily/Brave search toggles, STT/TTS/OCR/Embedding endpoints and models.
     - **Secrets Vault**: Table of credentials metadata, masked previews, "Replace Secret" modal, "Test Connection" button, "Delete" modal.
     - **Audit Log**: Paginated table of administrative configuration changes.
-- [ ] Implement write-only credential form inputs (`type="password"`, form state scrubbed on submit, never populating previous secret values).
-- [ ] Update `frontend/src/core/apiClient.ts` and React Query hooks (`useAdminSettings`, `useAdminSecrets`, `useAdminStatus`, `useAdminAudit`).
-- [ ] Add fake API endpoints to `frontend/e2e/fake-api.ts`.
-- [ ] Write Playwright E2E test: `frontend/e2e/admin.spec.ts`:
-  - Assert admin link visible only to admin users.
-  - Assert viewing status overview.
-  - Assert updating a setting and observing saved feedback.
-  - Assert adding a credential without leaking plaintext.
-  - Assert step-up prompt triggers on sensitive actions.
-- [ ] Gates: `npm --prefix frontend run build`, `npm --prefix frontend run test:e2e`.
+- [x] Implement write-only credential form inputs (`type="password"`, form state scrubbed on submit, never populating previous secret values).
+- [x] Update `frontend/src/modules/admin/useAdmin.ts` so `GET` queries use normal session auth while all mutations wrap in `useSensitiveAction` (`withStepUp`).
+- [x] Add fake API endpoints to `frontend/e2e/fake-api.ts`.
+- [x] Write Playwright E2E test: `frontend/e2e/admin.spec.ts`.
+- [x] Gates: `npm --prefix frontend run build`, `npm --prefix frontend run test:e2e`.
 
 ---
 
 ### Task 7: Documentation, Runbooks & Final Verification (§14, §15)
 
-- [ ] Update `.env.example`:
-  - Add `SECRETS_ENCRYPTION_KEY` documentation and generation instructions (`openssl rand -hex 32`).
-  - Add `ADMIN_USERS` bootstrap configuration documentation.
-  - Annotate runtime-managed variables with notes indicating they can now be managed via Admin UI.
-- [ ] Update `docs/architecture.md`, `docs/api.md`, `docs/llm.md`, and `docs/database.md` to reflect the configuration architecture.
-- [ ] Update `docs/superpowers/HANDOFF.md` with status, rulings, and verification evidence.
-- [ ] Execute full verification suite:
-  ```bash
-  cargo fmt --all -- --check
-  cargo check -p matrix-bot --all-targets
-  cargo clippy --workspace --all-targets -- -D warnings
-  cargo test -p matrix-bot --all-targets
-  cargo test -p matrix-bot --test architecture
-  cargo test -p matrix-bot live_postgres -- --ignored --test-threads=1
-  cargo run --bin generate-openapi && git diff --exit-code backend/openapi.json
-  npm --prefix frontend run build
-  npm --prefix frontend run test:e2e
-  ```
-- [ ] Clean git diff check: no secrets, debug code, or temporary files.
+- [x] Update `.env.example`, `README.md`, `docs/architecture.md`, `docs/api.md`, `docs/llm.md`, and `docs/database.md` to reflect the configuration architecture, 20 hot-reloadable keys, and CLI admin bootstrap (`matrix-bot admin grant|revoke <account_id>`).
+- [x] Update `docs/superpowers/HANDOFF.md` with status, rulings, and verification evidence.
+- [x] Execute full verification suite.
+- [x] Clean git diff check: no secrets, debug code, or temporary files.
 
 ---
 
-## Rulings to Record in HANDOFF.md
+## Rulings Recorded in HANDOFF.md
 
-- **Ruling R-CFG1:** `app_settings` and `provider_secrets` are instance-wide system configuration tables and are **not** added to `OWNED_TABLES`. Merging an admin account updates `updated_by` and `actor_id` via `OWNER_ID_MERGED_SEPARATELY`.
-- **Ruling R-CFG2:** Secret read APIs return metadata only (`SecretMetadata`), with ciphertext and plaintext completely omitted from response DTOs.
-- **Ruling R-CFG3:** `AdminUser` requires both `account.role == 'admin'` and recent passkey assertion (`VerifiedUser`), enforcing 5-minute step-up on all administrative operations.
+- **Ruling R-CFG1:** `app_settings` and `provider_secrets` are instance-wide system configuration tables and are **not** added to `OWNED_TABLES`. Merging an admin account remaps `updated_by` and `actor_id` in `infrastructure/postgres/merge.rs`.
+- **Ruling R-CFG2:** Secret read APIs return metadata only (`SecretMetadataDto`), with ciphertext and plaintext completely omitted from response DTOs.
+- **Ruling R-CFG3:** Ordinary admin `GET` endpoints use `AdminSession` (`role == 'admin'`, enrolled passkey required, non-MCP token, non-recovery-restricted session), while admin writes and `POST /api/v1/admin/secrets/:id/test` require `AdminUser` (`AdminSession` + 5-minute WebAuthn passkey step-up `STEP_UP_WINDOW_MINUTES = 5`).
 - **Ruling R-CFG4:** Missing `SECRETS_ENCRYPTION_KEY` fails closed for secret management operations; unencrypted fallback storage is prohibited.
-- **Ruling R-CFG5:** Runtime configuration snapshot is stored in an `ArcSwap<RuntimeConfigSnapshot>`, guaranteeing zero-locking lock-free reads on request and AI turn paths.
+- **Ruling R-CFG5:** Runtime configuration snapshot is stored in an `ArcSwap<RuntimeConfigSnapshot>` (preloaded at boot), guaranteeing lock-free reads on request and AI turn paths.
+- **Ruling R-CFG6:** Initial administrator bootstrap and recovery are CLI/SQL-only (`matrix-bot admin grant|revoke <account_id>`); public registration and passkey enrollment never grant `admin` implicitly.
+- **Ruling R-CFG7:** Only the 20 hot-reloadable settings live in `SettingRegistry` / Admin Console (all wired to live runtime consumers); the 12 restart-required settings (`EMBEDDING_MODEL`, `DISCORD_*`, `TELEGRAM_*`, `EMAIL_*`) stay in `.env`.

@@ -54,11 +54,12 @@ app.rs / main.rs             Composition roots, supervision, graceful shutdown
    - Gitea (`git@git.mbm.one:evan/matrix-bot.git`) is primary; GitHub (`origin`) is a mirror.
 4. **Preserve Security Invariants:**
    - Passkeys are the exclusive web authentication mechanism; session tokens are stored as SHA-256 only.
-   - Step-up verification (`VerifiedUser`) is strictly enforced for sensitive endpoints (`/account/*`, `/portfolio/trade`, `/agent/approvals/*`), and `AdminUser` (`role == 'admin'` + 5-minute passkey step-up) is enforced for `/admin/*`.
-   - Secret read APIs return metadata only (`SecretMetadata`); plaintext and ciphertext never appear in response DTOs, DOM, logs, or audit records.
-   - Sensitive commands are strictly refused in public rooms/channels; `/link` is DM-only with 10-minute single-use tokens.
-   - Every owner-keyed table must be registered in `OWNED_TABLES` or `ACCOUNT_ID_FOLLOWS` (`domain/accounts/mod.rs`).
-   - Every user-supplied string rendered into HTML must pass through `html_escape()`; input strings are capped at 500 characters.
+    - Step-up verification (`VerifiedUser`, 5-minute window `STEP_UP_WINDOW_MINUTES = 5`) is strictly enforced for sensitive endpoints (`/account/*`, `/portfolio/trade`, `/agent/approvals/*`). Ordinary admin `GET` endpoints use `AdminSession` (`role == 'admin'`, enrolled passkey required, non-MCP token, non-recovery-restricted session), while admin write and secret-test endpoints (`PUT`, `POST`, `DELETE`) require `AdminUser` (`AdminSession` + 5-minute passkey step-up).
+    - Initial administrator bootstrap is CLI/SQL-only (`matrix-bot admin grant <account_id>` / `matrix-bot admin revoke <account_id>`); public registration and passkey enrollment never grant `admin` implicitly.
+    - Secret read APIs return metadata only (`SecretMetadata`); plaintext and ciphertext never appear in response DTOs, DOM, logs, or audit records.
+    - Sensitive commands are strictly refused in public rooms/channels; `/link` is DM-only with 10-minute single-use tokens.
+    - Every owner-keyed table must be registered in `OWNED_TABLES` or `ACCOUNT_ID_FOLLOWS` (`domain/accounts/mod.rs`).
+    - Every user-supplied string rendered into HTML must pass through `html_escape()`; input strings are capped at 500 characters.
 
 ---
 
@@ -67,15 +68,15 @@ app.rs / main.rs             Composition roots, supervision, graceful shutdown
 - **Rust Backend:**
   - `cargo check -p matrix-bot --all-targets`: Clean (zero errors, zero warnings).
   - `cargo clippy --workspace --all-targets -- -D warnings`: Clean.
-  - `cargo test -p matrix-bot --lib`: 1577 passed / 0 failed.
+  - `cargo test -p matrix-bot --lib`: 1583 passed / 0 failed.
   - `cargo test -p matrix-bot --test architecture`: 39 passed / 0 failed.
   - `cargo test -p matrix-bot live_postgres`: 3 passed / 0 failed.
   - `cargo run --bin generate-openapi && git diff --exit-code backend/openapi.json`: Byte-identical (zero drift).
 - **Inference Server:**
-  - `cargo test -p matrix-bot-inference`: 74 passed / 0 failed.
+  - `cargo test -p matrix-bot-inference`: 94 passed / 0 failed.
 - **Frontend SPA:**
   - `npm --prefix frontend run build`: Clean (1779 modules transformed, zero TypeScript errors).
-  - `npm --prefix frontend run test:e2e`: 222 passed / 0 failed (100% green across all Playwright specs).
+  - `npm --prefix frontend run test:e2e`: 223 passed / 0 failed (100% green across all Playwright specs).
 
 ---
 
@@ -117,6 +118,7 @@ Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in sequence:
      - Check bot account for stray device IDs from prior testing.
      - Send `!say Hello` in a Matrix room to verify MSC3245 audio voice bubble with waveform rendering.
      - Verify `SELECT platform, COUNT(*) FROM platform_identities GROUP BY platform;` reflects all migrated user links.
+     - Grant initial administrator role to your passkey-enrolled account via `matrix-bot admin grant <account_id>`.
 
 ---
 
@@ -156,8 +158,12 @@ Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in sequence:
 - **Transactional Outbox:** State mutations and their corresponding `SystemEvent` must be committed in the same database transaction. Outbox deliveries handle external fan-out with independent retries.
 - **Unified Tool Registry & Untrusted Input Guard:** Interactive user chat uses direct LLM + tool calling bounded by `MAX_TOOL_ROUNDS = 5`. Outside content (`<quoted_message>`, `<ocr_text>`, `<tool_output>`) escapes `<` and taints the turn, requiring explicit user confirmation before sensitive tools execute. The autonomous agent loop uses native tool calling (one tool call per step) and is reserved for background workflows, executing approved sensitive actions at-most-once from stored calls.
 - **pgvector Hybrid Search:** Multi-chunk `multilingual-e5-small` embeddings (`vector(384)`, served by `matrix-bot-inference`, tagged with the model that made them) indexed via HNSW (`vector_cosine_ops`), populated asynchronously via transactional outbox + background durable jobs (`knowledge.embed`). Search fuses lexical (FTS + trigram/substring) and vector results via reciprocal rank fusion, degrading to lexical-only if the embedder is unavailable.
-- **Dynamic Configuration & Encrypted Vault:** `RuntimeConfigSnapshot` (`ArcSwap`) provides lock-free reads backed by `app_settings` and `SettingRegistry` defaults, reloaded on `ConfigUpdated`/`SecretChanged` outbox notifications. External credentials in `provider_secrets` use AES-256-GCM with 96-bit CSPRNG nonces and AAD binding (`{provider}:{name}:{key_version}`), failing closed when `SECRETS_ENCRYPTION_KEY` is absent. Precedence: `AiUserConfig > Runtime Snapshot > Environment > Defaults`.
-- **Account Identity Model:** One human account (`accounts.id`) links multiple chat identities across Matrix, Discord, Telegram, and Email via `platform_identities`. Instance-wide tables (`app_settings`, `provider_secrets`, `config_audit`) are global and registered in `AUDIT_ACTOR_UNTOUCHED`.
+- **Dynamic Configuration & Encrypted Vault:** `RuntimeConfigSnapshot` (`ArcSwap`) provides lock-free reads backed by `app_settings` and `SettingRegistry` defaults (20 hot-reloadable settings, all wired to live runtime consumers; restart-required settings stay in `.env`), reloaded on `ConfigUpdated`/`SecretChanged` outbox notifications. External credentials in `provider_secrets` use AES-256-GCM with 96-bit CSPRNG nonces and AAD binding (`{provider}:{name}:{key_version}`), failing closed when `SECRETS_ENCRYPTION_KEY` is absent. Precedence: `AiUserConfig > Runtime Snapshot > Environment > Defaults`.
+- **Rulings (2026-10-10):**
+  - *Ruling: CLI/SQL-only admin bootstrap (`matrix-bot admin grant|revoke <account_id>`) — eliminates first-user auto-promotion race conditions and requires an enrolled passkey before granting or using admin privileges — cost if wrong: operator runs one CLI command after first passkey enrollment.*
+  - *Ruling: `AdminSession` for admin `GET`s and `AdminUser` (5-minute step-up window) for admin writes and secret connectivity tests — prevents unnecessary WebAuthn prompts when browsing the Admin Console while gating all mutations and secret operations — cost if wrong: none, secret `GET` returns masked metadata only.*
+  - *Ruling: Keep only the 20 hot-reloadable settings in `SettingRegistry` and the 6 hot-reloadable secret providers in `SecretProvider` (`OpenAi`, `Anthropic`, `Tavily`, `Stt`, `Tts`, `Generic`), keeping restart-required settings and credentials (channels, `EMBEDDING_MODEL`, and S3) in `.env` — avoids misleading Admin UI settings/secrets that cannot hot-reload and keeps `domain/config/registry.rs` under the 500-line limit — cost if wrong: changing channel adapters, S3, or embedding model requires `.env` edit + restart, which is already required by their lifecycle.*
+- **Account Identity Model:** One human account (`accounts.id`) links multiple chat identities across Matrix, Discord, Telegram, and Email via `platform_identities`. Instance-wide tables (`app_settings`, `provider_secrets`, `config_audit_log`) are global and registered in `AUDIT_ACTOR_UNTOUCHED`.
 - **File Length & Code Quality:** No file in `backend/src/` or `inference/src/` may exceed 500 lines of production code (target < 300 lines). Only `config/` reads environment variables.
 
 ---

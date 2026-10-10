@@ -138,22 +138,23 @@ Mutations publish `NoteCreated`, `NoteUpdated`, or `NoteDeleted` outbox events w
 
 ## Admin Configuration & Secrets Vault API
 
-Administrative configuration and encrypted secret management endpoints are mounted under `/api/v1/admin` and gated by the `AdminUser` extractor (`role == 'admin'` AND WebAuthn passkey step-up within 5 minutes; all mutating endpoints are registered in `SENSITIVE`):
+Administrative configuration and encrypted secret management endpoints are mounted under `/api/v1/admin`. Ordinary read endpoints use `AdminSession` (requiring an authenticated cookie session, `role == 'admin'`, at least one enrolled passkey, non-MCP token, and non-recovery-restricted session). Write and secret-testing endpoints use `AdminUser` (`AdminSession` plus fresh WebAuthn passkey step-up within 5 minutes, `STEP_UP_WINDOW_MINUTES = 5`, enforced in `SENSITIVE`):
 
 | Method | Path | Auth | Purpose |
 |---|---|---|---|
-| `GET` | `/api/v1/admin/config-status` | `AdminUser` | System configuration overview (`settings_count`, `custom_settings_count`, `encryption_configured`, `secrets_count`, `active_secrets_count`, `last_reload_at`) |
-| `GET` | `/api/v1/admin/settings` | `AdminUser` | List all 32 catalogued `SettingItem`s with current value, default, type, category, `is_custom`, and `hot_reloadable` flag |
-| `PUT` | `/api/v1/admin/settings/:key` | `AdminUser` | Update a setting (`{ value }`), validate schema/bounds, persist to `app_settings`, record `config_audit`, publish `ConfigUpdated`, and refresh `RuntimeConfigSnapshot` |
-| `DELETE` | `/api/v1/admin/settings/:key` | `AdminUser` | Reset a setting to its built-in default |
-| `GET` | `/api/v1/admin/secrets` | `AdminUser` | List `SecretMetadata` items (`id`, `provider`, `name`, `status`, `key_version`, `masked_preview`, `last_test_status`). Plaintext and ciphertext are never returned |
-| `POST` | `/api/v1/admin/secrets` | `AdminUser` | Encrypt and store a new credential (`{ provider, name?, secret, metadata? }`) using AES-256-GCM with AAD `{provider}:{name}:{key_version}` |
-| `PUT` | `/api/v1/admin/secrets/:id` | `AdminUser` | Replace secret value and/or update status (`{ secret?, status? }`) |
-| `DELETE` | `/api/v1/admin/secrets/:id` | `AdminUser` | Delete an encrypted credential from the vault |
-| `POST` | `/api/v1/admin/secrets/:id/test` | `AdminUser` | Decrypt credential in memory and run live provider connectivity check (`healthy` / `failed`) |
-| `GET` | `/api/v1/admin/audit-logs` | `AdminUser` | Paginated append-only `AuditLogEntry` records (`?limit=50&offset=0`) |
+| `GET` | `/api/v1/admin/config-status` | `AdminSession` | System configuration overview (`settings_count`, `custom_settings_count`, `encryption_configured`, `secrets_count`, `active_secrets_count`, `last_reload_at`) |
+| `GET` | `/api/v1/admin/settings` | `AdminSession` | List all 20 hot-reloadable `SettingItem`s with current value, default, type, category, `is_custom`, and `hot_reloadable` flag |
+| `GET` | `/api/v1/admin/settings/:key` | `AdminSession` | Fetch a single `SettingItem` by key |
+| `PUT` | `/api/v1/admin/settings/:key` | `AdminUser` (5m step-up) | Update a setting (`{ value }`), validate schema/bounds, persist to `app_settings`, record `config_audit_log`, publish `ConfigUpdated`, and refresh `RuntimeConfigSnapshot` |
+| `DELETE` | `/api/v1/admin/settings/:key` | `AdminUser` (5m step-up) | Reset a setting to its built-in default (`ResetSettingResponse: { status: "reset", key }`) |
+| `GET` | `/api/v1/admin/secrets` | `AdminSession` | List `SecretMetadataDto` items (`id`, `provider`, `name`, `status`, `key_version`, `masked_preview`, `last_tested_at`, `last_test_status`, `last_test_error`, `created_at`, `updated_at`). Plaintext and ciphertext are never returned |
+| `POST` | `/api/v1/admin/secrets` | `AdminUser` (5m step-up) | Encrypt and store a new credential (`CreateSecretRequest: { provider, name, secret, metadata? }`) using AES-256-GCM with AAD `{provider}:{name}:{key_version}` |
+| `PUT` | `/api/v1/admin/secrets/:id` | `AdminUser` (5m step-up) | Replace an existing credential's secret payload (`ReplaceSecretRequest: { secret }`) |
+| `DELETE` | `/api/v1/admin/secrets/:id` | `AdminUser` (5m step-up) | Delete an encrypted credential from the vault (`DeleteSecretResponse: { status: "deleted", id }`) |
+| `POST` | `/api/v1/admin/secrets/:id/test` | `AdminUser` (5m step-up) | Decrypt credential in memory and run live provider connectivity check (`SecretTestResultDto: { id, status, error }`) |
+| `GET` | `/api/v1/admin/audit-logs` | `AdminSession` | Paginated `AuditLogPageDto` (`{ entries: Vec<ConfigAuditRowDto>, total, limit, offset }`, `?limit=50&offset=0`) |
 
-`GET /api/v1/auth/me` includes `role: "user" | "admin"` so the SPA can conditionally display the Admin Console navigation item.
+`GET /api/v1/auth/me` includes `role: "user" | "admin"` so the SPA can conditionally display the Admin Console navigation item. Administrator role bootstrap and recovery are CLI/SQL-only (`matrix-bot admin grant <account_id>` / `matrix-bot admin revoke <account_id>`).
 
 ## Testing passkey auth locally
 

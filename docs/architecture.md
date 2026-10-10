@@ -44,7 +44,7 @@ Interfaces parse, authenticate, resolve the caller's scope, call a service, and 
 | Interface | `interface/{http,chat,channels,mcp,events,jobs}/` | protocol translation: Axum handlers and DTOs, `BotModule` handlers, the channel adapters, registry and shared inbound pipeline (`interface/channels/`), MCP, delivery sinks (`interface/events/`) | `application`, `domain` |
 | Events runtime | `events/` | SSE hub, the `LISTEN outbox` loop, the delivery dispatcher, retention; no SQL, no transport crates | `application`, `domain` |
 | LLM | `llm/` | prompts, the tool-calling loop, conversation context ([`llm.md`](llm.md)) | `application`, `domain` |
-| Infrastructure | `infrastructure/{postgres,inference,web}/` | repositories, HTTP clients for inference, LLM and web feeds | `domain`; never `application` or `interface` |
+| Infrastructure | `infrastructure/{postgres,inference,web,crypto,storage}/` | repositories, HTTP clients for inference, LLM and web feeds, secret encryption, object storage | `domain`; never `application` or `interface` |
 
 `backend/tests/architecture.rs` enforces the rules mechanically: layer imports, pure domain modules, zero SQL in `interface/` and `application/`, `AssertSqlSafe` confined to `infrastructure/postgres/merge.rs`, no `dotenvy::dotenv`.
 
@@ -110,7 +110,7 @@ events::purge (hourly) ── deletes events older than 30 days with no pending 
 
 ## Background jobs
 
-Reminders, morning briefings and portfolio alerts and refreshes run as durable jobs in PostgreSQL, not as polling loops owned by a Matrix sync session: a job survives a restart, its retries are bounded and visible in the `jobs` table, and a scheduler tick that runs twice enqueues once. The webhook delivery queue is unchanged until step 9 (outbox). Schema: [`database.md`](database.md#job-queue). Design: `superpowers/specs/2026-09-29-job-queue-design.md`.
+Reminders, morning briefings and portfolio alerts and refreshes run as durable jobs in PostgreSQL, not as polling loops owned by a Matrix sync session: a job survives a restart, its retries are bounded and visible in the `jobs` table, and a scheduler tick that runs twice enqueues once. Webhook delivery is not a job: it goes through the outbox dispatcher (see *Events and the outbox*). Schema: [`database.md`](database.md#job-queue). Design: `superpowers/specs/2026-09-29-job-queue-design.md`.
 
 | Job type | Enqueued by (cadence) | Dedupe key | Attempts / backoff | Handler (`interface/jobs/`) |
 |---|---|---|---|---|
@@ -142,7 +142,7 @@ reply ◄─ adapter renders ◄───────────── Reply { 
 jobs / outbox ─► ChannelRegistry::send(OutgoingMessage) ─► the target channel's adapter
 ```
 
-- **`ChannelAdapter`** (`interface/channels/adapter.rs`) is the one trait object boundary: `channel`, `is_connected`, `run(cancel)`, `send(OutgoingMessage)`, and two defaulted hooks, `authorize_delivery` (outbox pre-check, `Result<(), String>` whose text is the delivery error) and `find_conversation_by_name`. There are four real implementations over time (Matrix and Discord now, then Telegram and Email), so the dynamic dispatch is a justified boundary; the neutral message types live in `message.rs` (`IncomingMessage`, `OutgoingMessage`, `Reply`, `Content`, `Attachment`, an opaque `MessageRef`, no metadata map, R72) and the pure HTML-subset renderers in `render/`.
+- **`ChannelAdapter`** (`interface/channels/adapter.rs`) is the one trait object boundary: `channel`, `is_connected`, `run(cancel)`, `send(OutgoingMessage)`, and two defaulted hooks, `authorize_delivery` (outbox pre-check, `Result<(), String>` whose text is the delivery error) and `find_conversation_by_name`. There are four real implementations (Matrix, Discord, Telegram and Email), so the dynamic dispatch is a justified boundary; the neutral message types live in `message.rs` (`IncomingMessage`, `OutgoingMessage`, `Reply`, `Content`, `Attachment`, an opaque `MessageRef`, no metadata map, R72) and the pure HTML-subset renderers in `render/`.
 - **`ChannelRegistry`** (`registry.rs`) holds at most one adapter per channel (`check_unique`), routes `send` by the target's channel (`NotConfigured` for an absent channel or `web`, `NotConnected` while the adapter is down) and `spawn_all` runs every adapter's `run` under a child token. Only `app.rs` builds adapters and the registry (`only_the_composition_root_builds_adapters_and_the_registry`); the pipeline holds a `Weak<ChannelRegistry>` because the registry owns the adapters that own the pipeline (A5).
 - **Inbound pipeline** (`inbound.rs`) is everything between "the adapter parsed the text" and "the adapter sends the reply", written once. Order matters: **`link` is answered first, before identity resolution**, because resolving first would auto-provision an empty account for the very identity that is trying to link and turn every first link into a merge of nothing. Then `IdentityService::resolve` applies the channel's policy: Matrix auto-provisions an unknown sender (the bot stays usable without web signup); every other channel returns `Unlinked`, and an **unlinked identity gets only `start`, `help` and `link`** (every other command, and a direct free-text message, is answered with the "send /link" notice; free text in a shared conversation is ignored). A linked sender's text becomes a `ParsedCommand`, free text becomes the `ai` command where the bot is addressed, and dispatch runs inside a panic fence that answers with the fixed error reply. `interface/chat/link.rs` is the `link` handler the pipeline calls; it is deliberately not a `BotModule`.
 - **`MatrixAdapter`** (`interface/channels/matrix/`) keeps everything Matrix-specific: the sync loop and reconnects, E2EE and verification, quote parsing (`quote.rs`), the dispatcher that decides which events are commands, attachments and voice upload, reactions, room membership and `rooms.rs`. It parses into `InboundText` and sends the reply with its own progress UI. Its `authorize_delivery` runs the old webhook sink's checks in their order and with their messages (connected, valid room id, bot already joined, owner authorized for the room), and `find_conversation_by_name` serves the AI outage alert.
@@ -294,7 +294,7 @@ Selling the full quantity held deletes the row — average cost has no meaning f
 
 The SPA mirrors the backend plugin shape: `core/registry.ts` holds `FrontendModule`s registered in `App.tsx`, one per feature (dashboard, todo, reminder, finance, portfolio, AI and the rest). Each module supplies a `MainView`, optional `navTab`/`getStatItems`, and a `handleSseEvent(event, queryClient)` used to invalidate React Query caches from the live stream (`core/useSystemEvents.ts`). Adding a backend module means adding a matching `frontend/src/modules/<name>/index.tsx` and registering it in `App.tsx`.
 
-All API calls go through `core/apiClient.ts` (`fetchApi`), which sends `credentials: 'include'` — the session is an HttpOnly cookie, so there is no token to read or store — and unwraps the standardized `{ "error": "...", "code": 400 }` shape produced by `backend/src/error.rs::ApiError`.
+All API calls go through `core/apiClient.ts` (`fetchApi`), which sends `credentials: 'include'` — the session is an HttpOnly cookie, so there is no token to read or store — and unwraps the standardized `{ "error": "...", "code": 400 }` shape produced by `backend/src/interface/http/error.rs::ApiError`.
 
 `core/session.ts` is the single source of "who is signed in": the cookie is unreadable by the page, so only the server can answer, and `useSession()` asking `/auth/me` is that answer. There is deliberately no client-side token to inspect and nothing that can drift from the server's view.
 
@@ -305,7 +305,7 @@ All API calls go through `core/apiClient.ts` (`fetchApi`), which sends `credenti
 The notes subsystem (`domain/knowledge/`, `application/knowledge/`, `infrastructure/postgres/repositories/knowledge/`, `interface/http/knowledge.rs`, `interface/chat/knowledge.rs`, `interface/jobs/knowledge.rs`) turns the bot into a personal knowledge base with omnichannel capture, hierarchical tags, and hybrid keyword + semantic search:
 
 - **Pure Domain (`domain/knowledge/`):** Pure synchronous entities and value objects: `Note` (metadata only), `NoteDocument` (a `Note` plus its Markdown), `NoteId`, `NoteType`, `ContentHash`, `NotePatch`, `rrf` and `SearchResultItem`. Markdown is the only stored format. Invariants (titles non-empty and clamped to 200 chars, content non-empty and at most 100,000 characters, `#tag` lowercase normalization) are enforced at construction without async or external crates.
-- **PostgreSQL & pgvector (`0011_knowledge_base.sql`):** PostgreSQL 18 stores notes (`notes` table) and multi-chunk embeddings (`knowledge_embeddings` table) with the `pgvector` extension enabled (`vector(384)`). Embeddings use an HNSW index (`m = 16, ef_construction = 64`) over cosine distance (`vector_cosine_ops`), guaranteeing sub-millisecond approximate nearest neighbor retrieval under concurrent load.
+- **PostgreSQL & pgvector (`0011_knowledge_base.sql`):** PostgreSQL 18 stores notes (`notes` table) and multi-chunk embeddings (`knowledge_embeddings` table) with the `pgvector` extension enabled (`vector(384)`). Embeddings use an HNSW index (`m = 16, ef_construction = 64`) over cosine distance (`vector_cosine_ops`) for approximate nearest-neighbour retrieval.
 - **Durable Background Indexing (`interface/jobs/knowledge.rs`):** State mutations are committed alongside outbox events (`NoteCreated`, `NoteUpdated`, `NoteDeleted`). The service immediately enqueues a background durable job `knowledge.embed` (payload: `{ item_type: "note", item_id: i64 }`). A chunker splits `title + plain text` into overlapping 500-character chunks with 100-character overlaps along UTF-8 char boundaries. The worker skips an unchanged note (same hash, same model), calls `EmbeddingProvider`, and atomically swaps the chunks and the note's `indexed_content_hash` in one transaction.
 - **Pluggable Embedding Providers (`infrastructure/inference/embedding/`):** Implements the `EmbeddingProvider` trait over the local inference service (`multilingual-e5-small`, no external API call) and OpenAI-compatible HTTP endpoints, with mock vectors in unit tests. See `docs/llm.md` for the `query:`/`passage:` prefixes.
 - **Omnichannel Capture:**
@@ -317,31 +317,33 @@ The notes subsystem (`domain/knowledge/`, `application/knowledge/`, `infrastruct
 - **REST API & Web UI (`frontend/src/modules/knowledge/`):** Axum endpoints at `/api/v1/notes` and `/api/v1/knowledge/search`. React SPA module with live markdown preview, tag filter chips, instant search panel, and keyboard shortcuts (`Escape`, `Cmd/Ctrl+Enter`).
 - **AI & MCP Tools (`llm/tools/knowledge.rs`):** Exposes `knowledge_search`, `knowledge_create_note`, `knowledge_get_note`, and `knowledge_list_tags` to autonomous agent planning loops and external MCP clients (Cursor / Claude Desktop).
 
-## Dynamic Configuration & Encrypted Credentials Vault
+## Runtime configuration and the credentials vault
 
-The system provides dynamic configuration management, hot-reloading, and authenticated credential storage without service restarts (`domain/config/`, `application/config/`, `infrastructure/postgres/repositories/{app_settings,provider_secrets,config_audit}.rs`, `interface/http/admin/`, `frontend/src/modules/admin/`):
+The system provides dynamic configuration management, hot-reloading, and authenticated credential storage without service restarts (`domain/config/`, `domain/secrets/`, `application/config/`, `application/secrets/`, `infrastructure/postgres/repositories/{app_settings,provider_secrets,config_audit}.rs`, `interface/http/admin/`, `frontend/src/modules/admin/`):
 
-- **Pure Domain (`domain/config/`):**
-  - `SettingKey`: 32 catalogued configuration keys across categories (`General`, `Registration`, `Llm`, `Search`, `Inference`, `Channels`).
-  - `SettingValue`: Strongly typed values (`String`, `Integer`, `Float`, `Boolean`, `Json`) validated against defined bounds and schemas.
-  - `SettingRegistry`: Central registry defining default values, types, categories, and hot-reloadability.
-  - `SecretValue`: Secret container with automatic zeroization (`Zeroize` trait) on drop to prevent heap memory exposure.
+- **Domain (`domain/config/`, `domain/secrets/`):**
+  - `SettingKey`: 20 hot-reloadable runtime configuration keys across categories (`Registration`, `Llm`, `Search`, `Inference`), each wired to a live runtime consumer. Restart-required deployment parameters (channel adapters, knowledge embedding model, database, and storage) stay in `.env`.
+  - `SettingValue`: Strongly typed values (`String`, `Integer`, `Float`, `Boolean`) validated against defined bounds and schemas.
+  - `SettingRegistry`: Central registry defining default values, types, categories, and validation rules (`hot_reloadable: true` for all registered runtime settings).
+  - `SecretValue`: Secret container with redacted `Debug`/`Display` (`[REDACTED]`) and in-place buffer zeroization on `Drop` to prevent accidental heap or log exposure.
   - `AccountRole`: Role enum (`User` vs `Admin`) on accounts; only `Admin` can inspect or alter system settings and credentials.
-- **Authenticated Encryption at Rest (`infrastructure/crypto/`):**
-  - `AesGcmSecretProtector`: AES-256-GCM encryption with 96-bit CSPRNG nonces and Additional Authenticated Data (AAD) binding (`{provider}:{name}:{key_version}`). Master key loaded from `SECRETS_ENCRYPTION_KEY` (32 bytes base64/hex). Supports dual-key decryption during rotation via `SECRETS_ENCRYPTION_KEY_OLD`.
-  - `FailClosedSecretProtector`: In development without `SECRETS_ENCRYPTION_KEY`, rejects encryption/decryption operations with typed errors while leaving non-secret configuration and environment fallbacks functional. In production, missing key halts boot.
-  - Plaintext and ciphertext are write-only and never exposed in REST responses, DOM, logs, or audit records. Only masked previews (`sk-...9999`) are exposed.
-- **Lock-Free Hot-Reloading (`application/config/runtime.rs`):**
-  - `ArcSwap<RuntimeConfigSnapshot>` holds the active configuration snapshot in memory, updated atomically without lock contention.
+- **Admin bootstrap and revocation (`application/accounts/mod.rs`, `main.rs`):**
+  - Public registration and passkey enrollment never grant `admin` implicitly.
+  - Initial administrator privileges are granted exclusively via controlled CLI (`matrix-bot admin grant <account_id>`) or SQL after the account has enrolled at least one passkey, and revoked via `matrix-bot admin revoke <account_id>` (which demotes the account, terminates all active sessions, and records an audit entry).
+- **Encryption at rest (`infrastructure/crypto/`):**
+  - `AesGcmSecretProtector`: AES-256-GCM encryption with 96-bit nonces and Additional Authenticated Data (AAD) binding (`{provider}:{name}:{key_version}`). Master key loaded from `SECRETS_ENCRYPTION_KEY` (32 bytes base64/hex), with multi-version key rotation supported via `SECRETS_ENCRYPTION_KEYS` (`1:<key1>,2:<key2>`).
+  - `FailClosedSecretProtector`: When `SECRETS_ENCRYPTION_KEY` is not configured, rejects secret encryption/decryption operations with `CryptoError::KeyUnavailable` while leaving non-secret runtime settings and environment fallbacks functional.
+  - Plaintext and ciphertext are write-only and never exposed in REST responses, DOM, logs, or audit records. Only dynamically computed masked previews (`sk-...9999`) are exposed.
+- **Hot reload (`application/config/snapshot.rs`):**
+  - `ArcSwap<RuntimeConfigSnapshot>` holds the active configuration snapshot in memory, updated atomically without lock contention and preloaded at boot in `app::run`.
   - Live reloads trigger on transactional outbox events (`ConfigUpdated`, `SecretChanged`), event listener reconnections, and a periodic 60s background safety interval.
-- **Layered Precedence Resolution:**
-  - AI requests resolve with exact precedence: `AiUserConfig > Runtime Snapshot (app_settings + provider_secrets) > Environment (AiEnvConfig) > Defaults`.
-  - Settings marked `hot_reloadable: true` take effect immediately on subsequent requests; `hot_reloadable: false` take effect upon process restart.
-- **Admin Endpoints & Step-Up (`interface/http/admin/`):**
+- **Precedence:**
+  - AI, search, OCR, STT, TTS, embedding base URL, and link signup resolve with precedence: `AiUserConfig (where applicable) > Runtime Snapshot (app_settings + provider_secrets) > Environment > Defaults`.
+- **Admin endpoints and step-up (`interface/http/admin/`):**
   - Handlers mounted at `/api/v1/admin/{settings,secrets,config-status,audit-logs}`.
-  - Protected by `AdminUser` extractor requiring both `role == 'admin'` and WebAuthn passkey step-up within 5 minutes.
-  - Append-only audit logging (`config_audit` table) records every administrative change with actor ID, action, target, and outcome.
-- **Provider Connection Testers (`infrastructure/inference/testers/`):**
-  - Live credential verification for OpenAI, Anthropic, Tavily, Telegram, Discord, and Email.
-  - Offline/mock test keys bypass remote calls to ensure predictable and secure test suites.
-
+  - Ordinary admin `GET` endpoints use `AdminSession` (requires authenticated session, `role == 'admin'`, at least one enrolled passkey, non-MCP token, and non-recovery-restricted session).
+  - Admin write endpoints (`PUT /api/v1/admin/settings/:key`, `DELETE /api/v1/admin/settings/:key`, `POST /api/v1/admin/secrets`, `PUT /api/v1/admin/secrets/:id`, `DELETE /api/v1/admin/secrets/:id`) and `POST /api/v1/admin/secrets/:id/test` use `AdminUser` (requires `AdminSession` plus fresh WebAuthn passkey step-up within 5 minutes, `STEP_UP_WINDOW_MINUTES = 5`).
+  - Administrative audit logging (`config_audit_log` table) records every configuration, secret, and role change with actor ID, action, target, and sanitized detail.
+- **Provider connection testers (`infrastructure/inference/testers/`):**
+  - SSRF-guarded (`is_safe_target_url`, `redirect::Policy::none()`) live credential verification for `openai`, `anthropic`, and `tavily` secrets; `stt`, `tts`, and `generic` return `unknown` (`None`) because they have no fixed provider endpoint.
+  - There is no key-prefix bypass in production code: tests point the tester at a loopback mock server (`allow_private`), so no test calls a real provider.

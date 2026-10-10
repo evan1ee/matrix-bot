@@ -23,6 +23,7 @@ Every feature is reachable through several surfaces (Matrix chat commands, the w
 - 🔌 **MCP server**: exposes the same tools, resources and prompts to Claude Desktop, Cursor and other MCP clients over stdio or HTTP/SSE.
 - 🔊 **Voice replies**: `!say <text>` speaks into the room as a native Matrix voice message (Ogg Opus), synthesized by the bundled Kokoro server or by OpenAI/ElevenLabs. Each user picks a voice.
 - ⚙️ **Settings**: per-user timezone, default currency and voice, respected by every module.
+- 🛡️ **Admin Console & Encrypted Secrets Vault**: 20 hot-reloadable runtime settings (`ArcSwap` snapshot) and an AES-256-GCM credentials vault with live provider probes, gated by CLI-bootstrapped `admin` role and 5-minute WebAuthn passkey step-up on mutations.
 - 🔐 **Accounts and security**: passkey (WebAuthn) sign-in, linked Matrix identities, step-up assertions, delayed recovery and an audit log.
 - 🗄️ **PostgreSQL 18** as the only application database, with versioned migrations applied at boot. See [`docs/database.md`](docs/database.md).
 - 📦 **Decoupled Object Storage**: binary media (receipts, audio clips, attachments) stored in local filesystem or S3/R2/MinIO, isolated by account with presigned streaming.
@@ -121,6 +122,7 @@ Endpoints are mounted under `/api/v1`. Authentication is an HttpOnly session coo
 | Inbound gateway | `/webhooks/:token`, `/bot<token>/sendMessage` | Generic and Telegram-compatible webhook receivers |
 | Link | `/link/*` | The landing page's inspect, claim and allowlisted signup calls |
 | Settings, rooms | `/settings`, `/rooms` | Preferences and Matrix room picker |
+| Admin | `/admin/*` | 20 hot-reloadable runtime settings, AES-256-GCM provider secrets, connectivity probes, audit log (`AdminSession` for reads, `AdminUser` 5-min step-up for writes/tests) |
 | Live events | `/events` | SSE stream scoped to the authenticated owner |
 
 `GET /api-docs/openapi.json` serves the generated OpenAPI 3.1 specification (committed as [`backend/openapi.json`](backend/openapi.json)); it is the authoritative endpoint list, and the frontend's TypeScript client is generated from it. Conventions, SSE events and authentication are in [`docs/api.md`](docs/api.md).
@@ -216,11 +218,31 @@ TAVILY_API_KEY=tvly-...                # Live Web Search (fallback to DuckDuckGo
 # EMBEDDING_BASE_URL=http://inference:8090  # OpenAI-compatible /v1/embeddings (the bundled inference server)
 # EMBEDDING_MODEL=multilingual-e5-small     # Chunks are tagged with it; changing it re-embeds everything in the background
 # EMBEDDING_MODEL_DIR=/app/data/embedding_models/multilingual-e5-small  # Read by the inference container: where it downloads the model
+
+# Dynamic Configuration & Encrypted Secrets Vault (Optional in dev; required for storing secrets in the Admin Console)
+# SECRETS_ENCRYPTION_KEY=                   # 32-byte master key (`openssl rand -base64 32` or `openssl rand -hex 32`)
+# SECRETS_ENCRYPTION_KEYS=                  # Optional versioned keys for rotation (`1:<old_key>,2:<new_key>`)
 ```
 
 > [!WARNING]
 > **`WEBAUTHN_RP_ID` is baked into passkey credentials upon registration.**
 > Changing it invalidates existing passkeys. If deploying to production (e.g. `bot.example.com`), set `WEBAUTHN_RP_ID=bot.example.com` and `WEBAUTHN_ORIGIN=https://bot.example.com` before creating passkeys.
+
+---
+
+### Admin Bootstrap & Runtime Configuration
+
+Public registration and passkey enrollment never grant `admin` privileges automatically. To grant or revoke administrator access after an account has registered and enrolled at least one passkey:
+
+```bash
+# Grant admin role to a passkey-enrolled account
+matrix-bot admin grant acct_<uuid>
+
+# Revoke admin role and terminate all active sessions for that account
+matrix-bot admin revoke acct_<uuid>
+```
+
+Once signed in, administrators can manage the **20 hot-reloadable runtime settings** (LLM defaults, Tavily/Brave search toggles, OCR/STT/TTS/Embedding endpoints and models, and link signup toggle) and **AES-256-GCM encrypted provider credentials** directly from the Web Admin Console without restarting the server. Restart-required settings (`EMBEDDING_MODEL`, `DISCORD_*`, `TELEGRAM_*`, `EMAIL_*`) remain in `.env`.
 
 ---
 
