@@ -2,7 +2,6 @@
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::domain::accounts::AccountId;
 
@@ -53,32 +52,18 @@ pub fn compute_entry_hash(
     note: Option<&str>,
     created_at_epoch_ms: i64,
 ) -> String {
-    let mut hasher = Sha256::new();
-    hasher.update(prev_hash.as_bytes());
-    hasher.update(b":");
-    hasher.update(owner_id.as_bytes());
-    hasher.update(b":");
-    hasher.update(action.as_bytes());
-    hasher.update(b":");
-    hasher.update(symbol.unwrap_or("").as_bytes());
-    hasher.update(b":");
-    hasher.update(quantity_minor.unwrap_or(0).to_string().as_bytes());
-    hasher.update(b":");
-    hasher.update(price_minor.unwrap_or(0).to_string().as_bytes());
-    hasher.update(b":");
-    hasher.update(amount_minor.to_string().as_bytes());
-    hasher.update(b":");
-    hasher.update(currency.as_bytes());
-    hasher.update(b":");
-    hasher.update(currency_exponent.to_string().as_bytes());
-    hasher.update(b":");
-    hasher.update(realized_pl_minor.unwrap_or(0).to_string().as_bytes());
-    hasher.update(b":");
-    hasher.update(note.unwrap_or("").as_bytes());
-    hasher.update(b":");
-    hasher.update(created_at_epoch_ms.to_string().as_bytes());
-
-    format!("{:x}", hasher.finalize())
+    // The colon-joined preimage is the stored chain's format; the pinned
+    // digest test below fails if a single byte of it changes.
+    let preimage = format!(
+        "{prev_hash}:{owner_id}:{action}:{}:{}:{}:{amount_minor}:{currency}:\
+         {currency_exponent}:{}:{}:{created_at_epoch_ms}",
+        symbol.unwrap_or(""),
+        quantity_minor.unwrap_or(0),
+        price_minor.unwrap_or(0),
+        realized_pl_minor.unwrap_or(0),
+        note.unwrap_or(""),
+    );
+    crate::utils::secure::sha256_hex(preimage.as_bytes())
 }
 
 #[cfg(test)]

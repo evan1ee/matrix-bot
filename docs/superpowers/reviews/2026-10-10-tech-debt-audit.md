@@ -20,7 +20,7 @@ Evidence came from the code, not from memory: production line counts (lines befo
 | TD-04 | Completed plans left in `docs/superpowers/plans/` | Documentation | 3 | 2 | 1 | **25** | 1 | **Done** |
 | TD-05 | Hand-written e2e fakes and frontend types drift from OpenAPI | Test | 3 | 4 | 3 | **21** | 1 | Open |
 | TD-06 | Doc drift in AGENTS.md and the reference docs | Documentation | 2 | 2 | 1 | **20** | 1 | **Done** |
-| TD-07 | `domain/` imports `sha2` against the layer rule | Architecture | 2 | 2 | 2 | **16** | 1 | Open |
+| TD-07 | `domain/` imports `sha2` against the layer rule | Architecture | 2 | 2 | 2 | **16** | 1 | **Done** |
 | TD-08 | `application/secrets/mod.rs` over the 500-line cap; many files close to it | Code | 2 | 2 | 2 | **16** | 1 | Open |
 | TD-09 | `#[allow]`s with no reason, and dead code | Code | 2 | 1 | 1 | **15** | 1 | **Done** |
 | TD-10 | Three `reqwest` / two `hyper` stacks; direct `reqwest 0.11` | Dependency | 2 | 3 | 3 | **15** | 2 | Open |

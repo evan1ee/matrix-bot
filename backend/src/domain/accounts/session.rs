@@ -20,7 +20,6 @@
 use super::AccountId;
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 /// The cookie a browser presents to prove who it is.
 pub const COOKIE_NAME: &str = "mb_session";
@@ -83,14 +82,7 @@ impl Session {
 
 /// Hashes a session cookie into its storage key.
 pub fn hash_token(token: &str) -> String {
-    let digest = Sha256::digest(token.as_bytes());
-    digest
-        .iter()
-        .fold(String::with_capacity(64), |mut acc, byte| {
-            use std::fmt::Write;
-            let _ = write!(acc, "{byte:02x}");
-            acc
-        })
+    crate::utils::secure::sha256_hex(token.as_bytes())
 }
 
 /// A registered passkey row as stored.
@@ -109,4 +101,18 @@ pub enum DeleteOutcome {
     Removed,
     NotFound,
     WouldLockOut,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Stored session ids are this digest; changing it logs everyone out.
+    #[test]
+    fn hash_token_digest_is_pinned() {
+        assert_eq!(
+            hash_token("abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
 }

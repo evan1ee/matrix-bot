@@ -4,7 +4,6 @@ pub mod renderer;
 
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
 
 use crate::domain::accounts::AccountId;
 
@@ -127,14 +126,7 @@ pub struct WebhookOutboxItem {
 
 /// Hashes an inbound webhook token to SHA-256 for secure database lookup.
 pub fn hash_token(token: &str) -> String {
-    let digest = Sha256::digest(token.as_bytes());
-    digest
-        .iter()
-        .fold(String::with_capacity(64), |mut acc, byte| {
-            use std::fmt::Write;
-            let _ = write!(acc, "{byte:02x}");
-            acc
-        })
+    crate::utils::secure::sha256_hex(token.as_bytes())
 }
 
 /// Calculates exponential backoff delay based on retry attempts.
@@ -147,6 +139,15 @@ pub fn retry_delay(attempts_so_far: i64) -> Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_hash_token_digest_is_pinned() {
+        // Stored webhook tokens are looked up by this digest.
+        assert_eq!(
+            hash_token("abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+    }
 
     #[test]
     fn test_hash_token_stability() {

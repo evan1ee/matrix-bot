@@ -225,6 +225,7 @@ fn domain_depends_on_nothing_outside_itself() {
             "crate::modules",
             "crate::db",
             "webauthn_rs",
+            "sha2::",
             "tracing::",
         ],
     );
