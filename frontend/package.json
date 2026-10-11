@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "generate-api": "openapi-typescript ../backend/openapi.json -o src/types/api.ts",
     "test:e2e": "playwright test",
+    "typecheck:e2e": "tsc -p tsconfig.e2e.json",
     "test:e2e:ui": "playwright test --ui"
   },
   "dependencies": {

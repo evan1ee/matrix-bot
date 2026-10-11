@@ -475,7 +475,7 @@ const AdminConsoleContent: React.FC = () => {
                     {auditLogs.map((entry) => (
                       <tr key={entry.id} className="hover:bg-[var(--color-surface-hover)] transition-colors duration-150">
                         <td className="px-4 py-3 font-mono text-[11px] text-[var(--color-text-secondary)]">
-                          {formatDateTimeInZone(entry.created_at, userSettings.timezone)}
+                          {entry.created_at ? formatDateTimeInZone(entry.created_at, userSettings.timezone) : '—'}
                         </td>
                         <td className="px-4 py-3 font-medium text-[var(--color-text-primary)]">
                           {entry.action}

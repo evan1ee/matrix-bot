@@ -18,7 +18,7 @@ Evidence came from the code, not from memory: production line counts (lines befo
 | TD-03 | Playwright e2e is not run in CI | Test / infra | 4 | 4 | 2 | **32** | 1 | **Done** |
 | TD-02 | Config-management review findings not yet committed | Code / security | 4 | 5 | 3 | **27** | 0 | **Done** |
 | TD-04 | Completed plans left in `docs/superpowers/plans/` | Documentation | 3 | 2 | 1 | **25** | 1 | **Done** |
-| TD-05 | Hand-written e2e fakes and frontend types drift from OpenAPI | Test | 3 | 4 | 3 | **21** | 1 | Open |
+| TD-05 | Hand-written e2e fakes and frontend types drift from OpenAPI | Test | 3 | 4 | 3 | **21** | 1 | **Partial** |
 | TD-06 | Doc drift in AGENTS.md and the reference docs | Documentation | 2 | 2 | 1 | **20** | 1 | **Done** |
 | TD-07 | `domain/` imports `sha2` against the layer rule | Architecture | 2 | 2 | 2 | **16** | 1 | **Done** |
 | TD-08 | `application/secrets/mod.rs` over the 500-line cap; many files close to it | Code | 2 | 2 | 2 | **16** | 1 | **Done** |
@@ -60,6 +60,8 @@ Evidence came from the code, not from memory: production line counts (lines befo
 **Evidence:** Review finding B6: the audit endpoint returns `AuditLogPageDto`, but both the fake and the hook assumed a bare array. Every spec passed while the real UI crashed. `frontend/src/modules/admin/types.ts` duplicates DTOs that `frontend/src/types/api.ts` already generates (M18). `frontend/e2e/fake-api.ts` builds responses by hand.
 **Why it matters:** The fakes are the only thing the e2e tier tests against. When they drift from the real API, green tests prove nothing.
 **Fix:** Make the modules import their types from the generated `api.ts`. Type the fake-api handlers against the same types, so a shape mismatch fails `tsc`. Add a CI check that `npm run generate-api` produces no diff. **Effort:** 1–2 days across modules; do it module by module.
+
+**Partial:** the admin module now aliases the generated DTOs, and its e2e fixtures (`e2e/admin-fixtures.ts`) are type-checked in CI (`typecheck:e2e`). The other modules and the rest of `fake-api.ts` are Phase 2, module by module. Rule from now on: a new module types its API data from `types/api.ts`.
 
 ### TD-06 — Doc drift (20)
 **Evidence:**

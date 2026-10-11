@@ -1,5 +1,13 @@
 import { createHash } from 'node:crypto';
 import type { Page, Route } from '@playwright/test';
+import {
+  auditPage,
+  configStatus,
+  initialAdminSettings,
+  type FakeAuditRow,
+  type FakeSecret,
+  type FakeSetting,
+} from './admin-fixtures';
 
 /**
  * An in-memory stand-in for `/api/v1`, installed as a Playwright route so the
@@ -412,70 +420,9 @@ export class FakeApi {
    */
   signedIn = true;
   role: 'user' | 'admin' = 'user';
-  adminSettings: any[] = [
-    {
-      key: 'llm.default_provider',
-      value: 'openai',
-      default_value: 'openai',
-      value_type: 'string',
-      description: 'Default AI provider identifier',
-      is_custom: false,
-      hot_reloadable: true,
-      category: 'LLM',
-      updated_at: null,
-      updated_by: null,
-    },
-    {
-      key: 'llm.default_model',
-      value: 'gpt-4o-mini',
-      default_value: 'gpt-4o-mini',
-      value_type: 'string',
-      description: 'Default model name passed in inference requests',
-      is_custom: false,
-      hot_reloadable: true,
-      category: 'LLM',
-      updated_at: null,
-      updated_by: null,
-    },
-    {
-      key: 'search.tavily.enabled',
-      value: true,
-      default_value: true,
-      value_type: 'boolean',
-      description: 'Enable/disable Tavily live web search',
-      is_custom: false,
-      hot_reloadable: true,
-      category: 'Search',
-      updated_at: null,
-      updated_by: null,
-    },
-    {
-      key: 'inference.embedding.base_url',
-      value: '',
-      default_value: '',
-      value_type: 'string',
-      description: 'Base URL for knowledge embedding inference',
-      is_custom: false,
-      hot_reloadable: true,
-      category: 'inference',
-      updated_at: null,
-      updated_by: null,
-    },
-    {
-      key: 'registration.allow_link_signup',
-      value: true,
-      default_value: true,
-      value_type: 'boolean',
-      description: 'Allow allowlisted chat identities to create accounts via /link',
-      is_custom: false,
-      hot_reloadable: true,
-      category: 'registration',
-      updated_at: null,
-      updated_by: null,
-    },
-  ];
-  adminSecrets: any[] = [];
-  adminAuditLogs: any[] = [];
+  adminSettings: FakeSetting[] = initialAdminSettings();
+  adminSecrets: FakeSecret[] = [];
+  adminAuditLogs: FakeAuditRow[] = [];
   nextSecretId = 1;
 
   /** Passkeys the account holds, as Settings -> Security lists them. */
@@ -1216,14 +1163,7 @@ export class FakeApi {
       }
 
       if (path === '/admin/config-status' && method === 'GET') {
-        return json(route, 200, {
-          settings_count: this.adminSettings.length,
-          custom_settings_count: this.adminSettings.filter((s) => s.is_custom).length,
-          encryption_configured: true,
-          secrets_count: this.adminSecrets.length,
-          active_secrets_count: this.adminSecrets.filter((s) => s.status === 'active').length,
-          last_reload_at: new Date().toISOString(),
-        });
+        return json(route, 200, configStatus(this.adminSettings, this.adminSecrets));
       }
 
       if (path === '/admin/settings' && method === 'GET') {
@@ -1245,7 +1185,6 @@ export class FakeApi {
             hot_reloadable: true,
             category: 'General',
             updated_at: new Date().toISOString(),
-            updated_by: OWNER,
           };
           this.adminSettings.push(setting);
         } else {
@@ -1349,13 +1288,7 @@ export class FakeApi {
       if (path.startsWith('/admin/audit-logs') && method === 'GET') {
         const limit = Number(url?.searchParams.get('limit') ?? 50);
         const offset = Number(url?.searchParams.get('offset') ?? 0);
-        const entries = this.adminAuditLogs.slice(offset, offset + limit);
-        return json(route, 200, {
-          entries,
-          total: this.adminAuditLogs.length,
-          limit,
-          offset,
-        });
+        return json(route, 200, auditPage(this.adminAuditLogs, limit, offset));
       }
     }
 

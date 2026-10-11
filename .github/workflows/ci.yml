@@ -263,6 +263,9 @@ jobs:
       - name: Frontend build
         run: npm --prefix frontend run build
 
+      - name: Type-check typed e2e fixtures
+        run: npm --prefix frontend run typecheck:e2e
+
   frontend-e2e:
     name: Frontend e2e (Playwright)
     runs-on: ubuntu-latest
