@@ -98,6 +98,6 @@ After the fixes, re-run: fmt, check, clippy, full test suite against `pg18-test`
 - Admin bootstrap: first-passkey promotion, `ADMIN_USERS` allowlist, or SQL-only (document it)? This changes the security model, so it is the owner's call.
   - **Decision in the code:** CLI/SQL only (`matrix-bot admin grant|revoke <account_id>`); registration and passkey enrolment never grant `admin`.
 - Should admin read endpoints require fresh step-up, or only writes? The branch gates both; the docs say only writes.
-  - **Decision in the code:** both are gated (`AdminUser` requires `VerifiedUser`); the web console re-prompts for a passkey when step-up lapses (B7).
+  - **Decision in the code:** only writes need fresh step-up (`AdminUser`); reads need an admin session (`AdminSession`) without it, so a lapsed step-up no longer hides the console data (B7).
 - Should unwired settings (M1) be removed from the registry for now, or kept as declared-but-inert with a UI badge?
   - **Decision in the code:** removed; the registry holds only settings with a live consumer.

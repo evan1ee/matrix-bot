@@ -156,7 +156,6 @@ Migration `0015_configuration_and_secrets` introduces system-wide dynamic config
   - `key TEXT PRIMARY KEY` (validated in application code against the 20-key `SettingKey` enum and `SettingRegistry`)
   - `value JSONB NOT NULL` (typed in domain as `SettingValue::{String, Integer, Float, Boolean}`)
   - `updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP`, `updated_by UUID REFERENCES accounts(id) ON DELETE SET NULL`
-  - Index: `idx_app_settings_updated_at (updated_at)`
 - **`provider_secrets` table:**
   - `id UUID PRIMARY KEY DEFAULT gen_random_uuid()`
   - `provider TEXT NOT NULL`, `name TEXT NOT NULL DEFAULT 'default'` with `CONSTRAINT uq_provider_secrets_slot UNIQUE (provider, name)`
