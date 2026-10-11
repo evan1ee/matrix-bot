@@ -300,26 +300,22 @@ pub async fn verify_ai_config(
         .await
         .map_err(ApiError::from)?;
 
-    let resolved = ResolvedAiConfig::from_user_config(&state.ai, user_config.as_ref());
-
-    let target_base_url = input
-        .api_base_url
-        .filter(|u| !u.trim().is_empty())
-        .unwrap_or(resolved.api_base_url);
-
-    let target_key = input
-        .api_key
-        .filter(|k| !k.trim().is_empty())
-        .or_else(|| user_config.as_ref().and_then(|c| c.api_key.clone()))
-        .or(resolved.api_key);
-
-    let target_model = input
-        .model_name
-        .filter(|m| !m.trim().is_empty())
-        .unwrap_or(resolved.model_name);
+    // Resolved together, so the instance key never goes to a host the caller
+    // typed into the form.
+    let target = ResolvedAiConfig::for_verification(
+        &state.ai,
+        user_config.as_ref(),
+        input.api_base_url.as_deref(),
+        input.api_key.as_deref(),
+        input.model_name.as_deref(),
+    );
 
     match crate::infrastructure::inference::llm::shared_client(state.ai.proxy.as_deref())
-        .verify_api_key(&target_base_url, target_key.as_deref(), Some(&target_model))
+        .verify_api_key(
+            &target.api_base_url,
+            target.api_key.as_deref(),
+            Some(&target.model_name),
+        )
         .await
     {
         Ok(()) => Ok(Json(VerifyAiKeyResponse {

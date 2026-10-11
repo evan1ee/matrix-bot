@@ -217,6 +217,40 @@ impl ResolvedAiConfig {
         }
     }
 
+    /// The target of a "verify this key" probe: the caller's stored config
+    /// overlaid with what they typed into the form. Goes through `resolve`, so
+    /// the instance key is attached only when the target is the instance
+    /// endpoint; a typed host never receives it.
+    pub fn for_verification(
+        ai: &crate::config::AiEnvConfig,
+        stored: Option<&AiUserConfig>,
+        base_url: Option<&str>,
+        api_key: Option<&str>,
+        model_name: Option<&str>,
+    ) -> Self {
+        let typed = |v: Option<&str>| {
+            v.map(str::trim)
+                .filter(|s| !s.is_empty())
+                .map(str::to_string)
+        };
+        let mut overlay = stored.cloned().unwrap_or_else(|| AiUserConfig {
+            owner_id: String::new(),
+            api_base_url: None,
+            api_key: None,
+            model_name: None,
+            system_prompt: None,
+            temperature: None,
+            max_tokens: None,
+            max_history_turns: None,
+            updated_at: String::new(),
+            has_api_key: false,
+        });
+        overlay.api_base_url = typed(base_url).or(overlay.api_base_url);
+        overlay.api_key = typed(api_key).or(overlay.api_key);
+        overlay.model_name = typed(model_name).or(overlay.model_name);
+        Self::resolve(ai, None, None, Some(&overlay))
+    }
+
     /// The connection half of this config, for `services::llm`.
     pub fn endpoint(&self) -> LlmEndpoint<'_> {
         LlmEndpoint {
@@ -439,6 +473,42 @@ mod tests {
             resolved_custom_user.api_key, None,
             "User custom endpoint must never receive instance secret key"
         );
+    }
+
+    #[test]
+    fn verifying_a_foreign_host_never_attaches_the_instance_key() {
+        let ai_env = crate::config::AiEnvConfig {
+            base_url: Some("https://api.openai.com/v1".to_string()),
+            api_key: Some("sk-instance-key".to_string()),
+            model: None,
+            proxy: None,
+            allow_private_base_url: false,
+        };
+        // No stored config, no key typed: the instance key must stay home.
+        let foreign = ResolvedAiConfig::for_verification(
+            &ai_env,
+            None,
+            Some("https://attacker.example/v1"),
+            None,
+            None,
+        );
+        assert_eq!(foreign.api_base_url, "https://attacker.example/v1");
+        assert_eq!(foreign.api_key, None);
+
+        // The instance endpoint itself keeps its shared key.
+        let own = ResolvedAiConfig::for_verification(&ai_env, None, None, None, None);
+        assert_eq!(own.api_key.as_deref(), Some("sk-instance-key"));
+
+        // A typed key wins over everything, on any host.
+        let typed = ResolvedAiConfig::for_verification(
+            &ai_env,
+            None,
+            Some("https://other.example/v1"),
+            Some(" typed-key "),
+            Some("m1"),
+        );
+        assert_eq!(typed.api_key.as_deref(), Some("typed-key"));
+        assert_eq!(typed.model_name, "m1");
     }
 
     #[ignore]
