@@ -131,6 +131,9 @@ impl FromStr for RunStatus {
     }
 }
 
+/// The `task_name` of a run the user started with a goal of their own.
+pub const USER_GOAL_TASK: &str = "custom_goal";
+
 /// An autonomous agent execution run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AgentRun {
@@ -183,7 +186,7 @@ impl AgentRun {
             scheduled_task_id: None,
             account_id,
             task_name: if task_name.is_empty() {
-                "custom_goal".to_string()
+                USER_GOAL_TASK.to_string()
             } else {
                 task_name
             },

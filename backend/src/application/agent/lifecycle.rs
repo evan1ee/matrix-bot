@@ -23,7 +23,7 @@ impl AgentService {
         let now = now_at_storage_precision();
         let run = AgentRun::new(
             account_id,
-            "custom_goal",
+            crate::domain::agent::run::USER_GOAL_TASK,
             goal,
             origin_conversation.clone(),
             max_steps,

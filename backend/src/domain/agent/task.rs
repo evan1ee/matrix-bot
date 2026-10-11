@@ -9,6 +9,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use super::run::USER_GOAL_TASK;
 use super::{AgentError, AgentRun};
 use crate::domain::accounts::AccountId;
 
@@ -131,12 +132,17 @@ impl ScheduledTaskRegistry {
     /// The tools `run` may call.
     ///
     /// A user-started run is not restricted here (`None`): sensitive tools
-    /// still need the user's approval. A scheduled run runs unattended on
+    /// still need the user's approval. A user run is recognised by its name,
+    /// not by a missing `scheduled_task_id`, because that link is nulled when
+    /// the schedule row is deleted and must not turn a scheduled run into a
+    /// user run. Every other run is unattended: it runs on
     /// prompts that can carry untrusted content, so it is held to its task's
     /// whitelist. If its task is no longer registered, or its stored name is
     /// not a valid id, it gets no tools at all rather than every tool.
     pub fn tool_policy(&self, run: &AgentRun) -> Option<Vec<String>> {
-        run.scheduled_task_id?;
+        if run.scheduled_task_id.is_none() && run.task_name == USER_GOAL_TASK {
+            return None;
+        }
         let task = TaskId::new(&run.task_name)
             .ok()
             .and_then(|id| self.get(&id));
@@ -377,7 +383,7 @@ mod tests {
     #[test]
     fn user_run_is_not_restricted() {
         let registry = ScheduledTaskRegistry::with_builtins();
-        assert_eq!(registry.tool_policy(&run_for("user_goal", false)), None);
+        assert_eq!(registry.tool_policy(&run_for(USER_GOAL_TASK, false)), None);
     }
 
     #[test]
@@ -385,6 +391,23 @@ mod tests {
         let registry = ScheduledTaskRegistry::with_builtins();
         assert_eq!(
             registry.tool_policy(&run_for("habit_consistency_review", true)),
+            Some(vec![
+                "get_my_habits".to_string(),
+                "get_daily_log".to_string()
+            ])
+        );
+    }
+
+    #[test]
+    fn a_run_that_lost_its_schedule_link_stays_restricted() {
+        // `scheduled_task_id` is ON DELETE SET NULL (an account merge drops
+        // the absorbed account's schedule rows), so it cannot tell a user run
+        // from an orphaned scheduled one.
+        let registry = ScheduledTaskRegistry::with_builtins();
+        let mut orphan = run_for("habit_consistency_review", true);
+        orphan.scheduled_task_id = None;
+        assert_eq!(
+            registry.tool_policy(&orphan),
             Some(vec![
                 "get_my_habits".to_string(),
                 "get_daily_log".to_string()
