@@ -67,8 +67,8 @@ app.rs / main.rs             Composition roots, supervision, graceful shutdown
 
 - **Rust Backend:**
   - `cargo check -p matrix-bot --all-targets`: Clean (zero errors, zero warnings).
-  - `cargo clippy --workspace --all-targets -- -D warnings`: Clean.
-  - `cargo test -p matrix-bot --lib`: 1583 passed / 0 failed.
+  - `cargo clippy -p matrix-bot --all-targets -- -D warnings` and `-p matrix-bot-inference`: Clean.
+  - `cargo test -p matrix-bot --lib`: 1591 passed / 0 failed at the last fully green parallel run (before the review fix pass, which added 2 tests). The touched groups pass when run serially. Repeated full parallel runs against the local `pg18-test` later became unreliable (`PoolTimedOut` in unrelated tests, different ones each run), so re-run the full suite on a fresh server or in CI before merging.
   - `cargo test -p matrix-bot --test architecture`: 39 passed / 0 failed.
   - `cargo test -p matrix-bot live_postgres`: 3 passed / 0 failed.
   - `cargo run --bin generate-openapi && git diff --exit-code backend/openapi.json`: Byte-identical (zero drift).
@@ -124,7 +124,7 @@ Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in sequence:
 
 ### Track 2: Post-Cutover Enhancements & Technical Debt
 
-- Tech-debt register and phased plan: [reviews/2026-10-10-tech-debt-audit.md](reviews/2026-10-10-tech-debt-audit.md); execution plan: [plans/2026-10-11-tech-debt-phase-0-1.md](plans/2026-10-11-tech-debt-phase-0-1.md).
+- Tech-debt register: [reviews/2026-10-10-tech-debt-audit.md](reviews/2026-10-10-tech-debt-audit.md). Phases 0 and 1 are done (except TD-05 beyond the admin module). Phase 2 next: TD-10 (reqwest 0.12, own branch), TD-13.
 
 1. **Quote-Based AI Confirmation Without Taint:**
    - Every quoted message currently taints the AI turn (including quotes of the bot's own messages, since webhook alerts and notices also come from the bot account). Users confirming a sensitive action in clients that auto-quote replies must send an unquoted message. To allow quote-based confirmation safely, track authentic AI reply event IDs (in-memory bounded set or an `ai_reply_messages` table).
@@ -145,6 +145,14 @@ Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in sequence:
 5. **Minor Deferred Edge Cases:**
    - `SyncHealth`: Add fallback handling if Matrix sync timestamp string fails to parse.
    - Morning briefing window: Wrap-around logic for target briefing windows close to the hour boundary (`:58`–`:02`).
+
+6. **Review follow-ups left open by the tech-debt pass:**
+   - A vault key is attached to the env endpoint when `llm.default_provider` is not customized, even if the key belongs to another vendor than the endpoint (`llm/resolved_config.rs`, `resolve`). Decide whether to gate it by the provider's canonical URL; the existing precedence test encodes the current behaviour.
+   - The agent job, `chat/llm.rs` and `http/ai.rs` resolve with `from_user_config` (env only), so agent runs ignore the admin console's provider, model and vault key while chat honours them.
+   - `ScheduledAgentTask::allowed_tools()` defaults to `None`, which means every tool; make the default `Some(vec![])` and assert `is_some()` in `every_builtin_whitelist_names_registered_tools`.
+   - `resume.rs` checks the whitelist after `begin_approved_execution` has committed its "started" marker; check `tool_policy` first.
+   - `grant_admin`/`revoke_admin` audit the target account as the actor; account merges that carry over the admin role write no audit row.
+   - `application/knowledge/search.rs` builds a new embedding HTTP client per call while the base URL is customized; `resolve_runtime_stt` drops decrypt errors without a warning.
 
 ---
 

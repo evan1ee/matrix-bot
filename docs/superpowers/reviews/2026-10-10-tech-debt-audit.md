@@ -137,6 +137,8 @@ Each phase is sized to run alongside feature work. Every item ships as its own C
 *Exit:* the review doc has no open HIGH findings; the gates are green.
 
 ### Phase 1 — next 1–2 weeks (about 2–3 days in total)
+*Status 2026-10-11: done except TD-05 (admin module only; the other modules are Phase 2). Phase 0 is done too.*
+
 3. **TD-03:** Playwright in CI.
 4. **TD-04, TD-06:** prune completed plans, fix doc drift, and point HANDOFF §6 at AGENTS §8.
 5. **TD-09:** delete dead code and justify or drop the allows.
