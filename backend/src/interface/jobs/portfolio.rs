@@ -365,6 +365,34 @@ mod tests {
         assert!(out.is_ok(), "{out:?}");
     }
 
+    /// The scheduled refresh records today's snapshot, and a retry of the
+    /// same job does not record a second one.
+    #[tokio::test]
+    async fn refresh_prices_records_one_snapshot_per_day() {
+        use crate::infrastructure::postgres::repositories::portfolio::history as snapshots;
+        let (s, o) = services(&["acct_pf_h_snapshot"]).await;
+        let handler = RefreshPricesHandler::new(s.clone());
+
+        // No holdings, so no price is fetched and no network is touched.
+        handler
+            .run(&ctx(Some(o[0])), serde_json::json!({}))
+            .await
+            .unwrap();
+        handler
+            .run(&ctx(Some(o[0])), serde_json::json!({}))
+            .await
+            .unwrap();
+
+        // A cutoff two days back keeps the assertion stable across midnight.
+        let cutoff = (chrono::Utc::now() - chrono::Duration::days(2))
+            .format("%Y-%m-%d")
+            .to_string();
+        let rows = snapshots::get_snapshots(s.portfolio.pool(), &o[0], "USD", &cutoff)
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 1, "one snapshot per day, even after a retry");
+    }
+
     #[tokio::test]
     async fn refresh_prices_without_an_account_is_permanent() {
         let (s, _) = services(&["acct_pf_h_noacct"]).await;

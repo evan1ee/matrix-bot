@@ -24,7 +24,7 @@ Evidence came from the code, not from memory: production line counts (lines befo
 | TD-08 | `application/secrets/mod.rs` over the 500-line cap; many files close to it | Code | 2 | 2 | 2 | **16** | 1 | **Done** |
 | TD-09 | `#[allow]`s with no reason, and dead code | Code | 2 | 1 | 1 | **15** | 1 | **Done** |
 | TD-10 | Three `reqwest` / two `hyper` stacks; direct `reqwest 0.11` | Dependency | 2 | 3 | 3 | **15** | 2 | Open |
-| TD-11 | No integration test for the portfolio price-refresh snapshot | Test | 1 | 2 | 1 | **15** | 1 | Open |
+| TD-11 | No integration test for the portfolio price-refresh snapshot | Test | 1 | 2 | 1 | **15** | 1 | **Done** |
 | TD-12 | Frontend has no unit tests; large components | Test / code | 2 | 2 | 3 | **12** | 2 | Open |
 | TD-13 | Deferred edge cases: `SyncHealth` parse, briefing window wrap-around | Code | 1 | 2 | 2 | **12** | 2 | Open |
 | TD-14 | 23 `too_many_arguments` sites | Code | 2 | 1 | 3 | **9** | 2 | Open |

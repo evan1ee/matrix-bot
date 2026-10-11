@@ -142,10 +142,7 @@ Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in sequence:
 4. **WebAuthn Conditional UI (Passkey Autofill):**
    - Implement passkey autofill on the web sign-in form using the WebAuthn Conditional UI standard (`mediation: 'conditional'`) for seamless page-load sign-in.
 
-5. **Integration Test for Portfolio Price Refresh Snapshot:**
-   - Add an integration test asserting that `RefreshPricesHandler` persists today's USD snapshot row in `portfolio_daily_snapshots` (currently tested at the service layer in `application/portfolio/mod.rs`).
-
-6. **Minor Deferred Edge Cases:**
+5. **Minor Deferred Edge Cases:**
    - `SyncHealth`: Add fallback handling if Matrix sync timestamp string fails to parse.
    - Morning briefing window: Wrap-around logic for target briefing windows close to the hour boundary (`:58`–`:02`).
 
