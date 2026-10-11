@@ -67,29 +67,37 @@ async fn listen(
     ttl_interval.tick().await;
 
     loop {
-        tokio::select! {
-            _ = ttl_interval.tick() => {
+        // One `next()` future lives across TTL ticks. When a connection loss
+        // is being handled, `next()` awaits the reconnect and only then
+        // reports `Reconnected`; dropping it mid-way (a tick winning a
+        // `select!` that re-creates it) makes sqlx reconnect silently and the
+        // replay below would never run.
+        let next = listener.next();
+        tokio::pin!(next);
+        let signal = loop {
+            tokio::select! {
+                _ = ttl_interval.tick() => {
+                    if let Err(err) = app_config.reload().await {
+                        warn!(error = %err, "Periodic runtime configuration snapshot reload failed");
+                    }
+                }
+                signal = &mut next => break signal?,
+            }
+        };
+        match signal {
+            OutboxSignal::Event(id, account) => {
+                hub.on_notification(id, account).await;
+                wake.notify_waiters();
+            }
+            OutboxSignal::Reconnected => {
+                warn!("Outbox LISTEN connection was lost and re-established; replaying");
+                wake.notify_waiters();
+                hub.replay(config.replay_window, config.replay_limit).await;
                 if let Err(err) = app_config.reload().await {
-                    warn!(error = %err, "Periodic runtime configuration snapshot reload failed");
+                    warn!(error = %err, "Failed to reload runtime configuration snapshot after reconnect");
                 }
             }
-            signal = listener.next() => {
-                match signal? {
-                    OutboxSignal::Event(id, account) => {
-                        hub.on_notification(id, account).await;
-                        wake.notify_waiters();
-                    }
-                    OutboxSignal::Reconnected => {
-                        warn!("Outbox LISTEN connection was lost and re-established; replaying");
-                        wake.notify_waiters();
-                        hub.replay(config.replay_window, config.replay_limit).await;
-                        if let Err(err) = app_config.reload().await {
-                            warn!(error = %err, "Failed to reload runtime configuration snapshot after reconnect");
-                        }
-                    }
-                    OutboxSignal::Malformed => {}
-                }
-            }
+            OutboxSignal::Malformed => {}
         }
     }
 }
