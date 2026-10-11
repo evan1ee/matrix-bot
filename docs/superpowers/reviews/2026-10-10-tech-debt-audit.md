@@ -21,7 +21,7 @@ Evidence came from the code, not from memory: production line counts (lines befo
 | TD-05 | Hand-written e2e fakes and frontend types drift from OpenAPI | Test | 3 | 4 | 3 | **21** | 1 | Open |
 | TD-06 | Doc drift in AGENTS.md and the reference docs | Documentation | 2 | 2 | 1 | **20** | 1 | **Done** |
 | TD-07 | `domain/` imports `sha2` against the layer rule | Architecture | 2 | 2 | 2 | **16** | 1 | **Done** |
-| TD-08 | `application/secrets/mod.rs` over the 500-line cap; many files close to it | Code | 2 | 2 | 2 | **16** | 1 | Open |
+| TD-08 | `application/secrets/mod.rs` over the 500-line cap; many files close to it | Code | 2 | 2 | 2 | **16** | 1 | **Done** |
 | TD-09 | `#[allow]`s with no reason, and dead code | Code | 2 | 1 | 1 | **15** | 1 | **Done** |
 | TD-10 | Three `reqwest` / two `hyper` stacks; direct `reqwest 0.11` | Dependency | 2 | 3 | 3 | **15** | 2 | Open |
 | TD-11 | No integration test for the portfolio price-refresh snapshot | Test | 1 | 2 | 1 | **15** | 1 | Open |
@@ -76,6 +76,8 @@ Evidence came from the code, not from memory: production line counts (lines befo
 ### TD-08 — File size cap (16)
 **Evidence:** `application/secrets/mod.rs` has **514** production lines, over the 500 cap. Close behind: `interface/http/life.rs` 499, `repositories/reminders.rs` 494, `http/auth/types.rs` 490, `repositories/portfolio/trades.rs` 488, `matrix/attachments.rs` 482, `domain/accounts/mod.rs` 478, `identity/link.rs` 473, `chat/knowledge.rs` 471. About 40 files exceed 400 lines, against a target of under 300.
 **Fix:** Split `secrets/mod.rs` now, along a real seam such as CRUD versus connection testing and auditing. For the others, split each one the next time a feature touches it. A sweep-only refactor would break the rule against mixing features and refactors. **Effort:** 2 hours for secrets.
+
+**Done:** `secrets/mod.rs` is split into `mod.rs` (169 production lines), `mutations.rs` (248) and `credential_check.rs` (124). The other files near the cap stay as they are and are split when a feature next touches them.
 
 ### TD-09 — `#[allow]`s with no reason, and dead code (15)
 **Evidence:** AGENTS §9 requires every `#[allow]` to document why. None of these do:
