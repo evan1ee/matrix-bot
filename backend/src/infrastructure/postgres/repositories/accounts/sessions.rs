@@ -58,8 +58,9 @@ pub async fn create(
 }
 
 /// Opens a session that has not verified a passkey (e.g. Matrix access-token
-/// exchange), stamping `last_verified_at = MIN_UTC` so it never satisfies
-/// `VerifiedUser` or `AdminSession` until a passkey is presented.
+/// exchange), stamping `last_verified_at` with the Unix epoch (`timestamptz`
+/// cannot store `MIN_UTC`) so it never satisfies `VerifiedUser` or
+/// `AdminSession` until a passkey is presented.
 pub async fn create_unverified(
     conn: impl sqlx::PgExecutor<'_>,
     account_id: &AccountId,

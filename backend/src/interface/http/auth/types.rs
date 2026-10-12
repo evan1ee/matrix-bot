@@ -53,6 +53,14 @@ impl AuthUser {
         self.role.is_admin()
     }
 
+    /// Whether this session has never presented a passkey: a machine MCP token
+    /// (in-memory `MIN_UTC`) or a Matrix access-token exchange (stored as the
+    /// Unix epoch, because `timestamptz` cannot hold `MIN_UTC`). Compares with
+    /// `<=` so both sentinels, and anything older, count.
+    pub fn never_presented_passkey(&self) -> bool {
+        self.last_verified_at <= chrono::DateTime::<chrono::Utc>::UNIX_EPOCH
+    }
+
     /// Whether a passkey assertion happened recently enough for a sensitive
     /// action, and this is not a restricted recovery session.
     ///

@@ -192,8 +192,9 @@ where
             return Err(ApiError::forbidden("Administrative privileges required"));
         }
 
-        // Reject machine MCP tokens (`MIN_UTC` sentinel) from accessing admin routes.
-        if user.last_verified_at == chrono::DateTime::<chrono::Utc>::MIN_UTC {
+        // Reject sessions that never presented a passkey (MCP tokens, Matrix
+        // access-token exchanges) from accessing admin routes.
+        if user.never_presented_passkey() {
             return Err(ApiError::forbidden(
                 "Normal passkey authentication is required for administrative access",
             ));

@@ -179,6 +179,43 @@ async fn test_anonymous_caller_rejected_with_401() {
     }
 }
 
+/// A Matrix access-token exchange opens a session that never presented a
+/// passkey. Even for an administrator who owns one, it must not reach the
+/// admin reads that a passkey-verified session can.
+#[tokio::test]
+async fn test_an_unverified_matrix_session_is_rejected_on_admin_reads() {
+    let (app, state, admin_token, _user_token, admin_acct) = setup_app().await;
+
+    let unverified_token = state
+        .services
+        .accounts
+        .create_unverified_session(&admin_acct, None, None, None)
+        .await
+        .unwrap();
+
+    let (status, body) = send_request(
+        &app,
+        Method::GET,
+        "/api/v1/admin/config-status",
+        Some(&unverified_token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::FORBIDDEN, "{body}");
+    assert!(body.contains("passkey authentication"), "{body}");
+
+    // The same account with a passkey-verified session still gets through.
+    let (status, body) = send_request(
+        &app,
+        Method::GET,
+        "/api/v1/admin/config-status",
+        Some(&admin_token),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{body}");
+}
+
 #[tokio::test]
 async fn test_non_admin_user_rejected_with_403_on_reads_and_writes() {
     let (app, state, _admin_token, user_token, admin_acct) = setup_app().await;
