@@ -309,7 +309,7 @@ mod tests {
         .unwrap();
 
         // Only up to 0002: this test pins the TEXT -> UUID conversion and
-        // reads `matrix_links`, which 0007 later retires (see the 0007 tests).
+        // reads `matrix_links`, which 0006 later retires (see the 0006 tests).
         migrator_up_to(2).run(&pool).await.expect("0002");
 
         for (label, query) in [
@@ -516,13 +516,13 @@ mod tests {
         assert!(bad.is_err(), "the status CHECK must reject unknown states");
     }
 
-    /// Given a database at 0005 with a Matrix link, When 0006/0007 run, Then
+    /// Given a database at 0004 with a Matrix link, When 0005/0006 run, Then
     /// the link is one `platform = 'matrix'` identity on the same account
     /// (keeping its link time) and `matrix_links` no longer exists.
     #[tokio::test]
-    async fn test_0007_backfills_matrix_links_into_platform_identities() {
+    async fn test_0006_backfills_matrix_links_into_platform_identities() {
         let pool = crate::db::pool::test_pool().await;
-        migrator_up_to(5).run(&pool).await.expect("0001-0005");
+        migrator_up_to(4).run(&pool).await.expect("0001-0004");
         let account = uuid::Uuid::new_v4();
         sqlx::query("INSERT INTO accounts (id, display_name) VALUES ($1, 'evan')")
             .bind(account)
@@ -541,7 +541,7 @@ mod tests {
         migrator_up_to(i64::MAX)
             .run(&pool)
             .await
-            .expect("0006-0007");
+            .expect("0005-0006");
 
         let rows: Vec<(uuid::Uuid, String, String, String)> = sqlx::query_as(
             "SELECT account_id, platform, platform_user_id, created_at::text \
@@ -567,13 +567,13 @@ mod tests {
         assert_eq!(gone, None, "matrix_links must be dropped");
     }
 
-    /// A link whose account is gone must abort 0007 by name and change nothing.
+    /// A link whose account is gone must abort 0006 by name and change nothing.
     /// The 0002 foreign key makes an orphan impossible to insert, so the test
     /// drops that one constraint first, standing in for a hand-edited database.
     #[tokio::test]
-    async fn test_0007_refuses_a_link_without_an_account_and_changes_nothing() {
+    async fn test_0006_refuses_a_link_without_an_account_and_changes_nothing() {
         let pool = crate::db::pool::test_pool().await;
-        migrator_up_to(5).run(&pool).await.expect("0001-0005");
+        migrator_up_to(4).run(&pool).await.expect("0001-0004");
         // Literal SQL only (AGENTS §6): a DO block finds and drops the FK.
         sqlx::query(
             "DO $$ DECLARE fk TEXT; BEGIN \
@@ -601,75 +601,5 @@ mod tests {
             kept, 1,
             "a refused migration must leave matrix_links intact"
         );
-    }
-
-    const OWNER_14: &str = "26ab01c0-f4c1-9b7d-854f-46dca154ee89";
-
-    /// 0014 makes the derived note columns NOT NULL, which is only safe after
-    /// the backfill ran: a leftover NULL must abort it by id, change nothing,
-    /// and succeed once the row is filled.
-    #[tokio::test]
-    async fn test_0014_refuses_notes_without_derived_columns_until_they_are_filled() {
-        let pool = crate::db::pool::test_pool().await;
-        migrator_up_to(13).run(&pool).await.expect("0001-0013");
-        sqlx::query("INSERT INTO accounts (id, display_name) VALUES ($1::uuid, 'a')")
-            .bind(OWNER_14)
-            .execute(&pool)
-            .await
-            .unwrap();
-        let complete: i64 = sqlx::query_scalar(
-            "INSERT INTO notes (owner_id, title, content, content_hash, search_text, excerpt)              VALUES ($1::uuid, 'Done', 'body', 'h', 'body', 'body') RETURNING id",
-        )
-        .bind(OWNER_14)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-        let bare: i64 = sqlx::query_scalar(
-            "INSERT INTO notes (owner_id, title, content) VALUES ($1::uuid, 'Bare', 'walrus')              RETURNING id",
-        )
-        .bind(OWNER_14)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-
-        let err = migrator_up_to(14).run(&pool).await.unwrap_err();
-        let message = err.to_string();
-        assert!(message.contains(&bare.to_string()), "{message}");
-        assert!(
-            !message.contains(&format!("ids: {{{complete}")),
-            "{message}"
-        );
-
-        let nullable: String = sqlx::query_scalar(
-            "SELECT is_nullable FROM information_schema.columns              WHERE table_schema = current_schema() AND table_name = 'notes'                AND column_name = 'search_text'",
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-        assert_eq!(nullable, "YES", "a refused migration changes nothing");
-
-        sqlx::query(
-            "UPDATE notes SET content_hash = 'h2', search_text = 'walrus', excerpt = 'walrus'              WHERE id = $1",
-        )
-        .bind(bare)
-        .execute(&pool)
-        .await
-        .unwrap();
-        migrator_up_to(14).run(&pool).await.expect("0014");
-
-        let found: i64 = sqlx::query_scalar(
-            "SELECT count(*) FROM notes WHERE search_vector @@ to_tsquery('simple', 'walrus')",
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-        assert_eq!(found, 1, "the rebuilt search_vector indexes search_text");
-        let nullable: String = sqlx::query_scalar(
-            "SELECT is_nullable FROM information_schema.columns              WHERE table_schema = current_schema() AND table_name = 'notes'                AND column_name = 'search_text'",
-        )
-        .fetch_one(&pool)
-        .await
-        .unwrap();
-        assert_eq!(nullable, "NO");
     }
 }

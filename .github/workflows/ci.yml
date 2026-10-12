@@ -43,7 +43,7 @@ jobs:
     services:
       postgres:
         # pgvector/pgvector is the official postgres:18 image plus the `vector`
-        # extension, which migration 0011 creates; plain postgres:18 does not
+        # extension, which migration 0010 creates; plain postgres:18 does not
         # ship it and the migration fails with "extension vector is not available".
         image: pgvector/pgvector:pg18
         env:

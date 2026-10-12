@@ -36,9 +36,8 @@ Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in sequence:
    - **Email:** Verify IMAP mailbox polling over TLS, DMARC authentication check (`EMAIL_AUTHSERV_ID`), and multipart plain/HTML reply formatting via SMTP.
 
 2. **Production Database Pre-Flight & Migration Rehearsal:**
-   - **Drain Legacy Webhooks:** Check `SELECT COUNT(*) FROM webhook_outbox WHERE status = 'pending'`. Allow the legacy binary to drain pending alerts, or accept dropping them (migration `0005` drops `webhook_outbox`).
-   - **Check Orphan Matrix Links:** Verify `SELECT l.mxid FROM matrix_links l LEFT JOIN accounts a ON a.id = l.account_id WHERE a.id IS NULL;` returns 0 rows. Remove any orphaned links before migration `0007` backfills to `platform_identities`.
-   - **Legacy Notes Derived-Column Check (if upgrading a database with pre-`0013` notes):** Migration `0014` makes `content_hash`, `search_text`, and `excerpt` `NOT NULL`. If upgrading an environment with existing notes from `0011`, deploy commit `0f01833` first, let `knowledge.backfill_embeddings` populate those columns, verify `SELECT count(*) FROM notes WHERE content_hash IS NULL OR search_text IS NULL OR excerpt IS NULL;` returns `0`, then deploy the current release. Fresh databases or environments without legacy notes upgrade directly.
+   - **Drain Legacy Webhooks:** Check `SELECT COUNT(*) FROM webhook_outbox WHERE status = 'pending'`. Allow the legacy binary to drain pending alerts, or accept dropping them (migration `0004` drops `webhook_outbox`).
+   - **Check Orphan Matrix Links:** Verify `SELECT l.mxid FROM matrix_links l LEFT JOIN accounts a ON a.id = l.account_id WHERE a.id IS NULL;` returns 0 rows. Remove any orphaned links before migration `0006` backfills to `platform_identities`.
    - **Rehearse Migrations on Production Dump:**
      ```bash
      pg_dump -Fc "$PROD_URL" > prod.dump
@@ -110,6 +109,10 @@ Format: `Ruling: <decision> — <why> — <cost if wrong>`. New rulings go here 
 - *Ruling: CLI/SQL-only admin bootstrap (`matrix-bot admin grant|revoke <account_id>`) — eliminates first-user auto-promotion race conditions and requires an enrolled passkey before granting or using admin privileges — cost if wrong: operator runs one CLI command after first passkey enrollment.*
 - *Ruling: `AdminSession` for admin `GET`s and `AdminUser` (5-minute step-up window) for admin writes and secret connectivity tests — prevents unnecessary WebAuthn prompts when browsing the Admin Console while gating all mutations and secret operations — cost if wrong: none, secret `GET` returns masked metadata only.*
 - *Ruling: Keep only the 20 hot-reloadable settings in `SettingRegistry` and the 6 hot-reloadable secret providers in `SecretProvider` (`OpenAi`, `Anthropic`, `Tavily`, `Stt`, `Tts`, `Generic`), keeping restart-required settings and credentials (channels, `EMBEDDING_MODEL`, and S3) in `.env` — avoids misleading Admin UI settings/secrets that cannot hot-reload and keeps `domain/config/registry.rs` under the 500-line limit — cost if wrong: changing channel adapters, S3, or embedding model requires `.env` edit + restart, which is already required by their lifecycle.*
+
+### Rulings (2026-10-12 — Migration squash)
+
+- *Ruling: squashed migrations 0003–0016 into 0003–0011 (0005 folded into 0004; 0012–0014 into 0010 `knowledge_base`; 0016 into 0011 `configuration_and_secrets`; the rest renumbered) — nothing past `0001` had been released and the production cutover had not happened, so only dev/test databases had applied them, and the squashed files build the identical final schema — a database that already recorded the old versions in `_sqlx_migrations` fails with a checksum/missing-migration error and must be recreated; the notes legacy-derived-column runbook step and the 0014 guard are gone with it. After the first production cutover, committed migrations are immutable again.*
 
 ### Rulings (2026-10-12 — Adversarial Review Remediation)
 

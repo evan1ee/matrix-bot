@@ -75,7 +75,7 @@ services:
 
   postgres:
     # pgvector/pgvector is the official postgres:18 image plus the `vector`
-    # extension that migration 0011 creates; plain postgres:18 lacks it.
+    # extension that migration 0010 creates; plain postgres:18 lacks it.
     image: pgvector/pgvector:pg18
     container_name: matrix-bot-postgres
     restart: unless-stopped

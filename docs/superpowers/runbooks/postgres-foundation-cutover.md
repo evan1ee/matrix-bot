@@ -18,7 +18,7 @@ protects.
    precondition, not automatic — see
    `docs/database.md`'s Migrations section for why
    `0001` omits the backfill and rename it depends on already having run.
-   On the old bot, also check the legacy webhook queue (migration `0005`
+   On the old bot, also check the legacy webhook queue (migration `0004`
    drops `webhook_outbox`, undelivered rows included):
    `SELECT COUNT(*) FROM webhook_outbox WHERE status = 'pending'`. If it is
    non-zero, let the old bot drain it (re-run until 0) or accept losing
@@ -68,12 +68,12 @@ or in the PR before merging. If step 1.1 is re-run after this rehearsal (e.g.
 because more time has passed before cutover), re-run this rehearsal too —
 its precondition no longer holds otherwise.
 
-### 2a. Omnichannel migrations 0006-0008 (when `feat/omnichannel` ships with it)
+### 2a. Omnichannel migrations 0005-0007 (when `feat/omnichannel` ships with it)
 
 The same restored copy must also take the omnichannel migrations, in the same
-rehearsal run (0004-0008 apply in one boot). Two of them rewrite or drop data:
+rehearsal run (0004-0007 apply in one boot). Two of them rewrite or drop data:
 
-- **0007 backfills and drops `matrix_links`.** It starts with a guard that
+- **0006 backfills and drops `matrix_links`.** It starts with a guard that
   raises `matrix_links rows reference missing accounts: <mxids>` if any link
   points at an account that no longer exists; the message names the offending
   MXIDs. Check beforehand on the copy:
@@ -81,10 +81,10 @@ rehearsal run (0004-0008 apply in one boot). Two of them rewrite or drop data:
   SELECT l.mxid FROM matrix_links l LEFT JOIN accounts a ON a.id = l.account_id WHERE a.id IS NULL;
   ```
   A non-empty result stops the boot, so remove those rows (or restore the
-  missing accounts) on production first; never edit `0007`. After a clean
+  missing accounts) on production first; never edit `0006`. After a clean
   run `SELECT COUNT(*) FROM platform_identities WHERE platform = 'matrix'`
   must equal the old `matrix_links` count taken before the rehearsal.
-- **0008 drops `matrix_link_challenges`.** Pending web-minted link codes and
+- **0007 drops `matrix_link_challenges`.** Pending web-minted link codes and
   pending merge confirmations are not carried over.
 
 Tell users before release: **`!link <code>` is gone.** Existing links keep
@@ -96,18 +96,18 @@ set `WEB_URL` (defaults to `WEBAUTHN_ORIGIN`) and the signup allowlists
 (`DISCORD_ALLOWED_USERS`, `TELEGRAM_ALLOWED_USERS`, `EMAIL_ALLOWED_SENDERS`)
 before the first boot.
 
-### 2b. Storage and Autonomous Agent migrations 0009–0010
+### 2b. Storage and Autonomous Agent migrations 0008–0009
 
-Migrations 0009 and 0010 apply automatically alongside the foundation:
+Migrations 0008 and 0009 apply automatically alongside the foundation:
 
-- **0009 adds `receipt_storage_key` to `transactions`.** Additive column with
+- **0008 adds `receipt_storage_key` to `transactions`.** Additive column with
   index `idx_transactions_receipt_storage_key`. Non-locking and zero-downtime.
   Ensure storage configuration is present before booting if receipt image
   ingestion is enabled:
   - `STORAGE_DRIVER`: `local` (default) or `s3`; `STORAGE_SIGNING_SECRET` signs presigned URLs.
   - For local storage: `STORAGE_LOCAL_DIR` (defaults to `data/storage`).
   - For S3: `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, and optional `S3_ENDPOINT` and `S3_FORCE_PATH_STYLE`.
-- **0010 creates the Autonomous Agent subsystem.** Adds `agent_runs`,
+- **0009 creates the Autonomous Agent subsystem.** Adds `agent_runs`,
   `agent_steps`, `agent_approvals`, and `scheduled_agent_tasks`. All tables are
   owner-keyed (`owner_id UUID REFERENCES accounts(id) ON DELETE CASCADE`) and
   indexed for fast lookup by owner and status.
@@ -191,9 +191,9 @@ The database normally needs no rollback: `0001_baseline.sql` is a no-op
 against the already-adopted schema, so the previous binary (which never
 applied `sqlx` migrations) sees no difference. If a later migration did run
 and needs undoing, restore the `pg_dump` taken in step 1.3 instead of trying
-to hand-write a down migration. This applies in particular to 0007 and 0008,
+to hand-write a down migration. This applies in particular to 0006 and 0007,
 which drop `matrix_links` and `matrix_link_challenges`: the previous binary
-cannot run against a database that has lost them, so a rollback past 0007 is a
+cannot run against a database that has lost them, so a rollback past 0006 is a
 dump restore, never a code-only revert.
 
 To roll back the Matrix side:

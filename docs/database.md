@@ -84,11 +84,11 @@ Indexes: `idx_outbox_events_account_type_created` (`account_id, event_type, crea
 - **Claiming.** `claim_due` is one statement with `FOR UPDATE SKIP LOCKED` that increments `attempts` and moves `available_at` 60 s ahead (the lease); a claim that is never recorded reappears after the lease.
 - **Retention.** The hourly purge deletes events older than 30 days that have no `pending` delivery; their deliveries go with them (cascade). A pending delivery is never purged, however old, so an outage cannot silently discard an alert. Webhook logs are read from these rows and therefore cover 30 days.
 - **Account merge.** `outbox_events` is in `ACCOUNT_ID_FOLLOWS` (like `jobs`): history moves to the surviving account. Deliveries reach it through the event and need no entry of their own.
-- **0005 drops `webhook_outbox`.** `0005_drop_webhook_outbox` is a plain `DROP TABLE`; its history is deliberately not migrated (spec O2). Alerts still queued in it at cutover are lost, so drain it (no `pending` rows) before releasing; the rehearsal on a production copy covers 0004 and 0005 (and 0006–0008, below).
+- **0004 drops `webhook_outbox`.** `0004_outbox` ends with a plain `DROP TABLE webhook_outbox`; its history is deliberately not migrated (spec O2). Alerts still queued in it at cutover are lost, so drain it (no `pending` rows) before releasing; the rehearsal on a production copy covers 0004 (and 0005–0007, below).
 
 ## Platform identities and link tokens
 
-Migrations `0006`–`0008` (sub-project 2) replace the Matrix-only link tables with channel-neutral ones ([`architecture.md`](architecture.md#identity-and-linking)). Only `infrastructure/postgres/repositories/identities.rs` and `link_tokens.rs` touch them.
+Migrations `0005`–`0007` (sub-project 2) replace the Matrix-only link tables with channel-neutral ones ([`architecture.md`](architecture.md#identity-and-linking)). Only `infrastructure/postgres/repositories/identities.rs` and `link_tokens.rs` touch them.
 
 | Table | Meaning |
 |---|---|
@@ -98,15 +98,15 @@ Migrations `0006`–`0008` (sub-project 2) replace the Matrix-only link tables w
 - **Link tokens are hash-only, short-lived and single use.** Only the SHA-256 of the token is stored (the token itself exists in the chat reply and the URL and nowhere else), `expires_at` is `created_at` + 10 minutes (`LINK_TOKEN_TTL`), and `consumed_at` is set when the token is claimed or superseded (starting again burns the identity's earlier live token). A claim reads the row with `FOR UPDATE` inside its transaction, so two concurrent claims of one token serialise and only the first can succeed. Rows are not purged on a schedule; an expired or consumed row is inert.
 - **Uniqueness is the race guard.** `UNIQUE (platform, platform_user_id)` is what makes "one chat identity, one account" hold under concurrent links and first messages; a lost bind surfaces as `AlreadyLinked`, never as a second row.
 - **Account merge.** `platform_identities` is in `ACCOUNT_ID_FOLLOWS`: the absorbed account's identities move to the survivor. `link_tokens` has no `account_id` (it belongs to an identity, not an account) and is in no merge list.
-- **`0006_platform_identities`** is plain DDL: both tables and their indexes.
-- **`0007_platform_identities_backfill`** starts with a guard that raises, naming the offending `mxid`s, if any `matrix_links` row references a missing account (a hand-edited database); otherwise it copies every `matrix_links` row into `platform_identities` as `matrix` (using `linked_at` for both timestamps) and drops `matrix_links`. It rewrites data, so it is rehearsed on a production copy ([runbook](superpowers/runbooks/postgres-foundation-cutover.md)).
-- **`0008_drop_matrix_link_challenges`** drops the web-minted challenge table; pending challenges are not carried over (the `!link <code>` flow no longer exists).
+- **`0005_platform_identities`** is plain DDL: both tables and their indexes.
+- **`0006_platform_identities_backfill`** starts with a guard that raises, naming the offending `mxid`s, if any `matrix_links` row references a missing account (a hand-edited database); otherwise it copies every `matrix_links` row into `platform_identities` as `matrix` (using `linked_at` for both timestamps) and drops `matrix_links`. It rewrites data, so it is rehearsed on a production copy ([runbook](superpowers/runbooks/postgres-foundation-cutover.md)).
+- **`0007_drop_matrix_link_challenges`** drops the web-minted challenge table; pending challenges are not carried over (the `!link <code>` flow no longer exists).
 
-## Receipt storage keys and the agent runtime (`0009`, `0010`)
+## Receipt storage keys and the agent runtime (`0008`, `0009`)
 
-`0009_transaction_receipt_storage_key` adds `transactions.receipt_storage_key TEXT` (indexed): the object-storage key of a receipt photo, so the binary lives in `StorageService` and PostgreSQL keeps only the reference ([`architecture.md`](architecture.md#object-storage-and-media-decoupling)).
+`0008_transaction_receipt_storage_key` adds `transactions.receipt_storage_key TEXT` (indexed): the object-storage key of a receipt photo, so the binary lives in `StorageService` and PostgreSQL keeps only the reference ([`architecture.md`](architecture.md#object-storage-and-media-decoupling)).
 
-`0010_agent_runtime` adds four tables for the autonomous agent ([`llm.md`](llm.md#agent-runs-use-native-tool-calling)); all are `OWNED_TABLES` entries except `agent_steps`, which belongs to its run:
+`0009_agent_runtime` adds four tables for the autonomous agent ([`llm.md`](llm.md#agent-runs-use-native-tool-calling)); all are `OWNED_TABLES` entries except `agent_steps`, which belongs to its run:
 
 | Table | Meaning |
 |---|---|
@@ -115,9 +115,9 @@ Migrations `0006`–`0008` (sub-project 2) replace the Matrix-only link tables w
 | `agent_steps` | one step per `(run_id, step_number)` (`uq_run_step`, which also stops a re-claimed job from double-recording a step): `thought`, `tool_name`, `tool_input`/`tool_output` `JSONB`, `status` (`success`, `failed`, `blocked`) |
 | `agent_approvals` | a held sensitive call: `tool_name`, `tool_input`, `status` (`pending`, `approved`, `rejected`, `expired`), `expires_at`, `resolved_at`; a partial index on `pending` serves the approval list |
 
-## Knowledge base and vector embeddings (`0011_knowledge_base.sql`)
+## Knowledge base and vector embeddings (`0010_knowledge_base.sql`)
 
-Migration `0011_knowledge_base` introduces the personal knowledge base and vector search subsystem:
+Migration `0010_knowledge_base` introduces the personal knowledge base and vector search subsystem:
 
 - **pgvector extension:** `CREATE EXTENSION IF NOT EXISTS vector;` enabled on PostgreSQL 18.
 - **`notes` table:**
@@ -135,13 +135,13 @@ Migration `0011_knowledge_base` introduces the personal knowledge base and vecto
   - `item_type TEXT NOT NULL`, `item_id BIGINT NOT NULL`, `chunk_index INTEGER NOT NULL DEFAULT 0`
   - `content_chunk TEXT NOT NULL`
   - `embedding vector(384) NOT NULL` (sized for `multilingual-e5-small`)
-  - `embedding_model TEXT NOT NULL` (added in `0013`): the model that produced the chunk; search only compares vectors of the configured `EMBEDDING_MODEL`, and a chunk of any other model is re-embedded by the backfill
+  - `embedding_model TEXT NOT NULL` : the model that produced the chunk; search only compares vectors of the configured `EMBEDDING_MODEL`, and a chunk of any other model is re-embedded by the backfill
   - `created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`
   - Unique constraint: `UNIQUE (owner_id, item_type, item_id, chunk_index)`
   - Vector Index: `idx_knowledge_embeddings_vector USING hnsw (embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64)`.
 - **Ownership & Account Merge:** Both `notes` and `knowledge_embeddings` are listed in `OWNED_TABLES` (`domain/accounts/mod.rs`), so an account merge safely cascades and reassigns all notes and vector embeddings to the surviving account.
 
-### Notes: derived columns (`0012`–`0014`)
+### Notes: derived columns
 
 `notes.content` holds the Markdown and nothing else is authoritative. Everything search needs is **derived from it by the service on every write** (`application/knowledge/markdown.rs::derive`) and can be rebuilt from it:
 
@@ -154,15 +154,15 @@ Migration `0011_knowledge_base` introduces the personal knowledge base and vecto
 | `search_vector` | Generated, stored `tsvector`: `title` (weight A) and `search_text` (weight B) under the `simple` configuration, with a GIN index. `simple` keeps CJK runs as single tokens, so CJK matching goes through the trigram path. |
 | `indexed_content_hash`, `indexed_at` | The body hash the stored embedding chunks were built from. The backfill re-embeds a note whose `indexed_content_hash` differs from `content_hash` (a rename clears it too, because the title is part of every chunk). |
 
-`0012` rewrites `format` to `markdown` (guarded, data only), `0013` adds the columns, `pg_trgm` and the indexes, and `0014` makes `content_hash`, `search_text` and `excerpt` NOT NULL and rebuilds the generated column and trigram index over `search_text` alone. `0014` aborts naming up to 20 note ids if any column is still NULL, which means the database held notes written before `0013` and the backfill (removed in this release) never filled them: deploy commit `0f01833` first (runbook in `docs/superpowers/HANDOFF.md`).
+`0010_knowledge_base` creates `notes` with the derived columns already `NOT NULL`, the generated `search_vector` over `search_text`, and the GIN indexes. There is no backfill step: the service derives every column on write, and the table starts empty.
 
 `pg_trgm` and `vector` come from the `pgvector/pgvector` image's contrib set; the trigram GIN index covers `title || ' ' || search_text`, which is the exact expression the `ILIKE` and `<%` (word similarity, threshold 0.3 set per transaction) predicates use, so a query must keep that expression to use the index; both branches are served by it.
 
 **Rebuild invariant.** Embeddings are derived data. Deleting every row of `knowledge_embeddings` and clearing `notes.indexed_content_hash` loses nothing: `knowledge.backfill_embeddings` re-queues every item and the chunks come back identical (a test pins this). The same path re-tags everything after an `EMBEDDING_MODEL` change.
 
-## Configuration and encrypted secrets (`0015_configuration_and_secrets.sql`)
+## Configuration and encrypted secrets (`0011_configuration_and_secrets.sql`)
 
-Migration `0015_configuration_and_secrets` introduces system-wide dynamic configuration, an encrypted credentials vault, and an administrative audit log. Migration `0016_config_review_followups` widens the audit `target_type` CHECK with `account`, recreates the `accounts.role` CHECK per schema and drops three indexes nothing used; the list below is the schema after both:
+Migration `0011_configuration_and_secrets` introduces system-wide dynamic configuration, an encrypted credentials vault, and an administrative audit log. The audit `target_type` CHECK allows `setting`, `secret`, `account` and `system`, and the `accounts.role` CHECK is named inline so that every schema (one per test) gets its own. The list below is the resulting schema:
 
 - **`accounts.role` column:** `TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin'))`. Only `admin` accounts (granted via `matrix-bot admin grant <account_id>` or SQL, and enrolled with at least one passkey) can read or write system settings and secrets.
 - **`app_settings` table:**
