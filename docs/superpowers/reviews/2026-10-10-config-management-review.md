@@ -1,5 +1,7 @@
 # Code review: `feat/config-management` → `master`
 
+**Status:** historical; the branch shipped and its findings were worked through (per-finding status in the tables, outcome in `HANDOFF.md`).
+
 Point-in-time pre-merge review, 2026-10-10. Branch head `ade0288`, merge base `47c0398`.
 Scope: 8 commits, 97 files, +9271/−167 (configuration registry, encrypted secret vault, admin REST API, runtime reload, admin console).
 Intent reference: the configuration-management plan, since deleted (shipped; see HANDOFF).

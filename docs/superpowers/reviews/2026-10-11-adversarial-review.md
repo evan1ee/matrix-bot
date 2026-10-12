@@ -1,5 +1,7 @@
 # Adversarial review — 2026-10-11
 
+**Status:** all 53 verified findings fixed (`6859962`, 2026-10-12).
+
 Ten parallel reviewers, each finding re-checked against the code before listing.
 Status column: `?` = awaiting owner verification, `V` = verified, `X` = rejected, `F` = fixed.
 

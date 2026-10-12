@@ -104,9 +104,9 @@ Migrations 0009 and 0010 apply automatically alongside the foundation:
   index `idx_transactions_receipt_storage_key`. Non-locking and zero-downtime.
   Ensure storage configuration is present before booting if receipt image
   ingestion is enabled:
-  - `STORAGE_BACKEND`: `local` (default) or `s3`.
-  - For local storage: `STORAGE_LOCAL_ROOT` (defaults to `data/storage`).
-  - For S3: `STORAGE_S3_BUCKET`, `STORAGE_S3_REGION`, and optional `STORAGE_S3_ENDPOINT`.
+  - `STORAGE_DRIVER`: `local` (default) or `s3`; `STORAGE_SIGNING_SECRET` signs presigned URLs.
+  - For local storage: `STORAGE_LOCAL_DIR` (defaults to `data/storage`).
+  - For S3: `S3_BUCKET`, `S3_REGION`, `S3_ACCESS_KEY`, `S3_SECRET_KEY`, and optional `S3_ENDPOINT` and `S3_FORCE_PATH_STYLE`.
 - **0010 creates the Autonomous Agent subsystem.** Adds `agent_runs`,
   `agent_steps`, `agent_approvals`, and `scheduled_agent_tasks`. All tables are
   owner-keyed (`owner_id UUID REFERENCES accounts(id) ON DELETE CASCADE`) and
@@ -124,7 +124,7 @@ Before starting the bot, verify all channel credentials in `.env`:
 | **Discord** | `DISCORD_TOKEN`, `DISCORD_ALLOWED_USERS` | Bot requires Gateway Message Content intent for DM handling |
 | **Telegram** | `TELEGRAM_BOT_TOKEN`, `TELEGRAM_MODE`, `TELEGRAM_ALLOWED_USERS` | Webhook mode requires `TELEGRAM_WEBHOOK_SECRET` and HTTPS `WEB_URL` |
 | **Email** | `EMAIL_IMAP_URL`, `EMAIL_SMTP_URL`, `EMAIL_USERNAME`, `EMAIL_PASSWORD`, `EMAIL_FROM`, `EMAIL_AUTHSERV_ID` | Requires DMARC pass validation against `EMAIL_AUTHSERV_ID` |
-| **Storage** | `STORAGE_BACKEND`, `STORAGE_LOCAL_ROOT`, `STORAGE_S3_BUCKET` | Directory must be writable by bot process |
+| **Storage** | `STORAGE_DRIVER`, `STORAGE_LOCAL_DIR`, `STORAGE_SIGNING_SECRET`, `S3_BUCKET` | Directory must be writable by bot process |
 | **LLM** | `AI_ENDPOINT`, `AI_API_KEY`, `AI_MODEL` | Used for interactive turn tools and agent tool-calling loop |
 
 ## 3. First boot on matrix-sdk 0.18 and PostgreSQL 18

@@ -1,6 +1,7 @@
 # Architecture review: `matrix-bot` backend
 
 **Date:** 2026-10-10
+**Status:** documentation findings fixed (2026-10-11); ADR-A and ADR-B are still Proposed
 **Branch reviewed:** `feat/config-management` (working tree, including uncommitted changes)
 **Scope:** `backend/src/` layering, boundaries, runtime ownership and documentation fidelity, measured against [`AGENTS.md`](../../../AGENTS.md) and [`docs/architecture.md`](../../architecture.md).
 **Out of scope:** the configuration and secrets vault feature itself, which already has a line-by-line review in [`2026-10-10-config-management-review.md`](2026-10-10-config-management-review.md). This review refers to that one instead of repeating it.

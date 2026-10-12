@@ -102,7 +102,20 @@ Migrations `0006`–`0008` (sub-project 2) replace the Matrix-only link tables w
 - **`0007_platform_identities_backfill`** starts with a guard that raises, naming the offending `mxid`s, if any `matrix_links` row references a missing account (a hand-edited database); otherwise it copies every `matrix_links` row into `platform_identities` as `matrix` (using `linked_at` for both timestamps) and drops `matrix_links`. It rewrites data, so it is rehearsed on a production copy ([runbook](superpowers/runbooks/postgres-foundation-cutover.md)).
 - **`0008_drop_matrix_link_challenges`** drops the web-minted challenge table; pending challenges are not carried over (the `!link <code>` flow no longer exists).
 
-## Knowledge Base and Vector Embeddings (`0011_knowledge_base.sql`)
+## Receipt storage keys and the agent runtime (`0009`, `0010`)
+
+`0009_transaction_receipt_storage_key` adds `transactions.receipt_storage_key TEXT` (indexed): the object-storage key of a receipt photo, so the binary lives in `StorageService` and PostgreSQL keeps only the reference ([`architecture.md`](architecture.md#object-storage-and-media-decoupling)).
+
+`0010_agent_runtime` adds four tables for the autonomous agent ([`llm.md`](llm.md#agent-runs-use-native-tool-calling)); all are `OWNED_TABLES` entries except `agent_steps`, which belongs to its run:
+
+| Table | Meaning |
+|---|---|
+| `scheduled_agent_tasks` | one row per `(account_id, task_id)` (`uq_account_task`): `cron_expression`, `enabled`, `config` `JSONB`, `last_run_at`, `next_run_at`; a partial index on `next_run_at WHERE enabled` serves the scheduler |
+| `agent_runs` | one run: `goal`, `task_name`, optional `scheduled_task_id` (`ON DELETE SET NULL`) and `origin_conversation`, `status` (`planning`, `executing`, `waiting_approval`, `completed`, `failed`, `cancelled`; CHECK), `max_steps` (default 15), token and error bookkeeping; a partial index on non-terminal statuses backs the one-active-run-per-account rule |
+| `agent_steps` | one step per `(run_id, step_number)` (`uq_run_step`, which also stops a re-claimed job from double-recording a step): `thought`, `tool_name`, `tool_input`/`tool_output` `JSONB`, `status` (`success`, `failed`, `blocked`) |
+| `agent_approvals` | a held sensitive call: `tool_name`, `tool_input`, `status` (`pending`, `approved`, `rejected`, `expired`), `expires_at`, `resolved_at`; a partial index on `pending` serves the approval list |
+
+## Knowledge base and vector embeddings (`0011_knowledge_base.sql`)
 
 Migration `0011_knowledge_base` introduces the personal knowledge base and vector search subsystem:
 
@@ -147,7 +160,7 @@ Migration `0011_knowledge_base` introduces the personal knowledge base and vecto
 
 **Rebuild invariant.** Embeddings are derived data. Deleting every row of `knowledge_embeddings` and clearing `notes.indexed_content_hash` loses nothing: `knowledge.backfill_embeddings` re-queues every item and the chunks come back identical (a test pins this). The same path re-tags everything after an `EMBEDDING_MODEL` change.
 
-## Configuration Management and Encrypted Secrets (`0015_configuration_and_secrets.sql`)
+## Configuration and encrypted secrets (`0015_configuration_and_secrets.sql`)
 
 Migration `0015_configuration_and_secrets` introduces system-wide dynamic configuration, an encrypted credentials vault, and an administrative audit log. Migration `0016_config_review_followups` widens the audit `target_type` CHECK with `account`, recreates the `accounts.role` CHECK per schema and drops three indexes nothing used; the list below is the schema after both:
 

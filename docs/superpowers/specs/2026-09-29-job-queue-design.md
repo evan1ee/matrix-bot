@@ -1,7 +1,7 @@
 # Step 8: Durable Job Queue — Design
 
 > Sub-project 1, design step 8. Binding parent: `2026-09-24-postgres-foundation-design.md` §5.1.
-> Roadmap: `SPEC.md` §5. Approved by the user 2026-09-29.
+> Roadmap: `SPEC.md` §5 (since deleted). Approved by the user 2026-09-29. **Status:** Implemented.
 > Amended after implementation (HANDOFF R31): where the plan's clarifications C1–C6 forced a different shape, this text describes the code.
 
 ## 1. Goal

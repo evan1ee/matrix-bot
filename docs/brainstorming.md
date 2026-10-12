@@ -1,5 +1,7 @@
 # Future Feature Enhancements, Refinements & Brand New Horizons
 
+**Status:** ideas only. Nothing here is planned or promised; promote one by writing a spec under `docs/superpowers/specs/`.
+
 This document captures architectural ideation, potential feature enhancements, and brand new conceptual horizons for **Matrix Bot**, building upon the completed PostgreSQL 18 layered foundation, omnichannel adapters (Matrix, Discord, Telegram, Email), decoupled object storage, durable job runtime, autonomous agent engine (native tool calling with step-up approvals), and local ONNX inference engine (multilingual-e5-small, Kokoro-82M TTS, Sherpa/SenseVoice STT).
 
 ---

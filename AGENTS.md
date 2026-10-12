@@ -30,8 +30,8 @@ Rules for coding agents working in this repository. This file says **how to work
 
 `matrix-bot` is a personal AI/life workspace built around Matrix. One Rust Cargo workspace and one React SPA:
 
-- `backend/` — crate `matrix-bot`: Matrix bot, embedded Axum REST/SSE API, MCP server, LLM integration, domain features (todos, reminders, finance, portfolio, bills, habits, bookmarks, life/journal, footprints, webhooks, settings, accounts and passkey auth).
-- `inference/` — crate `matrix-bot-inference`: Axum server hosting local ONNX models for OCR, speech-to-text and text-to-speech.
+- `backend/` — crate `matrix-bot`: chat channels (Matrix, Discord, Telegram, Email), embedded Axum REST/SSE API, MCP server, LLM integration and the autonomous agent runtime, durable jobs and the transactional outbox, domain features (todos, reminders, finance, portfolio, bills, habits, bookmarks, life/journal, footprints, notes and knowledge search, webhooks, settings, accounts and passkey auth) and the admin console's runtime configuration and encrypted secrets vault.
+- `inference/` — crate `matrix-bot-inference`: Axum server hosting local ONNX models for OCR, speech-to-text, text-to-speech and text embeddings.
 - `frontend/` — React 19 + Vite + Tailwind v4 SPA, built into `backend/web/dist/`.
 - `contracts/` — JSON fixtures each crate asserts its wire formats against.
 - PostgreSQL 18 is the only application database; matrix-sdk keeps its own SQLite crypto store under `data/`.
@@ -76,6 +76,7 @@ interface/chat/              BotModule command handlers per feature
 interface/channels/          ChannelAdapter trait, ChannelRegistry, neutral messages, shared inbound pipeline,
                              renderers; no SQL, no business rules
 interface/channels/matrix/   the Matrix adapter: matrix-sdk client, sync loop, E2EE, verification, rooms
+interface/channels/{discord,telegram,email}/   the other adapters; each keeps its transport crate (serenity, teloxide-core, async-imap + lettre) inside its directory
 interface/mcp/               MCP protocol adapters
 interface/jobs/              job handlers (payload → service → delivery)
 interface/events/            outbox delivery sinks (Matrix room)
@@ -83,7 +84,9 @@ jobs/                        job runtime: workers, reaper, leader-elected schedu
 events/                      events runtime: outbox listener, SSE hub, delivery dispatcher, purge (no SQL)
 llm/                         prompts, tool loop, tool registry (llm/tools/)
 infrastructure/postgres/     repositories/<f>.rs, read_models/, merge.rs, ping
-infrastructure/inference/    HTTP clients: OCR, STT, TTS, LLM transport
+infrastructure/inference/    HTTP clients: OCR, STT, TTS, embeddings, LLM transport, provider testers
+infrastructure/crypto/       AES-256-GCM secret encryption (fail-closed without a key)
+infrastructure/storage/      object storage: local filesystem (HMAC presigning) and S3-compatible
 infrastructure/web/          outbound web feeds, SSRF guard
 app.rs / main.rs             composition roots
 db/                          pool, migration runner, test pools and the schema catalog test

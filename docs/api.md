@@ -6,7 +6,7 @@ The embedded Axum server (`backend/src/interface/http/`) exposes the application
 
 - **Mounting.** Application endpoints live under `/api/v1`, aggregated by `api_routes()` in `interface/http/routes.rs`. The health probes, the Telegram update webhook receiver (`POST /api/webhooks/telegram`), and the Telegram-compatible webhook receiver are mounted at the router root, outside `/api/v1`.
 - **Handler shape.** Parse and validate → call a service on `ApiState.services` → map the result to a response DTO. A handler holds no business rule and runs no SQL.
-- **Errors.** Every response uses `ApiError` (`backend/src/error.rs`): `{ "error": "...", "code": 400 }`. `?` maps `AppError` through `interface/http/app_error.rs`: `Validation` → 400, `NotFound` → 404, `Forbidden` → 403, `Conflict` → 409; `Database` and `External` become an opaque 500 with the detail logged, never returned. `.api_context("Failed to …")?` keeps a handler's log context.
+- **Errors.** Every response uses `ApiError` (`backend/src/interface/http/error.rs`): `{ "error": "...", "code": 400 }`. `?` maps `AppError` through `interface/http/app_error.rs`: `Validation` → 400, `NotFound` → 404, `Forbidden` → 403, `Conflict` → 409; `Database` and `External` become an opaque 500 with the detail logged, never returned. `.api_context("Failed to …")?` keeps a handler's log context.
 - **Input limits.** Cap every API payload string at 500 characters. The router carries a 180 s `TimeoutLayer` so long research requests (AI, web search) complete.
 - **DTOs are not domain types.** DTOs derive `ToSchema` and implement `From<&DomainType>`; domain types derive neither `ToSchema` nor `sqlx::FromRow`. Never put a `///` doc comment on a DTO that had none (utoipa copies it into the schema).
 - **Ownership.** The owner comes from the authenticated context (`AuthUser::owner_id()`), never from a path, query or body field. Every query enforces the caller's own scope.
@@ -55,7 +55,7 @@ Sessions are held server-side (`infrastructure/postgres/repositories/accounts/se
 
 ### Linking, recovery, and the Matrix ceiling
 
-Linking is chat-initiated for every channel (`!link` on Matrix, `/link` on Discord and Telegram, in a direct conversation, mints a ten-minute single-use token; see `application/identity/link.rs` and the flow in [`architecture.md`](architecture.md#identity-and-linking)). Proof of identity ownership is the direct conversation that minted the token, proof of account ownership is the passkey session that claims it. The web half:
+Linking is chat-initiated for every channel (`!link` on Matrix, `/link` on Discord and Telegram, `!link` or `/link` on Email, in a direct conversation, mints a ten-minute single-use token; see `application/identity/link.rs` and the flow in [`architecture.md`](architecture.md#identity-and-linking)). Proof of identity ownership is the direct conversation that minted the token, proof of account ownership is the passkey session that claims it. The web half:
 
 | Route | Extractor | Notes |
 |---|---|---|
@@ -66,17 +66,6 @@ Linking is chat-initiated for every channel (`!link` on Matrix, `/link` on Disco
 | `POST /link/signup/start` / `finish` | none, rate-limited per IP (20/min, `429`) | only for an identity on the deployment's signup allowlist (`DISCORD_ALLOWED_USERS`, `TELEGRAM_ALLOWED_USERS`, `EMAIL_ALLOWED_SENDERS`; `403` otherwise, re-checked at finish). `start` returns a `ceremony_id`; `finish` takes `{ceremony_id, token, credential, label?}`, and the ceremony carries the token's SHA-256 so a challenge started for one token cannot finish another. Finish creates the account, stores the passkey and binds the identity in **one** transaction (anything but a completed bind rolls the account back: `400` expired or already yours, `409` owned elsewhere), then issues the session cookie |
 
 The token travels in the request body, is capped at 500 characters, and appears in no log line or error; the landing page strips it from the address bar after reading it. `link` is handled by the inbound pipeline before the sender is resolved: resolving first would provision an empty account for the very identity being claimed. A claim requires `VerifiedUser` (so the web's passkey step-up and the `Origin` check apply); `/link/inspect` takes an optional session and reads only. The old `/account/matrix/*` endpoints (web-minted link code, pending merge confirmation, Matrix-only unlink) are gone, together with `!link <code>`: the replacement is the table above, and an identity is removed with `POST /account/identities/unlink`.
-
-### Telegram update webhook (`POST /api/webhooks/telegram`)
-
-Mounted outside `/api/v1` at `POST /api/webhooks/telegram`. Receives raw JSON `Update` payloads from Telegram Bot API servers.
-
-- **Authentication & Rate Limit:** Checked before reading the request body. Rate-limited by IP sliding window (120 req / 60 s, `429`). The `X-Telegram-Bot-Api-Secret-Token` header is verified against `TELEGRAM_WEBHOOK_SECRET` using constant-time comparison (`utils::secure::constant_time_eq`); missing or incorrect secret returns `401 Unauthorized` without reading the body (invariant 7).
-- **Queueing:** Returns `200 OK` immediately upon enqueuing to the adapter's bounded worker channel (capacity 32). Returns `503 Service Unavailable` if the queue is full.
-- **Availability:** Returns `404 Not Found` when Telegram is disabled or configured in polling mode.
-- **Security:** Neither the secret header nor the payload body is logged at any level. Not included in OpenAPI (`backend/openapi.json` is byte-identical, T12).
-
-The drop-in Bot-API emulation shim (`/bot<token>/sendMessage`) lives in `interface/http/webhooks/telegram_compat.rs` and remains at the router root for external monitoring services.
 
 Unlinking keeps every row. Data belongs to the account; unlinking revokes an access path, and the MXID comes back as a stranger.
 
@@ -116,7 +105,33 @@ Management is also available from chat: `!webhook list | create <name> [room] | 
 - A request returns `202 Accepted` once its alert is written to the outbox (`WebhookTriggered` plus one `matrix:<room>` delivery, committed together with the webhook's `last_triggered_at`). The events runtime delivers it: up to 10 attempts, waiting `retry_delay` after each failure (1 s, doubling, capped at 512 s), each send bounded to 30 s. `failure_count` rises on every failed attempt and `total_delivered_count` on delivery, each only when the delivery row actually changed state. `GET /account/webhooks/:id/logs` reads the outbox deliveries, so history is kept 30 days; the `outbox_id` in the accepted response and the `id` of each log entry are delivery ids. The `WebhookTriggered` SSE payload carries `id`, `owner_id`, `room_id`, `severity`, `title`, `html_body` and `plain_body`, and no outbox id. See [`architecture.md`](architecture.md#events-and-the-outbox).
 - A sliding-window limiter allows 60 requests per minute per token.
 
-## Knowledge Base & Notes API
+## Telegram update webhook (`POST /api/webhooks/telegram`)
+
+Mounted outside `/api/v1` at `POST /api/webhooks/telegram`. Receives raw JSON `Update` payloads from Telegram Bot API servers.
+
+- **Authentication & Rate Limit:** Checked before reading the request body. Rate-limited by IP sliding window (120 req / 60 s, `429`). The `X-Telegram-Bot-Api-Secret-Token` header is verified against `TELEGRAM_WEBHOOK_SECRET` using constant-time comparison (`utils::secure::constant_time_eq`); missing or incorrect secret returns `401 Unauthorized` without reading the body (invariant 7).
+- **Queueing:** Returns `200 OK` immediately upon enqueuing to the adapter's bounded worker channel (capacity 32). Returns `503 Service Unavailable` if the queue is full.
+- **Availability:** Returns `404 Not Found` when Telegram is disabled or configured in polling mode.
+- **Security:** Neither the secret header nor the payload body is logged at any level. Not included in OpenAPI (`backend/openapi.json` is byte-identical, T12).
+
+The drop-in Bot-API emulation shim (`/bot<token>/sendMessage`) lives in `interface/http/webhooks/telegram_compat.rs` and remains at the router root for external monitoring services.
+
+## Agent, storage and media endpoints
+
+All are mounted under `/api/v1` and authenticate with `AuthUser` (session cookie or Bearer). How the agent loop, approvals and resume work is in [`llm.md`](llm.md#agent-runs-use-native-tool-calling); how stored media is organised is in [`architecture.md`](architecture.md#object-storage-and-media-decoupling).
+
+| Endpoint | Purpose |
+|---|---|
+| `GET`/`POST /agent/runs` | List recent runs; start one (`409` while the account already has an active run) |
+| `GET /agent/runs/:id` | One run with its steps |
+| `POST /agent/runs/:id/cancel` | Cancel a run (an approved tool call that is already executing is not interrupted) |
+| `GET /agent/approvals` | Pending approval requests |
+| `POST /agent/approvals/:id/approve`, `…/reject` | Resolve a held sensitive call. These take `AuthUser`, not `VerifiedUser`: they are not in `SENSITIVE`, so no passkey step-up applies today |
+| `GET /agent/tasks`, `PUT /agent/tasks/:id` | List scheduled agent tasks; upsert one (`400` for an unknown task id or invalid cron expression) |
+| `GET /storage/:key` | Stream a stored binary. Allowed for a session whose account matches the key's `accounts/<id>/` prefix, or for an unexpired HMAC signature |
+| `POST /ocr/scan`, `POST /voice/transcribe` | Receipt OCR and speech-to-text for uploads from the web UI; each is unavailable (OCR answers `503`) while its inference service is unconfigured |
+
+## Knowledge base and notes API
 
 Personal notes and semantic search endpoints are mounted under `/api/v1`:
 
@@ -136,7 +151,7 @@ Request bodies are limited to 1 MB for extractors (`DefaultBodyLimit`); `POST /n
 
 Mutations publish `NoteCreated`, `NoteUpdated`, or `NoteDeleted` outbox events with valid `owner_id()`. Background durable jobs (`knowledge.embed`) chunk and embed note content asynchronously for vector search.
 
-## Admin Configuration & Secrets Vault API
+## Admin configuration and secrets API
 
 Administrative configuration and encrypted secret management endpoints are mounted under `/api/v1/admin`. Ordinary read endpoints use `AdminSession` (requiring an authenticated cookie session, `role == 'admin'`, at least one enrolled passkey, non-MCP token, and non-recovery-restricted session). Write and secret-testing endpoints use `AdminUser` (`AdminSession` plus fresh WebAuthn passkey step-up within 5 minutes, `STEP_UP_WINDOW_MINUTES = 5`, enforced in `SENSITIVE`):
 
@@ -176,7 +191,7 @@ npm --prefix frontend run dev              # SPA on :5173, proxies /api and /hea
 | Flow | How to exercise it |
 |---|---|
 | Register / sign in | Sign-in dialog → *Create an account instead* → save the recovery codes (shown once) → sign out → *Sign in* (one button, no username). Invite-gated registration uses `API_REGISTRATION_SECRET`. |
-| Link a chat account | Send `!link` (Matrix) or `/link` (Discord, Telegram) **in a DM** to the bot and open the reply's link while signed in. In a shared room it must refuse and mint nothing. An identity with existing data shows a merge preview before the passkey confirmation; the bot confirms in the chat afterwards. |
+| Link a chat account | Send `!link` (Matrix, Email) or `/link` (Discord, Telegram, Email) **in a DM** to the bot and open the reply's link while signed in. In a shared room it must refuse and mint nothing. An identity with existing data shows a merge preview before the passkey confirmation; the bot confirms in the chat afterwards. |
 | Step-up | Expire it with `psql "$DATABASE_URL" -c "UPDATE sessions SET last_verified_at = NOW() - INTERVAL '10 minutes';"`, then click *Sign out other devices*: the server answers 403, the UI prompts for the passkey, the action retries. |
 | Recovery | `!recover` in a DM starts a 24 h delay; skip it with `UPDATE recovery_requests SET valid_after = NOW() - INTERVAL '1 minute';`. Cancelling must work without a passkey. |
 | Passkey from chat | `!passkey add` (alias `!web`) in a DM mints a single-use 10-minute link, valid only while the account has no passkey. `!passkeys` lists them read-only. |

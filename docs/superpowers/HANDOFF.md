@@ -1,95 +1,37 @@
-# Agent Handoff — Production Cutover & Remaining Roadmap
+# Agent handoff
 
-**Read this before touching code.** This document is the authoritative hand-off state for `matrix-bot`. It outlines the current state of the platform, immediate operational cutover actions, remaining roadmap enhancements, and settled architectural invariants.
+**Read this before touching code.** [`AGENTS.md`](../../AGENTS.md) holds the rules; this file holds the state: what is done, what an operator must still do, what is open, and the rulings that settled each disagreement. Design rationale lives in [`docs/architecture.md`](../architecture.md) and its sibling documents, not here.
 
-> **Current Status (2026-10):** All architectural phases across the PostgreSQL foundation, omnichannel adapters, storage decoupling, autonomous agent runtime, web console polish, **Notes & Knowledge Base (pgvector + hybrid search)**, and **Dynamic Configuration & Encrypted Credential Vault** are **implemented and verified**.
-
----
-
-## 1. Quick Start & Architecture Overview
-
-`matrix-bot` is an **Omnichannel Personal AI/Life Workspace & Knowledge Base** built around Matrix, Discord, Telegram, Email, and a React 19 Web Console, powered by a modular Rust backend and local ONNX inference server.
-
-- `backend/` (`matrix-bot`): Matrix bot, Axum REST/SSE API, MCP server, LLM gateway, durable jobs, transactional outbox, knowledge base (pgvector), dynamic configuration & AES-256-GCM secrets vault, and domain capabilities.
-- `inference/` (`matrix-bot-inference`): Axum server hosting local ONNX models for OCR, speech-to-text (Sherpa/SenseVoice), text-to-speech (Kokoro-82M), and text embeddings (`multilingual-e5-small`).
-- `frontend/` (`web`): React 19 + Vite + Tailwind v4 SPA, built into `backend/web/dist/`.
-- `contracts/`: JSON wire fixtures asserting cross-platform compatibility.
-
-### Layer-First Architecture (`backend/src/`)
-
-```text
-domain/<f>/                  entities, value objects, invariants, domain errors (pure, synchronous)
-domain/channels/             Channel, PlatformIdentity, ConversationAddress, neutral messages
-application/<f>/             <F>Service: use cases, transactions, publishes outbox events in tx
-interface/http/              Axum REST handlers + DTOs (OpenAPI contracts)
-interface/chat/              BotModule command handlers per feature, shared error replies
-interface/channels/          ChannelAdapter trait, ChannelRegistry, shared inbound pipeline
-interface/channels/matrix/   Matrix adapter: matrix-sdk client, sync loop, E2EE, verification
-interface/channels/discord/  Discord adapter: serenity client, slash commands, embeds
-interface/channels/telegram/ Telegram adapter: teloxide client, webhook/polling, inline keyboards
-interface/channels/email/    Email adapter: async-imap polling, lettre SMTP, DMARC validation
-interface/mcp/               MCP protocol adapters (stdio & HTTP/SSE)
-interface/jobs/              Durable job handlers (reminder.fire, briefing.send, agent.execute_run, etc.)
-jobs/                        Job runtime: workers (SKIP LOCKED), heartbeat reaper, advisory scheduler
-events/                      Events runtime: LISTEN outbox loop, SSE hub, delivery dispatcher, purge
-llm/                         Prompts, tool loop, tool registry, agent engine with native tool calling (llm/agent/)
-infrastructure/postgres/     repositories/<f>.rs (sqlx::query! only), read_models/, merge.rs
-infrastructure/crypto/       AES-256-GCM secret encryption with AAD binding and fail-closed fallback
-infrastructure/storage/      StorageService: Local filesystem (HMAC presigning) and S3/R2
-infrastructure/inference/    HTTP clients: OCR, STT, TTS, embeddings, LLM transport, provider testers
-app.rs / main.rs             Composition roots, supervision, graceful shutdown
-```
+> **Status (2026-10):** every architectural phase is implemented: the PostgreSQL foundation, omnichannel adapters, object storage, the autonomous agent runtime, the web console, the notes and knowledge base (pgvector hybrid search), and dynamic configuration with the encrypted credential vault. What remains is operator cutover (Track 1) and the follow-ups in Track 2.
 
 ---
 
-## 2. Hard Safety Rules (Never Override)
+## 1. Orientation
 
-1. **Never read or modify the production `.env` or `data/` directory.**
-   - `data/` contains the active Matrix SQLite crypto store.
-   - `.env` contains live credentials. Development and test runs use isolated test databases.
-2. **Never run the live bot binary against production homeservers or external channels.**
-   - The only permitted executable during development is `cargo run --bin generate-openapi` or automated test suites.
-   - Live logins and external channel interactions must be performed by the human operator.
-3. **Never push, merge, open a PR, or deploy without explicit user instructions.**
-   - Gitea (`git@git.mbm.one:evan/matrix-bot.git`) is primary; GitHub (`origin`) is a mirror.
-4. **Preserve Security Invariants:**
-   - Passkeys are the exclusive web authentication mechanism; session tokens are stored as SHA-256 only.
-    - Step-up verification (`VerifiedUser`, 5-minute window `STEP_UP_WINDOW_MINUTES = 5`) is strictly enforced for sensitive endpoints (`/account/*`, `/portfolio/trade`, `/agent/approvals/*`). Ordinary admin `GET` endpoints use `AdminSession` (`role == 'admin'`, enrolled passkey required, non-MCP token, non-recovery-restricted session), while admin write and secret-test endpoints (`PUT`, `POST`, `DELETE`) require `AdminUser` (`AdminSession` + 5-minute passkey step-up).
-    - Initial administrator bootstrap is CLI/SQL-only (`matrix-bot admin grant <account_id>` / `matrix-bot admin revoke <account_id>`); public registration and passkey enrollment never grant `admin` implicitly.
-    - Secret read APIs return metadata only (`SecretMetadata`); plaintext and ciphertext never appear in response DTOs, DOM, logs, or audit records.
-    - Sensitive commands are strictly refused in public rooms/channels; `/link` is DM-only with 10-minute single-use tokens.
-    - Every owner-keyed table must be registered in `OWNED_TABLES` or `ACCOUNT_ID_FOLLOWS` (`domain/accounts/mod.rs`).
-    - Every user-supplied string rendered into HTML must pass through `html_escape()`; input strings are capped at 500 characters.
+`matrix-bot` is a personal AI/life workspace reached through Matrix, Discord, Telegram, Email, a REST/SSE API, MCP and a React SPA. Crates and layers are described in [`AGENTS.md`](../../AGENTS.md) §1 and §3; the designs behind them in [`docs/architecture.md`](../architecture.md), [`database.md`](../database.md), [`api.md`](../api.md) and [`llm.md`](../llm.md).
+
+## 2. Safety rules
+
+The hard safety rules are [`AGENTS.md`](../../AGENTS.md) §9 and the security rules §7; they are not repeated here. In short: never touch the production `.env` or `data/`, never run the bot binary (only `cargo run --bin generate-openapi`), never push, merge, open a PR or deploy without an explicit instruction. Gitea (`git@git.mbm.one:evan/matrix-bot.git`) is primary and GitHub (`origin`) is a hand-updated mirror.
+
+The step-up routes are whatever `SENSITIVE` lists in `interface/http/mod.rs::step_up_tests`; read the list, not a summary of it.
+
+## 3. Verified baseline
+
+[`reviews/2026-10-11-adversarial-review.md`](reviews/2026-10-11-adversarial-review.md): all 53 verified findings (`C1`–`C2`, `H1`–`H13`, `M1`–`M26`, `L1`–`L12`) across `matrix-bot`, `matrix-bot-inference` and the frontend are fixed (`Status: F`) with regression tests.
+
+The gates in [`AGENTS.md`](../../AGENTS.md) §8 were green when those fixes landed (`6859962`, 2026-10-12). Counts go stale, so none are recorded here: rerun the gates before relying on this line.
 
 ---
 
-## 3. Verified System Baseline
+## 4. Remaining work
 
-- **Adversarial Security & Correctness Review (`reviews/2026-10-11-adversarial-review.md`):** All 53 verified findings (`C1`–`C2`, `H1`–`H13`, `M1`–`M26`, `L1`–`L12`) across `matrix-bot`, `matrix-bot-inference`, and `frontend` are fixed (`Status: F`) with regression tests.
-- **Rust Backend:**
-  - `cargo check -p matrix-bot --all-targets`: Clean (zero errors, zero warnings).
-  - `cargo clippy --workspace --all-targets -- -D warnings`: Clean (zero warnings).
-  - `cargo sqlx prepare --workspace --check -- -p matrix-bot --all-targets`: Clean (zero query cache drift).
-  - `cargo test -p matrix-bot --lib`: 1622 unit/integration tests across all module groups pass (`0 failed`, `--test-threads=2`).
-  - `cargo test -p matrix-bot --test architecture`: 39 passed / 0 failed.
-  - `cargo test -p matrix-bot live_postgres -- --ignored --test-threads=1`: 3 passed / 0 failed.
-  - `cargo run --bin generate-openapi && git diff --exit-code backend/openapi.json`: Byte-identical (zero drift).
-- **Inference Server:**
-  - `cargo test -p matrix-bot-inference --all-targets`: 97 passed / 0 failed.
-- **Frontend SPA:**
-  - `npm --prefix frontend run build` and `npm --prefix frontend run typecheck:e2e`: Clean (zero TypeScript errors).
-  - `npm --prefix frontend run test:e2e`: 100% green across touched and core Playwright specs (including new zero-decimal currency and timezone regression specs).
-
----
-
-## 4. Remaining Tasks & Action Plan
-
-### Track 1: Production Cutover & Operator Steps (Human Operator / User-Gated)
+### Track 1: Production cutover (operator, user-gated)
 
 Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in sequence:
 
 1. **Pre-Cutover Channel Verification (Staging / Non-Production):**
-   - **Discord:** Confirm bot application has Gateway Message Content intents enabled; verify `/todo`, `/expense`, `/portfolio`, `/ask`, and `/link` in DM and guild.
+   - **Discord:** Confirm the bot needs no privileged gateway intent (it uses `GUILDS` and `DIRECT_MESSAGES`); verify `/todo`, `/expense`, `/portfolio`, `/ask`, and `/link` in DM and guild.
    - **Telegram:** Verify `/start`, `/todo` inline keyboard buttons ("Done #id"), `/link`, and secret header verification (`TELEGRAM_WEBHOOK_SECRET`) in webhook mode.
    - **Email:** Verify IMAP mailbox polling over TLS, DMARC authentication check (`EMAIL_AUTHSERV_ID`), and multipart plain/HTML reply formatting via SMTP.
 
@@ -124,7 +66,7 @@ Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in sequence:
 
 ---
 
-### Track 2: Post-Cutover Enhancements & Technical Debt
+### Track 2: Post-cutover enhancements and technical debt
 
 - Tech-debt register: [reviews/2026-10-10-tech-debt-audit.md](reviews/2026-10-10-tech-debt-audit.md). Phases 0 and 1 are done (except TD-05 beyond the admin module). Phase 2 next: TD-10 (reqwest 0.12, own branch), TD-13.
 
@@ -155,32 +97,31 @@ Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in sequence:
    - `resume.rs` checks the whitelist after `begin_approved_execution` has committed its "started" marker; check `tool_policy` first.
    - `grant_admin`/`revoke_admin` audit the target account as the actor; account merges that carry over the admin role write no audit row.
    - `application/knowledge/search.rs` builds a new embedding HTTP client per call while the base URL is customized; `resolve_runtime_stt` drops decrypt errors without a warning.
+   - Agent approvals (`POST /agent/approvals/:id/approve|reject`, `interface/http/agent.rs`) take `AuthUser`, not `VerifiedUser`, and are not in `SENSITIVE`; earlier notes of this file claimed step-up for them. Decide whether approving a sensitive AI action needs a fresh passkey (and whether an MCP token may approve at all); if so, add `VerifiedUser` and the `SENSITIVE` entries together.
 
 ---
 
-## 5. Consolidated Architectural Invariants
+## 5. Settled rulings
 
-- **PostgreSQL 18 Exclusivity:** The application database is PostgreSQL only. `BIGINT` for row IDs, native `UUID` for `accounts.id` and `owner_id`. No SQL in `domain/`, `application/`, `jobs/`, `events/`, or `interface/`.
-- **Transactional Outbox:** State mutations and their corresponding `SystemEvent` must be committed in the same database transaction. Outbox deliveries handle external fan-out with independent retries.
-- **Unified Tool Registry & Untrusted Input Guard:** Interactive user chat uses direct LLM + tool calling bounded by `MAX_TOOL_ROUNDS = 5`. Outside content (`<quoted_message>`, `<ocr_text>`, `<tool_output>`) escapes `<` and taints the turn, requiring explicit user confirmation before sensitive tools execute. The autonomous agent loop uses native tool calling (one tool call per step) and is reserved for background workflows, executing approved sensitive actions at-most-once from stored calls.
-- **pgvector Hybrid Search:** Multi-chunk `multilingual-e5-small` embeddings (`vector(384)`, served by `matrix-bot-inference`, tagged with the model that made them) indexed via HNSW (`vector_cosine_ops`), populated asynchronously via transactional outbox + background durable jobs (`knowledge.embed`). Search fuses lexical (FTS + trigram/substring) and vector results via reciprocal rank fusion, degrading to lexical-only if the embedder is unavailable.
-- **Dynamic Configuration & Encrypted Vault:** `RuntimeConfigSnapshot` (`ArcSwap`) provides lock-free reads backed by `app_settings` and `SettingRegistry` defaults (20 hot-reloadable settings, all wired to live runtime consumers; restart-required settings stay in `.env`), reloaded in-process right after each write and by the listener's 60 s tick and on every LISTEN (re)connect. External credentials in `provider_secrets` use AES-256-GCM with 96-bit CSPRNG nonces and AAD binding (`{provider}:{name}:{key_version}`), failing closed when `SECRETS_ENCRYPTION_KEY` is absent. Precedence: `AiUserConfig > Runtime Snapshot > Environment > Defaults`.
-- **Rulings (2026-10-10):**
-  - *Ruling: CLI/SQL-only admin bootstrap (`matrix-bot admin grant|revoke <account_id>`) — eliminates first-user auto-promotion race conditions and requires an enrolled passkey before granting or using admin privileges — cost if wrong: operator runs one CLI command after first passkey enrollment.*
-  - *Ruling: `AdminSession` for admin `GET`s and `AdminUser` (5-minute step-up window) for admin writes and secret connectivity tests — prevents unnecessary WebAuthn prompts when browsing the Admin Console while gating all mutations and secret operations — cost if wrong: none, secret `GET` returns masked metadata only.*
-  - *Ruling: Keep only the 20 hot-reloadable settings in `SettingRegistry` and the 6 hot-reloadable secret providers in `SecretProvider` (`OpenAi`, `Anthropic`, `Tavily`, `Stt`, `Tts`, `Generic`), keeping restart-required settings and credentials (channels, `EMBEDDING_MODEL`, and S3) in `.env` — avoids misleading Admin UI settings/secrets that cannot hot-reload and keeps `domain/config/registry.rs` under the 500-line limit — cost if wrong: changing channel adapters, S3, or embedding model requires `.env` edit + restart, which is already required by their lifecycle.*
-- **Rulings (2026-10-12 — Adversarial Review Remediation):**
-  - *Ruling: Passkey enrollment via `/api/v1/account/passkeys/register/*` requires `VerifiedUser` (5-minute step-up window) and rejects MCP/recovery-restricted sessions; recovery enrollment uses `/api/v1/auth/recovery/*` exclusively (`C2`), and Matrix login sessions carry `last_verified_at = NULL` (`H1`) — closes privilege escalation from unverified/MCP/recovery sessions and Matrix tokens — cost if wrong: enrolling an additional passkey from the web console prompts for existing passkey step-up.*
-  - *Ruling: Room/channel delivery targets (`authorize_delivery`, `H4`/`M12`/`M26`) allow only `web`, an account's cached Matrix room, or a conversation address (`discord:`, `telegram:`, `email:`) matching the account's linked `platform_identities`; synthetic origins (`mcp`, `agent:*`) resolve to the user's saved default room or `web` — prevents cross-user message injection via raw room IDs or foreign channel addresses — cost if wrong: rooms not yet in the user's room cache cannot be targeted by raw ID until synced.*
-  - *Ruling: All outbound HTTP clients for user-configurable or untrusted URLs (`llm/client.rs`, `web/metadata.rs`, `H2`/`H3`/`M14`) disable automatic redirect following or re-validate each redirect hop and pin validated DNS socket addresses via `reqwest::ClientBuilder::resolve_to_addrs` — prevents SSRF via open redirects, IPv4-mapped IPv6 (`::ffff:127.0.0.1`), and DNS rebinding — cost if wrong: none.*
-  - *Ruling: Minor-unit currency exponents (`domain::finance::money::exponent_for`, `H7`/`H8`/`H9`/`M5`/`M19`/`H11`/`H13`/`M23`) are enforced end-to-end across recurring bills, footprints, portfolio quotes/alerts, net worth (skipping unconvertible currencies rather than assuming 1.0 EUR), LLM tool inputs, and the SPA — eliminates 100× scaling bugs on zero-decimal (`JPY`) and three-decimal (`KWD`) currencies — cost if wrong: none.*
-- **Account Identity Model:** One human account (`accounts.id`) links multiple chat identities across Matrix, Discord, Telegram, and Email via `platform_identities`. Instance-wide tables (`app_settings`, `provider_secrets`, `config_audit_log`) are global and registered in `AUDIT_ACTOR_UNTOUCHED`.
-- **File Length & Code Quality:** No file in `backend/src/` or `inference/src/` may exceed 500 lines of production code (target < 300 lines). Only `config/` reads environment variables.
+Format: `Ruling: <decision> — <why> — <cost if wrong>`. New rulings go here in the same commit as the work (AGENTS §4.1).
+
+### Rulings (2026-10-10)
+
+- *Ruling: CLI/SQL-only admin bootstrap (`matrix-bot admin grant|revoke <account_id>`) — eliminates first-user auto-promotion race conditions and requires an enrolled passkey before granting or using admin privileges — cost if wrong: operator runs one CLI command after first passkey enrollment.*
+- *Ruling: `AdminSession` for admin `GET`s and `AdminUser` (5-minute step-up window) for admin writes and secret connectivity tests — prevents unnecessary WebAuthn prompts when browsing the Admin Console while gating all mutations and secret operations — cost if wrong: none, secret `GET` returns masked metadata only.*
+- *Ruling: Keep only the 20 hot-reloadable settings in `SettingRegistry` and the 6 hot-reloadable secret providers in `SecretProvider` (`OpenAi`, `Anthropic`, `Tavily`, `Stt`, `Tts`, `Generic`), keeping restart-required settings and credentials (channels, `EMBEDDING_MODEL`, and S3) in `.env` — avoids misleading Admin UI settings/secrets that cannot hot-reload and keeps `domain/config/registry.rs` under the 500-line limit — cost if wrong: changing channel adapters, S3, or embedding model requires `.env` edit + restart, which is already required by their lifecycle.*
+
+### Rulings (2026-10-12 — Adversarial Review Remediation)
+
+- *Ruling: Passkey enrollment via `/api/v1/account/passkeys/register/*` requires `VerifiedUser` (5-minute step-up window) and rejects MCP/recovery-restricted sessions; recovery enrollment uses `/api/v1/auth/recovery/*` exclusively (`C2`), and Matrix login sessions carry `last_verified_at = NULL` (`H1`) — closes privilege escalation from unverified/MCP/recovery sessions and Matrix tokens — cost if wrong: enrolling an additional passkey from the web console prompts for existing passkey step-up.*
+- *Ruling: Room/channel delivery targets (`authorize_delivery`, `H4`/`M12`/`M26`) allow only `web`, an account's cached Matrix room, or a conversation address (`discord:`, `telegram:`, `email:`) matching the account's linked `platform_identities`; synthetic origins (`mcp`, `agent:*`) resolve to the user's saved default room or `web` — prevents cross-user message injection via raw room IDs or foreign channel addresses — cost if wrong: rooms not yet in the user's room cache cannot be targeted by raw ID until synced.*
+- *Ruling: All outbound HTTP clients for user-configurable or untrusted URLs (`llm/client.rs`, `web/metadata.rs`, `H2`/`H3`/`M14`) disable automatic redirect following or re-validate each redirect hop and pin validated DNS socket addresses via `reqwest::ClientBuilder::resolve_to_addrs` — prevents SSRF via open redirects, IPv4-mapped IPv6 (`::ffff:127.0.0.1`), and DNS rebinding — cost if wrong: none.*
+- *Ruling: Minor-unit currency exponents (`domain::finance::money::exponent_for`, `H7`/`H8`/`H9`/`M5`/`M19`/`H11`/`H13`/`M23`) are enforced end-to-end across recurring bills, footprints, portfolio quotes/alerts, net worth (skipping unconvertible currencies rather than assuming 1.0 EUR), LLM tool inputs, and the SPA — eliminates 100× scaling bugs on zero-decimal (`JPY`) and three-decimal (`KWD`) currencies — cost if wrong: none.*
 
 ---
 
-## 6. Verification Suite Reference
-
-Note for fresh local test PostgreSQL servers: create `vector` and `pg_trgm` extensions once in `public` (`CREATE EXTENSION IF NOT EXISTS vector SCHEMA public; CREATE EXTENSION IF NOT EXISTS pg_trgm SCHEMA public;`) before running parallel tests.
+## 6. Verification
 
 The verification gates are listed once, in [AGENTS.md §8](../../AGENTS.md#8-verification). Run them from the repository root.
+
+A fresh local test PostgreSQL server needs the `vector` and `pg_trgm` extensions created once in `public` before parallel tests run: `CREATE EXTENSION IF NOT EXISTS vector SCHEMA public; CREATE EXTENSION IF NOT EXISTS pg_trgm SCHEMA public;`. Database setup is in [`docs/database.md`](../database.md#test-databases).

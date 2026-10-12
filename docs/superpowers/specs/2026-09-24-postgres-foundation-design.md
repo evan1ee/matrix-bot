@@ -1,8 +1,8 @@
 # PostgreSQL Foundation — Design
 
 **Date:** 2026-09-24
-**Status:** Approved design, pending implementation plan
-**Parent roadmap:** [`SPEC.md`](../../../SPEC.md) — this document is sub-project 1 (roadmap phases 1–3)
+**Status:** Implemented. `docs/architecture.md` and `docs/database.md` describe the code as built and win wherever they differ from this design
+**Parent roadmap:** `SPEC.md` (since deleted) — this document was sub-project 1 (roadmap phases 1–3)
 
 ## 1. Goal
 

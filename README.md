@@ -1,14 +1,15 @@
 # Matrix Bot (Rust) 🦀
 
-A personal AI/life workspace built around Matrix: a chat bot, an embedded REST/SSE API, an MCP server and a React web UI in **one binary**. Built on [`matrix-sdk`](https://github.com/matrix-org/matrix-rust-sdk), [`axum`](https://github.com/tokio-rs/axum), [`sqlx`](https://github.com/launchbadge/sqlx) and [`webauthn-rs`](https://github.com/kanidm/webauthn-rs), with PostgreSQL for storage.
+A personal AI/life workspace built around Matrix: a chat bot (Matrix, plus optional Discord, Telegram and Email), an embedded REST/SSE API, an MCP server and a React web UI in **one binary**. Built on [`matrix-sdk`](https://github.com/matrix-org/matrix-rust-sdk), [`axum`](https://github.com/tokio-rs/axum), [`sqlx`](https://github.com/launchbadge/sqlx) and [`webauthn-rs`](https://github.com/kanidm/webauthn-rs), with PostgreSQL for storage.
 
-Every feature is reachable through several surfaces (Matrix chat commands, the web UI, AI tool calls and MCP) and all of them land on the same data.
+Every feature is reachable through several surfaces (chat commands, the web UI, AI tool calls and MCP) and all of them land on the same data.
 
 ---
 
 ## 🌟 Features
 
 - 🤖 **Core**: greetings (`!hello`), latency ping (`!ping`), module-driven help (`!help`).
+- 💬 **Channels**: Matrix (end-to-end encrypted) plus optional Discord, Telegram and Email adapters behind one inbound pipeline; one account links identities from all of them. Setup is under *Enabling Discord / Telegram / Email* below.
 - 📋 **To-dos**: priorities, due dates, lead-time reminders, personal and room-wide views, editing, pagination, and quoted-message capture (replying `!todo add` uses the quoted text).
 - ⏰ **Reminders**: one-off and recurring (daily, weekly, monthly, yearly), persisted across restarts with downtime catch-up and exponential retry backoff.
 - 💰 **Finance**: expense and income ledger with custom categories and monthly summaries. Amounts are integer minor units throughout, with no floating point.
@@ -19,7 +20,9 @@ Every feature is reachable through several surfaces (Matrix chat commands, the w
 - ⏳ **Life grid and journal**: lifespan visualization, daily mood/weather/notes, cross-module activity timelines.
 - 📍 **Footprints**: travel and location check-ins with ratings and journey statistics.
 - 🔔 **Webhooks**: inbound alert gateway with severity cards, Telegram Bot API drop-in compatibility and a durable retry queue. See [`docs/api.md`](docs/api.md#inbound-webhook-gateway).
+- 🗒️ **Notes and knowledge base**: Markdown notes with tags, captured from any channel (including voice and photo capture) and found with hybrid keyword + semantic search (pgvector); Markdown zip export and import. See [`docs/llm.md`](docs/llm.md#knowledge-search-and-embeddings).
 - 🧠 **AI assistant and web search**: multi-turn threads, tool calling over your own data, live search and fact-checking (Tavily, with DuckDuckGo fallback), per-user model configuration, and weekly retrospectives. See [`docs/llm.md`](docs/llm.md).
+- 🛰️ **Autonomous agent**: scheduled and on-demand tool-calling runs with a step budget; sensitive actions pause for your approval and run at most once. See [`docs/llm.md`](docs/llm.md#agent-runs-use-native-tool-calling).
 - 🔌 **MCP server**: exposes the same tools, resources and prompts to Claude Desktop, Cursor and other MCP clients over stdio or HTTP/SSE.
 - 🔊 **Voice replies**: `!say <text>` speaks into the room as a native Matrix voice message (Ogg Opus), synthesized by the bundled Kokoro server or by OpenAI/ElevenLabs. Each user picks a voice.
 - ⚙️ **Settings**: per-user timezone, default currency and voice, respected by every module.
@@ -35,7 +38,7 @@ Every feature is reachable through several surfaces (Matrix chat commands, the w
 One capability is implemented once and reached through every interface:
 
 ```
-                    ┌── Matrix chat (!commands, natural language)
+                    ┌── Chat: Matrix, Discord, Telegram, Email
                     ├── REST API + SSE
  User / LLM ───────►├── MCP
                     ├── AI tool calls
@@ -48,10 +51,10 @@ One capability is implemented once and reached through every interface:
                       PostgreSQL
 ```
 
-- **Two ways in.** Matrix events arrive as `!commands` (parsed deterministically, no LLM, zero token cost) or as natural language routed to the LLM, which calls tools. The embedded Axum server serves `/api/v1/*` and a live SSE stream at `/api/v1/events` for the web UI.
+- **Two ways in.** Chat messages arrive as commands (`!todo …` on Matrix and Email, `/todo …` on Discord and Telegram; parsed deterministically, no LLM, zero token cost) or as natural language routed to the LLM, which calls tools. The embedded Axum server serves `/api/v1/*` and a live SSE stream at `/api/v1/events` for the web UI.
 - **One implementation.** Chat commands, REST handlers, MCP and AI tools all call the same application services over `domain/` rules, so validation, ownership isolation and events are never duplicated.
 - **Live updates.** Every mutation publishes a typed `SystemEvent` through the transactional outbox, delivered per owner over SSE.
-- **Modular monolith.** No queues or microservices. Optional local OCR, speech-to-text and text-to-speech run in a separate `inference` server the bot reaches over HTTP; a missing one disables only that feature.
+- **Modular monolith.** No queues or microservices. Optional local OCR, speech-to-text, text-to-speech and text embeddings run in a separate `inference` server the bot reaches over HTTP; a missing one disables only that feature.
 
 The reasoning behind the design is in [`docs/architecture.md`](docs/architecture.md).
 
@@ -74,7 +77,7 @@ Matrix cannot prompt for a passkey, so `!export`, `!sessions`, `!recoverycodes`,
 
 ## 📋 Command reference
 
-Every feature module exposes intuitive chat commands formatted in HTML for rich Matrix clients (Element, FluffyChat, Cinny):
+Every feature module exposes chat commands, formatted in HTML for rich Matrix clients (Element, FluffyChat, Cinny) and rendered natively on the other channels. The table shows the Matrix spelling; Telegram and Email also accept `/` in place of `!`, and Discord offers six slash commands (`/todo /expense /portfolio /ask /link /help`) that take the rest of the command as one `args` text:
 
 | Module | Commands | Description |
 |---|---|---|
@@ -91,14 +94,14 @@ Every feature module exposes intuitive chat commands formatted in HTML for rich 
 | **Footprints** | `!footprint list`<br>`!footprint add <name> [\| date] [\| rating] [\| note]`<br>`!footprint delete <id>` | Visited places log, travel timeline, ratings (1-5 stars), and journey statistics |
 | **Webhooks** | `!webhook list`<br>`!webhook create <name> [room]`<br>`!webhook test <id>`<br>`!webhook revoke <id>` | Inbound webhook endpoints for external services, custom alert cards, and Telegram Bot API emulation |
 | **AI Assistant** | `!ai <prompt>` or `@bot <prompt>`<br>↳ *Or quote reply:* `@bot fact check` / `true?` / `verify`<br>`!ai reset`<br>`!ai model [name]`<br>`!ai config`<br>`!ai retro` | Conversational LLM assistant, live web search & fact-checking (Tavily/DDG), quoted message analysis, model switching, and weekly retrospectives |
+| **Notes** | `!note <text>` or `!note add <title> \| <content>`<br>↳ *Or send a voice note or photo captioned* `!note`<br>`!notes [tag]`<br>`!search <query>` | Capture Markdown notes from any channel; `!search` runs hybrid keyword + semantic search across notes, bookmarks, journal and footprints. Discord reaches notes through the assistant |
+| **Agent** | `!agent run <goal>`<br>`!agent status [run_id]`<br>`!agent list`<br>`!agent confirm <approval_id>`<br>`!agent reject <approval_id> [reason]`<br>`!agent cancel [run_id]` | Start and supervise an autonomous run; sensitive tool calls wait for `confirm` |
 | **Voice (TTS)** | `!say <text>` | Speaks the text into the room as a native Matrix voice message; voice chosen per user |
 | **Settings** | `!settings`<br>`!settings timezone <IANA zone>`<br>`!settings currency <CODE>`<br>`!settings voice <voice\|none>` | Configure per-user timezone, default currency, and the voice `!say` speaks in (in whatever the configured TTS provider calls it), applied across all modules |
 | **Account** | `!link` (`/link` on Discord, Telegram, and Email)<br>`!recover` | Get a 10-minute, single-use link that connects this chat account to your web identity (direct messages only), initiate delayed recovery |
 
 `!export`, `!sessions`, `!recoverycodes`, `!unlink` and `!passkey rm` are
 deliberately refused on Matrix and point at the web app (see *Accounts and security*).
-
----
 
 ---
 
@@ -121,6 +124,9 @@ Endpoints are mounted under `/api/v1`. Authentication is an HttpOnly session coo
 | MCP | `/mcp/*` | HTTP/SSE transport and token management |
 | Inbound gateway | `/webhooks/:token`, `/bot<token>/sendMessage` | Generic and Telegram-compatible webhook receivers |
 | Link | `/link/*` | The landing page's inspect, claim and allowlisted signup calls |
+| Notes, knowledge | `/notes`, `/knowledge/search` | Note CRUD, tags, Markdown export/import, hybrid search |
+| Agent | `/agent/*` | Runs, approvals and scheduled tasks |
+| Media | `/storage/:key`, `/ocr/scan`, `/voice/transcribe` | Stored binaries (session or signed URL), receipt OCR, speech-to-text |
 | Settings, rooms | `/settings`, `/rooms` | Preferences and Matrix room picker |
 | Admin | `/admin/*` | 20 hot-reloadable runtime settings, AES-256-GCM provider secrets, connectivity probes, audit log (`AdminSession` for reads, `AdminUser` 5-min step-up for writes/tests) |
 | Live events | `/events` | SSE stream scoped to the authenticated owner |
@@ -219,6 +225,12 @@ TAVILY_API_KEY=tvly-...                # Live Web Search (fallback to DuckDuckGo
 # EMBEDDING_MODEL=multilingual-e5-small     # Chunks are tagged with it; changing it re-embeds everything in the background
 # EMBEDDING_MODEL_DIR=/app/data/embedding_models/multilingual-e5-small  # Read by the inference container: where it downloads the model
 
+# Object storage for receipts, audio and exports (Optional; defaults to local disk)
+# STORAGE_DRIVER=local                      # local (default) or s3
+# STORAGE_LOCAL_DIR=data/storage
+# STORAGE_SIGNING_SECRET=                   # signs presigned URLs; production refuses the default
+# S3_BUCKET=  S3_REGION=  S3_ENDPOINT=  S3_ACCESS_KEY=  S3_SECRET_KEY=  S3_FORCE_PATH_STYLE=   # when STORAGE_DRIVER=s3
+
 # Dynamic Configuration & Encrypted Secrets Vault (Optional in dev; required for storing secrets in the Admin Console)
 # SECRETS_ENCRYPTION_KEY=                   # 32-byte master key (`openssl rand -base64 32` or `openssl rand -hex 32`)
 # SECRETS_ENCRYPTION_KEYS=                  # Optional versioned keys for rotation (`1:<old_key>,2:<new_key>`)
@@ -266,7 +278,7 @@ The bot answers `/todo`, `/expense`, `/portfolio`, `/ask`, `/link` and `/help` (
    - `webhook`: recommended for production. Requires a public HTTPS `WEB_URL` (or `WEBAUTHN_ORIGIN`) and `TELEGRAM_WEBHOOK_SECRET`. The bot calls `setWebhook` automatically at boot and receives updates at `POST /api/webhooks/telegram`.
 4. People link their Telegram account by sending `/link` to the bot in a direct chat and opening the link it returns. List someone's numeric Telegram user ID in `TELEGRAM_ALLOWED_USERS` (comma-separated) to let them create a new account from that link; anyone else signs in to an existing one.
 
-The bot advertises `/todo`, `/expense`, `/portfolio`, `/ask`, `/link`, and `/help` in Telegram's menu via `setMyCommands`. Direct messages route free-text to the AI assistant with typing indicators and status updates. In groups, commands are supported with `@botname` mentions, while private responses (e.g. portfolio/finance) are refused with a prompt to message the bot directly. The `/todo` task list includes interactive inline "Done" buttons to quickly complete tasks.
+The bot advertises `/start`, `/help`, `/todo`, `/expense`, `/portfolio` and `/link` in Telegram's menu via `setMyCommands`; any other typed `/command` still reaches its module, and free text goes to the assistant. Direct messages route free-text to the AI assistant with typing indicators and status updates. In groups, commands are supported with `@botname` mentions, while private responses (e.g. portfolio/finance) are refused with a prompt to message the bot directly. The `/todo` task list includes interactive inline "Done" buttons to quickly complete tasks.
 
 ---
 
@@ -342,7 +354,7 @@ sudo systemctl status matrix-bot
 Docker Compose manages persistent data volumes and restarts automatically.
 `docker compose up` starts **three** containers: `matrix-bot`, `postgres`
 (the only application database), and `inference` (the local ONNX model
-server behind `POST /ocr`). Neither `postgres` nor `inference` is published
+server for OCR, speech, text-to-speech and embeddings). Neither `postgres` nor `inference` is published
 to the host — the bot reaches both over the compose network only.
 
 ```bash
@@ -455,7 +467,8 @@ cargo fmt --all -- --check
 cargo check -p matrix-bot --all-targets                  # warning-free
 cargo test  -p matrix-bot --all-targets                  # includes the architecture test
 cargo test  -p matrix-bot live_postgres -- --ignored --test-threads=1
-cargo clippy --workspace --all-targets -- -D warnings
+cargo clippy -p matrix-bot --all-targets -- -D warnings
+cargo clippy -p matrix-bot-inference --all-targets -- -D warnings   # when inference/ or contracts/ change
 cargo test  -p matrix-bot-inference --all-targets        # when inference/ or contracts/ change
 npm --prefix frontend ci && npm --prefix frontend run build
 npm --prefix frontend run test:e2e                       # Playwright; fake API, no backend needed
@@ -489,20 +502,27 @@ backend/                      # crate `matrix-bot`: bot + embedded API, one bina
     ├── interface/            # everything that talks to the outside world
     │   ├── http/             #   axum REST + SSE, DTOs, auth extractors
     │   ├── chat/             #   BotModule command handlers per feature (channel-neutral)
-    │   ├── channels/         #   ChannelAdapter, registry, shared inbound pipeline
-    │   │   └── matrix/       #     the Matrix adapter: client, sync loop, E2EE, verification
-    │   ├── jobs/             #   job handlers (reminder, briefing, portfolio)
+    │   ├── channels/         #   ChannelAdapter, registry, shared inbound pipeline, renderers
+    │   │   ├── matrix/       #     client, sync loop, E2EE, verification
+    │   │   ├── discord/      #     serenity gateway and slash commands
+    │   │   ├── telegram/     #     teloxide polling or webhook
+    │   │   └── email/        #     IMAP polling, SMTP replies
+    │   ├── events/           #   outbox delivery sinks
+    │   ├── jobs/             #   job handlers (reminder, briefing, portfolio, agent, knowledge, media)
     │   └── mcp/              #   MCP protocol adapters
     ├── jobs/                 # job runtime: workers, reaper, leader-elected scheduler
-    ├── llm/                  # prompts, tool loop, tool registry (llm/tools/)
+    ├── events/               # events runtime: outbox listener, SSE hub, delivery dispatcher
+    ├── llm/                  # prompts, tool loop, tool registry (llm/tools/), agent engine (llm/agent/)
     ├── infrastructure/
     │   ├── postgres/         #   repositories, read models, account merge
-    │   ├── inference/        #   llm, ocr, stt, tts clients
+    │   ├── inference/        #   llm, ocr, stt, tts, embedding clients and provider testers
+    │   ├── crypto/           #   AES-256-GCM secret encryption
+    │   ├── storage/          #   local and S3 object storage
     │   └── web/              #   outbound feeds, SSRF guard
     ├── db/                   # pool, migration runner, test pools
     └── utils/
 inference/                    # crate `matrix-bot-inference`: Axum server hosting local ONNX
-│                              # models (OCR, STT and TTS), a separate binary and image
+│                              # models (OCR, STT, TTS and embeddings), a separate binary and image
 contracts/                    # JSON fixtures each crate asserts for the wire formats it speaks
 frontend/                     # React 19 + Vite + Tailwind v4, built into backend/web/dist
 data/                         # runtime Matrix crypto store (SQLite, gitignored)
@@ -516,8 +536,10 @@ docs/                         # architecture, database, api, llm; superpowers/ h
 | Document | Contents |
 |---|---|
 | [`AGENTS.md`](AGENTS.md) | Rules for coding agents: architecture, workflow, constraints, verification |
-| [`docs/architecture.md`](docs/architecture.md) | Layers, interfaces, Matrix, accounts, settings, external services |
+| [`docs/README.md`](docs/README.md) | Index of the documentation and the conventions it follows |
+| [`docs/architecture.md`](docs/architecture.md) | Layers, runtimes, channels, accounts, settings, storage, knowledge base, configuration vault |
 | [`docs/database.md`](docs/database.md) | Schema and SQLx conventions, migrations, test databases |
+| [`inference/README.md`](inference/README.md) | The inference server: routes, models, provisioning |
 | [`docs/api.md`](docs/api.md) | REST/SSE conventions, authentication, webhooks, OpenAPI workflow |
 | [`docs/llm.md`](docs/llm.md) | LLM transport, tool loop, agent limits, MCP |
 | [`docs/superpowers/`](docs/superpowers/) | Plans, designs, progress and hand-off state, runbooks |

@@ -1,5 +1,7 @@
 # Technical debt audit — 2026-10-10
 
+**Status:** phases 0 and 1 done; phase 2 open (tracked in `HANDOFF.md` Track 2).
+
 **Scope:** whole repository (`backend/`, `inference/`, `frontend/`, CI, docs) at `feat/config-management` (`ade0288` plus the uncommitted working tree: 66 files changed, apparently remediating the config-management review).
 **Companion:** [`2026-10-10-config-management-review.md`](2026-10-10-config-management-review.md) holds the branch-specific findings (B1–B8, M1–M18). This audit does not repeat them; it tracks them as one item (TD-02).
 

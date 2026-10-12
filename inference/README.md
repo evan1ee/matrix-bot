@@ -2,10 +2,11 @@
 
 Local, offline AI inference server for [`matrix-bot`](../README.md). Built with [Axum](https://github.com/tokio-rs/axum), [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx), [ort](https://github.com/pykeio/ort) (ONNX Runtime), and [paddle-ocr-rs](https://github.com/hiroi-sora/paddle-ocr-rs).
 
-It provides three core capabilities:
+It provides four capabilities:
 - 🔍 **OCR (Optical Character Recognition)**: Local text recognition from images using PaddleOCR (detection, classification, and recognition models).
 - 🎙️ **STT (Speech-to-Text)**: High-speed transcription for voice notes and audio clips using SenseVoice Small via sherpa-onnx.
 - 🗣️ **TTS (Text-to-Speech)**: Expressive speech synthesis using Kokoro multi-lingual v1.1 (103 voices, English & Mandarin, with Chinese text normalization FSTs), outputting native Matrix voice bubbles as RFC 7845 Ogg Opus.
+- 🧭 **Embeddings**: 384-dimension `multilingual-e5-small` text vectors (int8 ONNX via `ort`) for the bot's semantic note search.
 
 ---
 
@@ -19,6 +20,7 @@ inference/
 │   ├── .gitignore
 │   ├── ocr/                   # PaddleOCR ONNX models
 │   ├── stt/                   # SenseVoice ONNX model + tokens
+│   ├── embeddings/            # multilingual-e5-small model + tokenizer
 │   └── tts/                   # Kokoro TTS model, voices, lexicons, and FSTs
 └── src/
     ├── main.rs                # Server entry point & async task orchestration
