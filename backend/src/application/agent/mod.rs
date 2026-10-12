@@ -20,6 +20,7 @@ impl From<AgentError> for AppError {
         match err {
             AgentError::InvalidGoal(msg) => AppError::Validation(msg),
             AgentError::InvalidTaskId(msg) => AppError::Validation(msg),
+            AgentError::InvalidCronExpression(msg) => AppError::Validation(msg),
             AgentError::InvalidStatus(msg) => AppError::Validation(msg),
             AgentError::InvalidStatusTransition { from, to } => {
                 AppError::Conflict(format!("cannot transition run from {from} to {to}"))

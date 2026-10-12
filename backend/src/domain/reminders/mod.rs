@@ -137,27 +137,64 @@ impl Reminder {
     }
 }
 
-/// The next time a recurring reminder should fire, strictly after `now`.
+/// The next time a recurring reminder should fire, strictly after `now`,
+/// evaluated in `tz` so DST transitions keep the same local wall-clock time
+/// and multi-step catch-ups anchor to `current`'s day-of-month rather than
+/// drifting through shorter intermediate months (e.g. Jan 31 -> Feb 28 -> Mar 31).
+pub fn next_occurrence_in_tz(
+    current: DateTime<Utc>,
+    recurrence: RecurrencePattern,
+    now: DateTime<Utc>,
+    tz: chrono_tz::Tz,
+) -> Option<DateTime<Utc>> {
+    if recurrence == RecurrencePattern::None {
+        return None;
+    }
+    let local_base = current.with_timezone(&tz).naive_local();
+    for step_idx in 1u32..=10_000 {
+        let next_naive = match recurrence {
+            RecurrencePattern::Daily => {
+                local_base.checked_add_signed(Duration::days(i64::from(step_idx)))?
+            }
+            RecurrencePattern::Weekly => {
+                local_base.checked_add_signed(Duration::weeks(i64::from(step_idx)))?
+            }
+            RecurrencePattern::Monthly => local_base.checked_add_months(Months::new(step_idx))?,
+            RecurrencePattern::Yearly => {
+                local_base.checked_add_months(Months::new(step_idx.checked_mul(12)?))?
+            }
+            RecurrencePattern::None => return None,
+        };
+        let next_utc = resolve_local_to_utc(next_naive, tz)?;
+        if next_utc > now {
+            return Some(next_utc);
+        }
+    }
+    None
+}
+
+fn resolve_local_to_utc(naive: chrono::NaiveDateTime, tz: chrono_tz::Tz) -> Option<DateTime<Utc>> {
+    use chrono::TimeZone;
+    match tz.from_local_datetime(&naive) {
+        chrono::LocalResult::Single(dt) => Some(dt.with_timezone(&Utc)),
+        chrono::LocalResult::Ambiguous(earliest, _) => Some(earliest.with_timezone(&Utc)),
+        chrono::LocalResult::None => {
+            // Spring-forward gap: shift forward by 1 hour into valid local time.
+            let shifted = naive + Duration::hours(1);
+            tz.from_local_datetime(&shifted)
+                .earliest()
+                .map(|dt| dt.with_timezone(&Utc))
+        }
+    }
+}
+
+/// The next time a recurring reminder should fire, strictly after `now` (in UTC).
 pub fn next_occurrence(
     current: DateTime<Utc>,
     recurrence: RecurrencePattern,
     now: DateTime<Utc>,
 ) -> Option<DateTime<Utc>> {
-    let step = |dt: DateTime<Utc>| -> Option<DateTime<Utc>> {
-        match recurrence {
-            RecurrencePattern::Daily => Some(dt + Duration::days(1)),
-            RecurrencePattern::Weekly => Some(dt + Duration::weeks(1)),
-            RecurrencePattern::Monthly => dt.checked_add_months(Months::new(1)),
-            RecurrencePattern::Yearly => dt.checked_add_months(Months::new(12)),
-            RecurrencePattern::None => None,
-        }
-    };
-
-    let mut next = step(current)?;
-    while next <= now {
-        next = step(next)?;
-    }
-    Some(next)
+    next_occurrence_in_tz(current, recurrence, now, chrono_tz::UTC)
 }
 
 /// Input data for creating a new reminder.
@@ -387,6 +424,29 @@ mod tests {
         let next = next_occurrence(scheduled, RecurrencePattern::Daily, now).unwrap();
         assert!(next > now);
         assert_eq!(next, utc(2026, 1, 14, 9));
+
+        // M1: Jan 31 monthly reminder catching up in March lands on Mar 31, not Mar 28
+        let jan31 = utc(2026, 1, 31, 9);
+        let mar1 = utc(2026, 3, 1, 9);
+        assert_eq!(
+            next_occurrence(jan31, RecurrencePattern::Monthly, mar1).unwrap(),
+            utc(2026, 3, 31, 9)
+        );
+    }
+
+    #[test]
+    fn test_next_occurrence_in_tz_preserves_local_hour_across_dst() {
+        // 2026-03-07 09:00 EST is 14:00 UTC; after US spring-forward on 2026-03-08,
+        // 09:00 EDT is 13:00 UTC.
+        let before_dst = utc(2026, 3, 7, 14);
+        let next = next_occurrence_in_tz(
+            before_dst,
+            RecurrencePattern::Daily,
+            before_dst,
+            chrono_tz::America::New_York,
+        )
+        .unwrap();
+        assert_eq!(next, utc(2026, 3, 8, 13));
     }
 
     fn fixture(trigger_at: DateTime<Utc>) -> Reminder {

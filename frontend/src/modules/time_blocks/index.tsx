@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   Clock,
@@ -6,6 +6,7 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { fetchApi } from '../../core/apiClient';
+import { nowInZone, todayInZone, useSettings } from '../../core/settings';
 import type { FrontendModule, SystemEvent } from '../../core/types';
 import type { TimeAllocation } from '../life/types';
 import { LifeTimeGrid } from '../life/LifeTimeGrid';
@@ -13,8 +14,17 @@ import { DatePicker } from '../../components/DatePicker';
 
 export const TimeBlocksView: React.FC = () => {
   const queryClient = useQueryClient();
-  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
-  const [selectedDate, setSelectedDate] = useState<string>(todayStr);
+  const { timezone } = useSettings();
+  const todayStr = useMemo(() => todayInZone(timezone), [timezone]);
+  const [selectedDate, setSelectedDate] = useState<string>(() => todayInZone(timezone));
+  const prevTodayRef = useRef(todayStr);
+
+  useEffect(() => {
+    if (selectedDate === prevTodayRef.current && todayStr !== prevTodayRef.current) {
+      setSelectedDate(todayStr);
+    }
+    prevTodayRef.current = todayStr;
+  }, [todayStr, selectedDate]);
 
   const [timeAllocation, setTimeAllocation] = useState<TimeAllocation>(() => Array(288).fill(null));
   const [timeSaveSuccess, setTimeSaveSuccess] = useState(false);

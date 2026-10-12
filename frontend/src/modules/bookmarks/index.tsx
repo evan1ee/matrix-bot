@@ -14,6 +14,7 @@ import {
 } from 'lucide-react';
 
 import type { FrontendModule, SystemEvent } from '../../core/types';
+import { fetchApi } from '../../core/apiClient';
 import { triggerAiPrompt } from '../ai';
 import type { Bookmark, BookmarkStats, CreateBookmarkInput, BookmarkFilterTab } from './types';
 import { BookmarkCard } from './BookmarkCard';
@@ -52,45 +53,22 @@ export const BookmarksView: React.FC = () => {
   // Query: Bookmarks list
   const { data: bookmarks = [], isLoading } = useQuery<Bookmark[]>({
     queryKey: ['bookmarks', queryParams],
-    queryFn: async () => {
-      const url = `/api/v1/bookmarks${queryParams ? `?${queryParams}` : ''}`;
-      const res = await fetch(url, { credentials: 'include' });
-      if (!res.ok) throw new Error('Failed to load bookmarks');
-      return res.json();
-    },
+    queryFn: () => fetchApi<Bookmark[]>(`/bookmarks${queryParams ? `?${queryParams}` : ''}`),
   });
 
   // Query: Stats
   const { data: stats } = useQuery<BookmarkStats>({
     queryKey: ['bookmarks-stats'],
-    queryFn: async () => {
-      const res = await fetch('/api/v1/bookmarks/stats', { credentials: 'include' });
-      if (!res.ok) throw new Error('Failed to load bookmark statistics');
-      return res.json();
-    },
+    queryFn: () => fetchApi<BookmarkStats>('/bookmarks/stats'),
   });
 
   // Mutation: Create
   const createMutation = useMutation({
-    mutationFn: async (payload: CreateBookmarkInput) => {
-      const res = await fetch('/api/v1/bookmarks', {
+    mutationFn: (payload: CreateBookmarkInput) =>
+      fetchApi<Bookmark>('/bookmarks', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        let msg = `Failed to save bookmark (${res.status})`;
-        try {
-          const data = await res.json();
-          if (data.error) msg = data.error;
-        } catch {
-          // Response body is not JSON
-        }
-        throw new Error(msg);
-      }
-      return res.json();
-    },
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['bookmarks'] });
       queryClient.invalidateQueries({ queryKey: ['bookmarks-stats'] });
@@ -99,14 +77,10 @@ export const BookmarksView: React.FC = () => {
 
   // Mutation: Toggle Favorite
   const toggleFavoriteMutation = useMutation({
-    mutationFn: async (id: number) => {
-      const res = await fetch(`/api/v1/bookmarks/${id}/toggle-favorite`, {
+    mutationFn: (id: number) =>
+      fetchApi<Bookmark>(`/bookmarks/${id}/toggle-favorite`, {
         method: 'POST',
-        credentials: 'include',
-      });
-      if (!res.ok) throw new Error('Failed to toggle favorite');
-      return res.json();
-    },
+      }),
     onSuccess: (updated: Bookmark) => {
       queryClient.invalidateQueries({ queryKey: ['bookmarks'] });
       queryClient.invalidateQueries({ queryKey: ['bookmarks-stats'] });
@@ -118,14 +92,10 @@ export const BookmarksView: React.FC = () => {
 
   // Mutation: Toggle Archive
   const toggleArchiveMutation = useMutation({
-    mutationFn: async (id: number) => {
-      const res = await fetch(`/api/v1/bookmarks/${id}/toggle-archive`, {
+    mutationFn: (id: number) =>
+      fetchApi<Bookmark>(`/bookmarks/${id}/toggle-archive`, {
         method: 'POST',
-        credentials: 'include',
-      });
-      if (!res.ok) throw new Error('Failed to toggle archive');
-      return res.json();
-    },
+      }),
     onSuccess: (updated: Bookmark) => {
       queryClient.invalidateQueries({ queryKey: ['bookmarks'] });
       queryClient.invalidateQueries({ queryKey: ['bookmarks-stats'] });
@@ -137,13 +107,10 @@ export const BookmarksView: React.FC = () => {
 
   // Mutation: Delete
   const deleteMutation = useMutation({
-    mutationFn: async (id: number) => {
-      const res = await fetch(`/api/v1/bookmarks/${id}`, {
+    mutationFn: (id: number) =>
+      fetchApi<void>(`/bookmarks/${id}`, {
         method: 'DELETE',
-        credentials: 'include',
-      });
-      if (!res.ok) throw new Error('Failed to delete bookmark');
-    },
+      }),
     onSuccess: (_, deletedId) => {
       queryClient.invalidateQueries({ queryKey: ['bookmarks'] });
       queryClient.invalidateQueries({ queryKey: ['bookmarks-stats'] });

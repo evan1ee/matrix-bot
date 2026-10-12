@@ -41,6 +41,7 @@ impl LlmClient {
     pub fn new(proxy: Option<&str>) -> Self {
         let mut builder = reqwest::Client::builder()
             .use_rustls_tls()
+            .redirect(reqwest::redirect::Policy::none())
             .tcp_keepalive(Some(Duration::from_secs(30)))
             .pool_idle_timeout(Some(Duration::from_secs(30)))
             .timeout(Duration::from_secs(120));
@@ -119,6 +120,15 @@ impl LlmClient {
             };
 
             let status = res.status();
+            if status.is_redirection() {
+                return Err(LlmError::Api {
+                    status: status.as_u16(),
+                    message: format!(
+                        "Redirects are not allowed for AI endpoints (HTTP {})",
+                        status.as_u16()
+                    ),
+                });
+            }
             if !status.is_success() {
                 let error_text = res
                     .text()
@@ -174,6 +184,15 @@ impl LlmClient {
             .await?;
 
         let status = res.status();
+        if status.is_redirection() {
+            return Err(LlmError::Api {
+                status: status.as_u16(),
+                message: format!(
+                    "Redirects are not allowed for AI endpoints (HTTP {})",
+                    status.as_u16()
+                ),
+            });
+        }
         if !status.is_success() {
             let error_text = res
                 .text()
@@ -187,24 +206,24 @@ impl LlmClient {
         }
 
         let mut stream = res.bytes_stream();
-        let mut buffer = String::new();
+        let mut buffer: Vec<u8> = Vec::new();
         let mut full_content = String::new();
         let mut tool_calls: Vec<super::types::ToolCall> = Vec::new();
 
         while let Some(item) = stream.next().await {
             let bytes = item?;
-            let chunk_str = String::from_utf8_lossy(&bytes);
-            buffer.push_str(&chunk_str);
+            buffer.extend_from_slice(&bytes);
 
-            while let Some(newline_pos) = buffer.find('\n') {
-                let line = buffer[..newline_pos].trim().to_string();
-                buffer.drain(..=newline_pos);
+            while let Some(newline_pos) = buffer.iter().position(|&b| b == b'\n') {
+                let line_bytes: Vec<u8> = buffer.drain(..=newline_pos).collect();
+                let line_str = String::from_utf8_lossy(&line_bytes);
+                let line = line_str.trim();
 
                 if line.is_empty() || line.starts_with(':') {
                     continue;
                 }
 
-                if let Some(chunk) = parse_sse_chunk(&line) {
+                if let Some(chunk) = parse_sse_chunk(line) {
                     for choice in chunk.choices {
                         if let Some(ref text) = choice.delta.content {
                             if !text.is_empty() {
@@ -243,13 +262,17 @@ impl LlmClient {
             }
         }
 
-        if !buffer.trim().is_empty() {
-            if let Some(chunk) = parse_sse_chunk(buffer.trim()) {
-                for choice in chunk.choices {
-                    if let Some(ref text) = choice.delta.content {
-                        if !text.is_empty() {
-                            full_content.push_str(text);
-                            on_delta(text.clone()).await;
+        if !buffer.is_empty() {
+            let tail_str = String::from_utf8_lossy(&buffer);
+            let tail = tail_str.trim();
+            if !tail.is_empty() {
+                if let Some(chunk) = parse_sse_chunk(tail) {
+                    for choice in chunk.choices {
+                        if let Some(ref text) = choice.delta.content {
+                            if !text.is_empty() {
+                                full_content.push_str(text);
+                                on_delta(text.clone()).await;
+                            }
                         }
                     }
                 }
@@ -293,6 +316,12 @@ impl LlmClient {
         {
             Ok(res) => {
                 let status = res.status();
+                if status.is_redirection() {
+                    return Err(format!(
+                        "Redirects are not allowed for AI endpoints (HTTP {})",
+                        status.as_u16()
+                    ));
+                }
                 if status.is_success() {
                     return Ok(());
                 }
@@ -338,6 +367,12 @@ impl LlmClient {
             .map_err(|e| format!("Connection error connecting to {}: {}", clean_base, e))?;
 
         let comp_status = comp_res.status();
+        if comp_status.is_redirection() {
+            return Err(format!(
+                "Redirects are not allowed for AI endpoints (HTTP {})",
+                comp_status.as_u16()
+            ));
+        }
         if comp_status.is_success() {
             return Ok(());
         }
@@ -673,5 +708,133 @@ mod tests {
             .expect_err("a 401 is an invalid key");
 
         assert!(err.starts_with("Invalid API key (HTTP 401)"), "{}", err);
+    }
+
+    #[tokio::test]
+    async fn test_llm_client_refuses_redirects_and_hides_redirect_body() {
+        let target_hit = Arc::new(Mutex::new(false));
+        let target_hit_clone = target_hit.clone();
+        let target_app = Router::new().route(
+            "/secret",
+            get(move || {
+                let hit = target_hit_clone.clone();
+                async move {
+                    *hit.lock().unwrap() = true;
+                    (
+                        axum::http::StatusCode::UNAUTHORIZED,
+                        "SENSITIVE_INTERNAL_SECRET",
+                    )
+                }
+            })
+            .post(move || async move {
+                (
+                    axum::http::StatusCode::UNAUTHORIZED,
+                    "SENSITIVE_INTERNAL_SECRET",
+                )
+            }),
+        );
+        let target_base = spawn_server(target_app).await;
+        let redirect_url = format!("{target_base}/secret");
+
+        let redirect_url_1 = redirect_url.clone();
+        let redirect_url_2 = redirect_url.clone();
+        let redirector = Router::new()
+            .route(
+                "/models",
+                get(move || {
+                    let loc = redirect_url_1.clone();
+                    async move {
+                        (
+                            axum::http::StatusCode::FOUND,
+                            [(axum::http::header::LOCATION, loc)],
+                            "SENSITIVE_REDIRECT_BODY",
+                        )
+                    }
+                }),
+            )
+            .route(
+                "/chat/completions",
+                post(move || {
+                    let loc = redirect_url_2.clone();
+                    async move {
+                        (
+                            axum::http::StatusCode::TEMPORARY_REDIRECT,
+                            [(axum::http::header::LOCATION, loc)],
+                            "SENSITIVE_REDIRECT_BODY",
+                        )
+                    }
+                }),
+            );
+        let base = spawn_server(redirector).await;
+        let client = LlmClient::new(None);
+
+        let verify_err = client
+            .verify_api_key(&base, Some("sk-test"), Some("test-model"))
+            .await
+            .expect_err("redirect must be rejected");
+        assert!(
+            verify_err.contains("Redirects are not allowed"),
+            "{verify_err}"
+        );
+        assert!(!verify_err.contains("SENSITIVE"));
+        assert!(
+            !*target_hit.lock().unwrap(),
+            "redirect target must never be hit"
+        );
+
+        let chat_err = client
+            .chat_completion(
+                LlmEndpoint {
+                    base_url: &base,
+                    api_key: Some("sk-test"),
+                },
+                &request("test-model"),
+            )
+            .await
+            .expect_err("redirect must be rejected");
+        assert!(!chat_err.to_string().contains("SENSITIVE"));
+    }
+
+    #[tokio::test]
+    async fn test_chat_completion_stream_preserves_multibyte_utf8_split_across_chunks() {
+        let sse_line = "data: {\"id\":\"c\",\"model\":\"m\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"你好世界\"},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n";
+        let bytes = sse_line.as_bytes().to_vec();
+        // Split right inside the 3-byte UTF-8 sequence for '好'
+        let split_idx = sse_line.find('好').unwrap() + 1;
+        let part1 = bytes[..split_idx].to_vec();
+        let part2 = bytes[split_idx..].to_vec();
+
+        let app = Router::new().route(
+            "/chat/completions",
+            post(move || {
+                let p1 = part1.clone();
+                let p2 = part2.clone();
+                async move {
+                    let stream = futures_util::stream::iter(vec![
+                        Ok::<_, std::convert::Infallible>(axum::body::Bytes::from(p1)),
+                        Ok::<_, std::convert::Infallible>(axum::body::Bytes::from(p2)),
+                    ]);
+                    (
+                        [("content-type", "text/event-stream")],
+                        axum::body::Body::from_stream(stream),
+                    )
+                }
+            }),
+        );
+        let base = spawn_server(app).await;
+
+        let result = LlmClient::new(None)
+            .chat_completion_stream(
+                LlmEndpoint {
+                    base_url: &base,
+                    api_key: None,
+                },
+                &request("test-model"),
+                |_| async {},
+            )
+            .await
+            .expect("stream should succeed");
+
+        assert_eq!(result.content, "你好世界");
     }
 }

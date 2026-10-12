@@ -81,7 +81,10 @@ pub async fn execute_tool(
                 let acct = *owner_id;
                 let target_room = if let Some(r) = args.get("room").and_then(|v| v.as_str()) {
                     rooms.resolve_target_room(&acct, Some(r)).await
-                } else if room_id.is_empty() || room_id == "web" || room_id == "web_chat" {
+                } else if matches!(
+                    crate::domain::rooms::RoomTarget::parse(Some(room_id)),
+                    crate::domain::rooms::RoomTarget::UserDefault
+                ) {
                     rooms.resolve_target_room(&acct, None).await
                 } else {
                     room_id.to_string()

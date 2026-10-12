@@ -8,7 +8,7 @@ use super::ReminderService;
 use crate::application::AppError;
 use crate::domain::events::SystemEvent;
 use crate::domain::jobs::{JobStatus, NewJob};
-use crate::domain::reminders::{next_occurrence, Reminder};
+use crate::domain::reminders::{next_occurrence_in_tz, Reminder};
 use crate::infrastructure::postgres::repositories::{self, outbox};
 
 /// Maximum number of due reminders enqueued in one scheduler tick.
@@ -17,24 +17,40 @@ use crate::infrastructure::postgres::repositories::{self, outbox};
 /// memory or connection resources in a single tick; remaining due reminders
 /// are picked up on the next 5-second tick.
 pub const MAX_ENQUEUE_DUE_BATCH: i64 = 100;
+const MAX_ENQUEUE_SCAN_PAGES: i64 = 50;
 
 impl ReminderService {
     /// Enqueues a `reminder.fire` job for every pending reminder due by `now`.
-    /// Idempotent: the dedupe key is `<id>:<trigger_at>` (R19).
+    /// Idempotent: the dedupe key is `<id>:<trigger_at>` (R19). Scans past pages
+    /// of already-enqueued/deferred reminders so they cannot starve later due rows.
     pub async fn enqueue_due(&self, now: DateTime<Utc>) -> Result<usize, AppError> {
-        let due =
-            repositories::reminders::get_due_reminders(&self.pool, now, MAX_ENQUEUE_DUE_BATCH)
-                .await?;
-        let mut enqueued = 0;
-        for r in &due {
-            let job = NewJob::reminder_fire(r.owner_id, r.id, r.trigger_at);
-            if repositories::jobs::enqueue(&self.pool, &job)
-                .await?
-                .is_some()
-            {
-                enqueued += 1;
-            } else {
-                self.fail_if_job_failed(&job, r).await?;
+        let mut enqueued = 0usize;
+        for page in 0..MAX_ENQUEUE_SCAN_PAGES {
+            let offset = page * MAX_ENQUEUE_DUE_BATCH;
+            let due = repositories::reminders::get_due_reminders_page(
+                &self.pool,
+                now,
+                MAX_ENQUEUE_DUE_BATCH,
+                offset,
+            )
+            .await?;
+            let page_len = due.len();
+            for r in &due {
+                let job = NewJob::reminder_fire(r.owner_id, r.id, r.trigger_at);
+                if repositories::jobs::enqueue(&self.pool, &job)
+                    .await?
+                    .is_some()
+                {
+                    enqueued += 1;
+                    if enqueued >= MAX_ENQUEUE_DUE_BATCH as usize {
+                        return Ok(enqueued);
+                    }
+                } else {
+                    self.fail_if_job_failed(&job, r).await?;
+                }
+            }
+            if (page_len as i64) < MAX_ENQUEUE_DUE_BATCH {
+                break;
             }
         }
         Ok(enqueued)
@@ -67,23 +83,42 @@ impl ReminderService {
         Ok(repositories::reminders::find_by_id(&self.pool, id).await?)
     }
 
-    /// The message is out: publish `ReminderTriggered` (before advancing, as
-    /// the polling loop did), then reschedule a recurring reminder or finish
-    /// a one-off one.
+    /// The message is out: reschedule a recurring reminder (in the owner's
+    /// saved timezone) or finish a one-off one, guarded on `status = 'pending'`
+    /// and `trigger_at` so a concurrent cancel or snooze is not clobbered,
+    /// and publish `ReminderTriggered` only when the transition succeeded.
     pub async fn complete_delivery(
         &self,
         reminder: &Reminder,
         now: DateTime<Utc>,
     ) -> Result<(), AppError> {
         let mut tx = self.pool.begin().await?;
-        outbox::publish(&mut tx, &SystemEvent::ReminderTriggered(reminder.clone())).await?;
-        match next_occurrence(reminder.trigger_at, reminder.recurrence, now) {
-            Some(next) => {
-                repositories::reminders::reschedule(&mut *tx, reminder.id, next).await?;
-            }
-            None => {
-                repositories::reminders::mark_triggered(&mut *tx, reminder.id).await?;
-            }
+        let tz = repositories::settings::get(&mut *tx, &reminder.owner_id)
+            .await?
+            .unwrap_or_default()
+            .tz();
+        let transitioned =
+            match next_occurrence_in_tz(reminder.trigger_at, reminder.recurrence, now, tz) {
+                Some(next) => {
+                    repositories::reminders::reschedule_at(
+                        &mut *tx,
+                        reminder.id,
+                        reminder.trigger_at,
+                        next,
+                    )
+                    .await?
+                }
+                None => {
+                    repositories::reminders::mark_triggered_at(
+                        &mut *tx,
+                        reminder.id,
+                        reminder.trigger_at,
+                    )
+                    .await?
+                }
+            };
+        if transitioned {
+            outbox::publish(&mut tx, &SystemEvent::ReminderTriggered(reminder.clone())).await?;
         }
         tx.commit().await?;
         Ok(())
@@ -125,13 +160,18 @@ impl ReminderService {
         trigger_at: DateTime<Utc>,
         now: DateTime<Utc>,
     ) -> Result<(), AppError> {
-        if let Some(next) = next_occurrence(trigger_at, reminder.recurrence, now) {
+        let tz = repositories::settings::get(&self.pool, &reminder.owner_id)
+            .await?
+            .unwrap_or_default()
+            .tz();
+        if let Some(next) = next_occurrence_in_tz(trigger_at, reminder.recurrence, now, tz) {
             tracing::warn!(
                 reminder_id = reminder.id,
                 %next,
                 "Exhausted attempts on current occurrence of recurring reminder; advancing to next scheduled occurrence rather than marking failed"
             );
-            repositories::reminders::reschedule(&self.pool, reminder.id, next).await?;
+            repositories::reminders::reschedule_at(&self.pool, reminder.id, trigger_at, next)
+                .await?;
         } else {
             repositories::reminders::mark_failed_at(&self.pool, reminder.id, trigger_at).await?;
         }
@@ -356,5 +396,30 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(after.status, ReminderStatus::Pending);
+    }
+
+    #[tokio::test]
+    async fn complete_delivery_does_not_clobber_concurrent_cancel() {
+        let (services, owner, daily, now) =
+            services_with_reminder("acct_cancel_race", RecurrencePattern::Daily).await;
+        services.reminders.cancel(&owner, daily.id).await.unwrap();
+
+        services
+            .reminders
+            .complete_delivery(&daily, now + Duration::minutes(2))
+            .await
+            .unwrap();
+
+        let after = services
+            .reminders
+            .find_owned(&owner, daily.id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(after.status, ReminderStatus::Cancelled);
+        let types = repositories::outbox::event_types_for(&services.reminders.pool, &owner)
+            .await
+            .unwrap();
+        assert!(!types.contains(&"ReminderTriggered".to_string()));
     }
 }

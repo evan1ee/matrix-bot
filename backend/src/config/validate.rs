@@ -94,6 +94,16 @@ impl Config {
             .map_err(|e| anyhow::anyhow!("Invalid secret encryption configuration: {e}"))?;
         }
 
+        if is_prod
+            && (self.storage.signing_secret.trim().is_empty()
+                || self.storage.signing_secret == super::storage::DEFAULT_SIGNING_SECRET)
+        {
+            anyhow::bail!(
+                "STORAGE_SIGNING_SECRET is still the default or empty in production. \
+                 Set a unique secret to sign storage download URLs."
+            );
+        }
+
         Ok(())
     }
 }

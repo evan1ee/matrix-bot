@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { History, RefreshCw, X, FileText, Clock, AlertTriangle, CheckCircle2, AlertCircle } from 'lucide-react';
+import { formatDateTimeInZone, useSettings } from '../../core/settings';
 import { WebhookItem, WebhookLogsResponse } from './types';
 
 interface WebhookLogsModalProps {
@@ -19,6 +20,7 @@ export const WebhookLogsModal: React.FC<WebhookLogsModalProps> = ({
   onRefresh,
   onClose,
 }) => {
+  const { timezone } = useSettings();
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -150,7 +152,7 @@ export const WebhookLogsModal: React.FC<WebhookLogsModalProps> = ({
                   </div>
                   <div className="text-[11px] text-neutral-500 dark:text-neutral-400 flex items-center gap-1">
                     <Clock className="w-3 h-3" />
-                    {new Date(item.created_at).toLocaleString()}
+                    {formatDateTimeInZone(item.created_at, timezone)}
                   </div>
                 </div>
 

@@ -100,17 +100,27 @@ pub async fn trigger_briefing(
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    // Attempt delivery to user's direct or default Matrix room if configured
+    // Attempt delivery to user's direct or default Matrix room if configured and authorized.
+    // Never call `join_room_by_id` on an unverified room.
     let client_guard = state.bot_client.read().await;
     if let Some(ref client) = *client_guard {
         if let Some(target_room) = state.services.rooms.default_room(&user.account_id).await {
-            if let Ok(room_id) = <&RoomId>::try_from(target_room.as_str()) {
-                let content =
-                    RoomMessageEventContent::text_html(&payload.plain_text, &payload.html_content);
-                if let Some(room) = client.get_room(room_id) {
-                    let _ = room.send(content).await;
-                } else if let Ok(joined) = client.join_room_by_id(room_id).await {
-                    let _ = joined.send(content).await;
+            if crate::interface::channels::matrix::rooms::is_room_authorized_for_account(
+                &state.services.rooms,
+                Some(client),
+                &user.account_id,
+                &target_room,
+            )
+            .await
+            {
+                if let Ok(room_id) = <&RoomId>::try_from(target_room.as_str()) {
+                    if let Some(room) = client.get_room(room_id) {
+                        let content = RoomMessageEventContent::text_html(
+                            &payload.plain_text,
+                            &payload.html_content,
+                        );
+                        let _ = room.send(content).await;
+                    }
                 }
             }
         }

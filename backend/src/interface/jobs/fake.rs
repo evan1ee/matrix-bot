@@ -16,6 +16,8 @@ use crate::interface::channels::message::{MessageRef, OutgoingMessage, Target};
 pub(crate) struct FakeOutbound {
     /// One flag for every channel: a test scripts "the platform is down".
     pub connected: AtomicBool,
+    /// Optional delivery authorization error returned by `authorize_delivery`.
+    pub auth_error: Mutex<Option<String>>,
     /// Popped per send; empty means `Ok` with the event id `$evt`.
     pub results: Mutex<VecDeque<Result<SentRef, ChannelError>>>,
     pub sent: Mutex<Vec<OutgoingMessage>>,
@@ -84,6 +86,17 @@ impl FakeOutbound {
 impl Outbound for FakeOutbound {
     fn is_connected(&self, _channel: Channel) -> bool {
         self.connected.load(Ordering::SeqCst)
+    }
+
+    async fn authorize_delivery(
+        &self,
+        _owner: &crate::domain::accounts::AccountId,
+        _to: &crate::domain::channels::ConversationAddress,
+    ) -> Result<(), String> {
+        if let Some(reason) = self.auth_error.lock().unwrap().clone() {
+            return Err(reason);
+        }
+        Ok(())
     }
 
     async fn send(&self, message: OutgoingMessage) -> Result<SentRef, ChannelError> {

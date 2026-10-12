@@ -137,34 +137,68 @@ impl RecurringBillPatch {
     }
 }
 
-/// Advances a bill's due date string based on its frequency.
-pub fn advance_due_date(current_due_at: &str, frequency: &str) -> String {
+/// Advances a bill's due date string based on its frequency, anchoring
+/// month-based frequencies (`monthly`, `quarterly`, `semiannually`, `yearly`)
+/// to `due_day` (clamped to the target month's last calendar day) when provided.
+pub fn advance_due_date_with_due_day(
+    current_due_at: &str,
+    frequency: &str,
+    due_day: Option<i32>,
+) -> String {
     let dt = parse_due_at(current_due_at).unwrap_or_else(Utc::now);
+    let freq = frequency.trim().to_ascii_lowercase();
 
-    let next_dt = match frequency.to_lowercase().as_str() {
+    let next_dt = match freq.as_str() {
         "daily" => dt + Duration::days(1),
         "weekly" => dt + Duration::weeks(1),
         "biweekly" => dt + Duration::weeks(2),
-        "monthly" => dt
-            .checked_add_months(Months::new(1))
-            .unwrap_or(dt + Duration::days(30)),
-        "quarterly" => dt
-            .checked_add_months(Months::new(3))
-            .unwrap_or(dt + Duration::days(90)),
-        "semiannually" => dt
-            .checked_add_months(Months::new(6))
-            .unwrap_or(dt + Duration::days(180)),
-        "yearly" => dt
-            .checked_add_months(Months::new(12))
-            .unwrap_or(dt + Duration::days(365)),
-        _ => dt + Duration::days(30),
+        "monthly" => add_months_with_anchor(dt, 1, due_day),
+        "quarterly" => add_months_with_anchor(dt, 3, due_day),
+        "semiannually" => add_months_with_anchor(dt, 6, due_day),
+        "yearly" => add_months_with_anchor(dt, 12, due_day),
+        _ => add_months_with_anchor(dt, 1, due_day),
     };
 
     next_dt.format("%Y-%m-%d %H:%M:%S").to_string()
 }
 
+fn add_months_with_anchor(dt: DateTime<Utc>, months: u32, due_day: Option<i32>) -> DateTime<Utc> {
+    use chrono::Datelike;
+    let stepped = dt
+        .checked_add_months(Months::new(months))
+        .unwrap_or_else(|| dt + Duration::days(i64::from(months) * 30));
+    let Some(anchor) = due_day.filter(|&d| (1..=31).contains(&d)) else {
+        return stepped;
+    };
+    let year = stepped.year();
+    let month = stepped.month();
+    let last_day = last_day_of_month(year, month);
+    let target_day = (anchor as u32).min(last_day);
+    stepped.with_day(target_day).unwrap_or(stepped)
+}
+
+fn last_day_of_month(year: i32, month: u32) -> u32 {
+    let (next_year, next_month) = if month == 12 {
+        (year + 1, 1)
+    } else {
+        (year, month + 1)
+    };
+    chrono::NaiveDate::from_ymd_opt(next_year, next_month, 1)
+        .and_then(|d| d.pred_opt())
+        .map(|d| chrono::Datelike::day(&d))
+        .unwrap_or(28)
+}
+
+/// Advances a bill's due date string based on its frequency.
+pub fn advance_due_date(current_due_at: &str, frequency: &str) -> String {
+    advance_due_date_with_due_day(current_due_at, frequency, None)
+}
+
 /// Parses a stored `next_due_at`, which may be one of several text formats.
 pub fn parse_due_at(raw: &str) -> Option<DateTime<Utc>> {
+    if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(raw.trim()) {
+        return Some(dt.with_timezone(&Utc));
+    }
     NaiveDateTime::parse_from_str(raw, "%Y-%m-%d %H:%M:%S")
         .or_else(|_| NaiveDateTime::parse_from_str(raw, "%Y-%m-%dT%H:%M:%S"))
         .or_else(|_| NaiveDateTime::parse_from_str(&format!("{raw} 00:00:00"), "%Y-%m-%d %H:%M:%S"))
@@ -207,6 +241,12 @@ mod tests {
         assert_eq!(advance_due_date(base, "biweekly"), "2026-01-29 10:00:00");
         assert_eq!(advance_due_date(base, "monthly"), "2026-02-15 10:00:00");
         assert_eq!(advance_due_date(base, "yearly"), "2027-01-15 10:00:00");
+
+        // M1: A bill with due_day=31 clamped to Feb 28 advances to Mar 31, not Mar 28
+        let feb = advance_due_date_with_due_day("2026-01-31 10:00:00", "monthly", Some(31));
+        assert_eq!(feb, "2026-02-28 10:00:00");
+        let mar = advance_due_date_with_due_day(&feb, "monthly", Some(31));
+        assert_eq!(mar, "2026-03-31 10:00:00");
     }
 
     #[test]

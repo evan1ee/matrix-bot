@@ -46,7 +46,8 @@ const KNOWN_CRYPTO: &[&str] = &[
 
 pub fn is_crypto_symbol(symbol: &str) -> bool {
     let clean = symbol.trim().to_uppercase();
-    KNOWN_CRYPTO.contains(&clean.as_str()) || clean.ends_with("-USD") || clean.ends_with("-USDT")
+    let base = clean.split('-').next().unwrap_or(&clean);
+    KNOWN_CRYPTO.contains(&base) || clean.ends_with("-USD") || clean.ends_with("-USDT")
 }
 
 #[derive(Deserialize)]
@@ -74,6 +75,18 @@ struct YahooChartMeta {
     regular_market_change_percent: Option<f64>,
 }
 
+fn normalize_quote_currency(price: f64, raw_currency: &str) -> (f64, String) {
+    match raw_currency.trim() {
+        // Pence sterling (1/100 GBP)
+        "GBp" | "GBX" => (price / 100.0, "GBP".to_string()),
+        // South African cents (1/100 ZAR)
+        "ZAc" | "ZAC" => (price / 100.0, "ZAR".to_string()),
+        // Israeli agorot (1/100 ILS)
+        "ILA" => (price / 100.0, "ILS".to_string()),
+        other => (price, other.to_ascii_uppercase()),
+    }
+}
+
 pub fn parse_yahoo_chart_json(body: &str) -> Result<FetchedPrice, String> {
     let resp: YahooChartResponse = serde_json::from_str(body)
         .map_err(|e| format!("Failed to parse Yahoo Finance response: {}", e))?;
@@ -96,11 +109,12 @@ pub fn parse_yahoo_chart_json(body: &str) -> Result<FetchedPrice, String> {
         })
         .ok_or_else(|| "Empty result list from Yahoo Finance".to_string())?;
 
-    let price = first
+    let raw_price = first
         .meta
         .regular_market_price
         .ok_or_else(|| "No regularMarketPrice in quote".to_string())?;
-    let currency = first.meta.currency.unwrap_or_else(|| "USD".to_string());
+    let raw_currency = first.meta.currency.unwrap_or_else(|| "USD".to_string());
+    let (price, currency) = normalize_quote_currency(raw_price, &raw_currency);
 
     Ok(FetchedPrice {
         price,
@@ -142,8 +156,16 @@ pub async fn fetch_latest_price(symbol: &str) -> Result<FetchedPrice, String> {
     let client = get_client();
 
     if is_crypto_symbol(&clean_sym) {
-        let base_sym = clean_sym.split('-').next().unwrap_or(&clean_sym);
-        let cb_url = format!("https://api.coinbase.com/v2/prices/{}-USD/spot", base_sym);
+        let (base_sym, quote_cur) = clean_sym.split_once('-').unwrap_or((&clean_sym, "USD"));
+        let cb_quote = if quote_cur == "USDT" {
+            "USD"
+        } else {
+            quote_cur
+        };
+        let cb_url = format!(
+            "https://api.coinbase.com/v2/prices/{}-{}/spot",
+            base_sym, cb_quote
+        );
 
         if let Ok(res) = client.get(&cb_url).send().await {
             if res.status().is_success() {
@@ -375,7 +397,29 @@ mod tests {
         assert!(is_crypto_symbol("ETH"));
         assert!(is_crypto_symbol("SOL"));
         assert!(is_crypto_symbol("BTC-USD"));
+        assert!(is_crypto_symbol("BTC-EUR"));
+        assert!(is_crypto_symbol("ETH-GBP"));
         assert!(!is_crypto_symbol("AAPL"));
         assert!(!is_crypto_symbol("MSFT"));
+    }
+
+    #[test]
+    fn test_parse_yahoo_chart_json_normalizes_sub_units() {
+        let json = r#"{
+            "chart": {
+                "result": [{
+                    "meta": {
+                        "currency": "GBp",
+                        "symbol": "VOD.L",
+                        "regularMarketPrice": 7250.0,
+                        "regularMarketChangePercent": 0.5
+                    }
+                }],
+                "error": null
+            }
+        }"#;
+        let parsed = parse_yahoo_chart_json(json).unwrap();
+        assert!((parsed.price - 72.50).abs() < 1e-9);
+        assert_eq!(parsed.currency, "GBP");
     }
 }

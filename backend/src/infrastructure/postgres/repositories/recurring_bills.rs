@@ -153,6 +153,33 @@ pub async fn find_owned<'e>(
     Ok(row.map(Into::into))
 }
 
+pub async fn find_owned_for_update<'e>(
+    conn: impl PgExecutor<'e>,
+    owner_id: &AccountId,
+    id: i64,
+) -> Result<Option<RecurringBill>, sqlx::Error> {
+    let row = sqlx::query_as!(
+        RecurringBillRow,
+        r#"
+        SELECT
+            id, room_id, owner_id, sender_name, name, category,
+            amount_minor, currency, currency_exponent, frequency,
+            due_day, next_due_at, total_installments, paid_installments,
+            auto_pay, status, notes, remind_before_minutes, remind_room_id,
+            created_at, updated_at
+        FROM recurring_bills
+        WHERE id = $1 AND owner_id = $2
+        FOR UPDATE
+        "#,
+        id,
+        owner_id.as_uuid()
+    )
+    .fetch_optional(conn)
+    .await?;
+
+    Ok(row.map(Into::into))
+}
+
 pub async fn list_by_owner<'e>(
     conn: impl PgExecutor<'e>,
     owner_id: &AccountId,
@@ -194,6 +221,10 @@ pub async fn update<'e>(
     let remind_val = patch.remind_before_minutes.flatten();
     let has_remind_room = patch.remind_room_id.is_some();
     let remind_room_val = patch.remind_room_id.as_deref();
+    let currency_exp = patch
+        .currency
+        .as_deref()
+        .map(|c| crate::domain::finance::money::exponent_for(c) as i64);
 
     let row = sqlx::query_as!(
         RecurringBillRow,
@@ -204,6 +235,7 @@ pub async fn update<'e>(
             category = COALESCE($2, category),
             amount_minor = COALESCE($3, amount_minor),
             currency = COALESCE($4, currency),
+            currency_exponent = COALESCE($22, currency_exponent),
             frequency = COALESCE($5, frequency),
             due_day = CASE WHEN $6 THEN $7 ELSE due_day END,
             next_due_at = COALESCE($8, next_due_at),
@@ -243,7 +275,8 @@ pub async fn update<'e>(
         has_remind_room,
         remind_room_val,
         id,
-        owner_id.as_uuid()
+        owner_id.as_uuid(),
+        currency_exp
     )
     .fetch_optional(conn)
     .await?;

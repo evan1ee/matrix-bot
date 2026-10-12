@@ -1,7 +1,7 @@
 use ogg::PacketReader;
 use opus_decoder::OpusDecoder;
 use std::io::Cursor;
-use symphonia::core::audio::{AudioBufferRef, Signal};
+use symphonia::core::audio::SampleBuffer;
 use symphonia::core::codecs::{DecoderOptions, CODEC_TYPE_NULL};
 use symphonia::core::errors::Error as SymphoniaError;
 use symphonia::core::formats::FormatOptions;
@@ -105,6 +105,14 @@ pub fn decode_ogg_opus(bytes: &[u8]) -> Result<Vec<f32>, VoiceError> {
                     } else {
                         match decoder.decode_float(&packet.data, &mut pcm_buf, false) {
                             Ok(samples_decoded) => {
+                                if all_samples.len().saturating_add(samples_decoded)
+                                    > MAX_AUDIO_SAMPLES
+                                {
+                                    return Err(VoiceError::AudioDecode(format!(
+                                        "Decoded audio exceeds maximum allowed length of {} samples (5 minutes)",
+                                        MAX_AUDIO_SAMPLES
+                                    )));
+                                }
                                 all_samples.extend_from_slice(&pcm_buf[..samples_decoded]);
                             }
                             Err(err) => {
@@ -165,13 +173,20 @@ pub fn decode_generic_audio(bytes: &[u8]) -> Result<Vec<f32>, VoiceError> {
             sample_rate, MIN_SAMPLE_RATE, MAX_SAMPLE_RATE
         )));
     }
-    let channels = track.codec_params.channels.map(|c| c.count()).unwrap_or(1);
+    let channels = track
+        .codec_params
+        .channels
+        .map(|c| c.count())
+        .unwrap_or(1)
+        .max(1);
 
     let dec_opts: DecoderOptions = Default::default();
     let mut decoder = symphonia::default::get_codecs()
         .make(&track.codec_params, &dec_opts)
         .map_err(|e| VoiceError::AudioDecode(format!("Codec decoder init error: {:?}", e)))?;
 
+    let max_raw_samples =
+        ((MAX_AUDIO_SAMPLES as u64 * sample_rate as u64) / TARGET_SAMPLE_RATE as u64) as usize;
     let mut raw_mono_samples: Vec<f32> = Vec::new();
 
     while let Ok(packet) = format.next_packet() {
@@ -180,42 +195,25 @@ pub fn decode_generic_audio(bytes: &[u8]) -> Result<Vec<f32>, VoiceError> {
         }
 
         match decoder.decode(&packet) {
-            Ok(decoded) => match decoded {
-                AudioBufferRef::F32(buf) => {
-                    for i in 0..buf.frames() {
-                        let mut sum = 0.0;
-                        for ch in 0..channels {
-                            sum += buf.chan(ch)[i];
-                        }
-                        raw_mono_samples.push(sum / channels as f32);
+            Ok(decoded) => {
+                let frames = decoded.frames();
+                if frames > 0 {
+                    let spec = *decoded.spec();
+                    let actual_channels = spec.channels.count().max(channels).max(1);
+                    let mut sample_buf = SampleBuffer::<f32>::new(decoded.capacity() as u64, spec);
+                    sample_buf.copy_interleaved_ref(decoded);
+                    for frame in sample_buf.samples().chunks_exact(actual_channels) {
+                        let sum: f32 = frame.iter().copied().sum();
+                        raw_mono_samples.push(sum / actual_channels as f32);
                     }
                 }
-                AudioBufferRef::S16(buf) => {
-                    for i in 0..buf.frames() {
-                        let mut sum = 0.0;
-                        for ch in 0..channels {
-                            sum += buf.chan(ch)[i] as f32 / 32768.0;
-                        }
-                        raw_mono_samples.push(sum / channels as f32);
-                    }
-                }
-                AudioBufferRef::U8(buf) => {
-                    for i in 0..buf.frames() {
-                        let mut sum = 0.0;
-                        for ch in 0..channels {
-                            sum += (buf.chan(ch)[i] as f32 - 128.0) / 128.0;
-                        }
-                        raw_mono_samples.push(sum / channels as f32);
-                    }
-                }
-                _ => {}
-            },
+            }
             Err(SymphoniaError::IoError(_)) => break,
             Err(SymphoniaError::DecodeError(_)) => continue,
             Err(e) => return Err(VoiceError::AudioDecode(format!("Decoder error: {:?}", e))),
         }
 
-        if raw_mono_samples.len() > MAX_AUDIO_SAMPLES * 2 {
+        if raw_mono_samples.len() > max_raw_samples {
             return Err(VoiceError::AudioDecode(
                 "Audio input exceeds maximum allowed sample length".to_string(),
             ));
@@ -242,15 +240,12 @@ pub fn resample_linear(samples: &[f32], from_rate: u32, to_rate: u32) -> Vec<f32
         return samples.to_vec();
     }
     let ratio = to_rate as f64 / from_rate as f64;
-    let target_len = (samples.len() as f64 * ratio).round() as usize;
-    if target_len > MAX_AUDIO_SAMPLES {
-        return samples.to_vec();
-    }
+    let target_len = ((samples.len() as f64 * ratio).round() as usize).min(MAX_AUDIO_SAMPLES + 1);
     let mut resampled = Vec::with_capacity(target_len);
 
     for i in 0..target_len {
         let src_idx = i as f64 / ratio;
-        let idx0 = src_idx.floor() as usize;
+        let idx0 = (src_idx.floor() as usize).min(samples.len() - 1);
         let idx1 = (idx0 + 1).min(samples.len() - 1);
         let frac = (src_idx - idx0 as f64) as f32;
         let s0 = samples[idx0];
@@ -340,14 +335,93 @@ mod tests {
             decode_audio_to_16k_mono(&wav_8khz).expect("8kHz WAV should decode and resample");
         assert_eq!(samples.len(), 16_000);
     }
+
+    #[test]
+    fn test_decode_wav_24bit_and_32bit_pcm() {
+        let wav_24 = test_audio::silent_wav_bits(16_000, 1.0, 24);
+        let samples_24 =
+            decode_audio_to_16k_mono(&wav_24).expect("24-bit PCM WAV must decode to non-empty f32");
+        assert_eq!(samples_24.len(), 16_000);
+
+        let wav_32 = test_audio::silent_wav_bits(16_000, 1.0, 32);
+        let samples_32 =
+            decode_audio_to_16k_mono(&wav_32).expect("32-bit PCM WAV must decode to non-empty f32");
+        assert_eq!(samples_32.len(), 16_000);
+    }
+
+    #[test]
+    fn test_long_8khz_resample_does_not_return_unresampled_samples() {
+        // 2,500,000 samples at 8kHz = 312.5s (> 300s max); resample_linear must cap at
+        // MAX_AUDIO_SAMPLES + 1 rather than returning 2,500,000 un-resampled 8kHz samples.
+        let samples = vec![0.0f32; 2_500_000];
+        let resampled = resample_linear(&samples, 8_000, 16_000);
+        assert_eq!(resampled.len(), MAX_AUDIO_SAMPLES + 1);
+    }
+
+    #[test]
+    fn test_decode_ogg_opus_exceeding_max_samples_is_rejected() {
+        use ogg::writing::{PacketWriteEndInfo, PacketWriter};
+        use opus::{Application, Channels, Encoder};
+
+        // Encode a single 20ms silent Opus frame at 16kHz (320 samples) and repeat it
+        // 15,005 times (4,801,600 samples > MAX_AUDIO_SAMPLES = 4,800,000).
+        let mut encoder = Encoder::new(16_000, Channels::Mono, Application::Voip).unwrap();
+        let mut pkt = vec![0u8; 256];
+        let len = encoder.encode_float(&[0.0f32; 320], &mut pkt).unwrap();
+        pkt.truncate(len);
+
+        let serial = 42u32;
+        let mut ogg_bytes = Vec::new();
+        {
+            let mut writer = PacketWriter::new(std::io::Cursor::new(&mut ogg_bytes));
+            let mut head = Vec::with_capacity(19);
+            head.extend_from_slice(b"OpusHead");
+            head.push(1);
+            head.push(1);
+            head.extend_from_slice(&0u16.to_le_bytes());
+            head.extend_from_slice(&16_000u32.to_le_bytes());
+            head.extend_from_slice(&0i16.to_le_bytes());
+            head.push(0);
+            writer
+                .write_packet(head, serial, PacketWriteEndInfo::EndPage, 0)
+                .unwrap();
+
+            let mut tags = Vec::new();
+            tags.extend_from_slice(b"OpusTags");
+            tags.extend_from_slice(&4u32.to_le_bytes());
+            tags.extend_from_slice(b"test");
+            tags.extend_from_slice(&0u32.to_le_bytes());
+            writer
+                .write_packet(tags, serial, PacketWriteEndInfo::EndPage, 0)
+                .unwrap();
+
+            let frame_count = 15_005u64;
+            for i in 0..frame_count {
+                let end_info = if i + 1 == frame_count {
+                    PacketWriteEndInfo::EndStream
+                } else {
+                    PacketWriteEndInfo::NormalPacket
+                };
+                writer
+                    .write_packet(pkt.clone(), serial, end_info, (i + 1) * 960)
+                    .unwrap();
+            }
+        }
+
+        let err = decode_ogg_opus(&ogg_bytes).expect_err("over-length Ogg Opus stream must error");
+        assert!(
+            err.to_string().contains("maximum allowed length"),
+            "unexpected error: {err}"
+        );
+    }
 }
 
 #[cfg(test)]
 pub mod test_audio {
-    /// A mono 16-bit PCM WAV with arbitrary sample rate: enough for the decoder to
-    /// accept and for SenseVoice to run over, with no audio fixture on disk.
-    pub fn silent_wav(sample_rate: u32, seconds: f32) -> Vec<u8> {
-        let data_len = (sample_rate as f32 * seconds) as u32 * 2;
+    /// A mono PCM WAV with arbitrary sample rate and bit depth.
+    pub fn silent_wav_bits(sample_rate: u32, seconds: f32, bits_per_sample: u16) -> Vec<u8> {
+        let bytes_per_sample = (bits_per_sample / 8) as u32;
+        let data_len = (sample_rate as f32 * seconds) as u32 * bytes_per_sample;
         let mut wav = Vec::with_capacity(44 + data_len as usize);
         wav.extend_from_slice(b"RIFF");
         wav.extend_from_slice(&(36 + data_len).to_le_bytes());
@@ -356,13 +430,19 @@ pub mod test_audio {
         wav.extend_from_slice(&1u16.to_le_bytes()); // PCM
         wav.extend_from_slice(&1u16.to_le_bytes()); // mono
         wav.extend_from_slice(&sample_rate.to_le_bytes());
-        wav.extend_from_slice(&(sample_rate * 2).to_le_bytes()); // byte rate
-        wav.extend_from_slice(&2u16.to_le_bytes()); // block align
-        wav.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
+        wav.extend_from_slice(&(sample_rate * bytes_per_sample).to_le_bytes()); // byte rate
+        wav.extend_from_slice(&(bytes_per_sample as u16).to_le_bytes()); // block align
+        wav.extend_from_slice(&bits_per_sample.to_le_bytes()); // bits per sample
         wav.extend_from_slice(b"data");
         wav.extend_from_slice(&data_len.to_le_bytes());
         wav.resize(44 + data_len as usize, 0);
         wav
+    }
+
+    /// A mono 16-bit PCM WAV with arbitrary sample rate: enough for the decoder to
+    /// accept and for SenseVoice to run over, with no audio fixture on disk.
+    pub fn silent_wav(sample_rate: u32, seconds: f32) -> Vec<u8> {
+        silent_wav_bits(sample_rate, seconds, 16)
     }
 
     /// A mono 16-bit PCM WAV of silence at 16 kHz.

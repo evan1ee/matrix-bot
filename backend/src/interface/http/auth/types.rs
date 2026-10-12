@@ -189,11 +189,13 @@ pub struct ApiState {
     /// `POST /api/webhooks/telegram` a 404.
     pub telegram: Option<crate::interface::channels::telegram::ingress::TelegramIngress>,
     pub storage_signing_secret: String,
+    pub outbound: Option<std::sync::Weak<crate::interface::channels::registry::ChannelRegistry>>,
 }
 
 /// A WebAuthn ceremony in flight.
 pub enum Ceremony {
-    /// Registering the first passkey for an account that does not exist yet.
+    /// Registering the first passkey for an account that does not exist yet,
+    /// or adding a passkey to an existing account.
     ///
     /// The account id is minted at `start` because it *is* the WebAuthn user
     /// handle and has to be inside the challenge, but the row is not written
@@ -201,6 +203,7 @@ pub enum Ceremony {
     Registration {
         account_id: crate::domain::accounts::AccountId,
         display_name: String,
+        restricted_until: Option<chrono::DateTime<chrono::Utc>>,
         state: webauthn_rs::prelude::PasskeyRegistration,
     },
     /// Registering a brand-new account's first passkey from a link token
@@ -272,6 +275,7 @@ impl ApiState {
             ai: crate::config::AiEnvConfig::default(),
             telegram: None,
             storage_signing_secret: "matrix-bot-default-signing-secret".to_string(),
+            outbound: None,
         }
     }
 
@@ -344,6 +348,7 @@ impl ApiState {
             // start_api_server hands the adapter's ingress in after from_config.
             telegram: None,
             storage_signing_secret: config.storage.signing_secret.clone(),
+            outbound: handles.outbound,
         })
     }
 

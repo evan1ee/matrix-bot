@@ -144,11 +144,11 @@ pub struct ToggleHabitRequest {
     pub note: Option<String>,
 }
 
-fn get_today_string(override_today: Option<&str>) -> String {
+fn get_today_string(override_today: Option<&str>, tz: chrono_tz::Tz) -> String {
     override_today.map(|s| s.to_string()).unwrap_or_else(|| {
         chrono::Utc::now()
-            .naive_utc()
-            .date()
+            .with_timezone(&tz)
+            .date_naive()
             .format("%Y-%m-%d")
             .to_string()
     })
@@ -170,7 +170,12 @@ pub async fn list_habits(
     State(state): State<ApiState>,
     Query(params): Query<ListHabitsQuery>,
 ) -> Result<Json<Vec<HabitWithStatus>>, ApiError> {
-    let today = get_today_string(params.today.as_deref());
+    let settings = state
+        .services
+        .settings
+        .get_or_default(&user.account_id)
+        .await;
+    let today = get_today_string(params.today.as_deref(), settings.tz());
     let items = state
         .services
         .habits
@@ -297,7 +302,12 @@ pub async fn toggle_habit_log(
     Path(id): Path<i64>,
     Json(payload): Json<ToggleHabitRequest>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let log_date = get_today_string(payload.date.as_deref());
+    let settings = state
+        .services
+        .settings
+        .get_or_default(&user.account_id)
+        .await;
+    let log_date = get_today_string(payload.date.as_deref(), settings.tz());
 
     let new_completed = state
         .services
@@ -348,7 +358,12 @@ pub async fn get_stats(
     State(state): State<ApiState>,
     Query(params): Query<ListHabitsQuery>,
 ) -> Result<Json<HabitStatsSummary>, ApiError> {
-    let today = get_today_string(params.today.as_deref());
+    let settings = state
+        .services
+        .settings
+        .get_or_default(&user.account_id)
+        .await;
+    let today = get_today_string(params.today.as_deref(), settings.tz());
     let stats = state
         .services
         .habits

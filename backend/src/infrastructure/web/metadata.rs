@@ -2,7 +2,7 @@ use reqwest::Client;
 use std::time::Duration;
 use url::Url;
 
-use super::ssrf::is_safe_target_url;
+use super::ssrf::resolve_safe_target_url;
 use crate::domain::bookmarks::html::{
     clean_text, extract_domain, extract_youtube_video_id, parse_html_metadata, ExtractedMetadata,
 };
@@ -96,19 +96,24 @@ pub async fn fetch_and_extract_metadata(
         }
     }
 
-    // SSRF protection: reject loopback, link-local, private IP ranges, and internal domains
-    if !is_safe_target_url(target_url).await {
+    // SSRF protection: reject loopback, link-local, private IP ranges, and internal domains,
+    // and pin the resolved socket addresses so DNS cannot rebind between check and connect.
+    let Some((resolved_host, resolved_addrs)) = resolve_safe_target_url(target_url).await else {
         tracing::warn!("Blocked SSRF request to unsafe target URL: {}", target_url);
         return meta;
-    }
+    };
 
-    // Attempt HTTP GET with a 5s timeout and strict redirect refusal to avoid SSRF bypasses
-    let fetch_client = reqwest::Client::builder()
+    // Attempt HTTP GET with a 5s timeout, pinned DNS resolution, and strict redirect refusal
+    let mut builder = reqwest::Client::builder()
         .use_rustls_tls()
         .redirect(reqwest::redirect::Policy::none())
-        .timeout(Duration::from_secs(5))
-        .build()
-        .unwrap_or_else(|_| http.clone());
+        .timeout(Duration::from_secs(5));
+    if resolved_host.parse::<std::net::IpAddr>().is_err() && !resolved_host.starts_with('[') {
+        builder = builder.resolve_to_addrs(&resolved_host, &resolved_addrs);
+    }
+    let Ok(fetch_client) = builder.build() else {
+        return meta;
+    };
 
     let resp_res = fetch_client
         .get(target_url)

@@ -78,6 +78,16 @@ pub(crate) fn to_inbound(
     (message, text)
 }
 
+/// Returns true when the Matrix message event is an edit (`m.replace`) of an earlier message.
+pub(crate) fn is_edit_replacement<C>(
+    relates_to: &Option<matrix_sdk::ruma::events::room::message::Relation<C>>,
+) -> bool {
+    matches!(
+        relates_to,
+        Some(matrix_sdk::ruma::events::room::message::Relation::Replacement(_))
+    )
+}
+
 /// Parses a text message and hands it to the shared pipeline, then shows the
 /// reply in the room: over a stage indicator for an AI turn, else as a plain
 /// reply.
@@ -92,6 +102,9 @@ pub async fn handle_text(
     db: &Database,
     services: &AppServices,
 ) {
+    if is_edit_replacement(&ev.content.relates_to) {
+        return;
+    }
     let MessageType::Text(ref text_content) = ev.content.msgtype else {
         return;
     };
@@ -343,5 +356,32 @@ mod tests {
     #[test]
     fn a_sender_that_is_no_mxid_is_refused() {
         assert!(matrix_sender("not-an-mxid").is_err());
+    }
+
+    #[test]
+    fn edit_replacement_relation_is_detected() {
+        let ev = event();
+        assert!(!is_edit_replacement(&ev.content.relates_to));
+
+        let edit_json = serde_json::json!({
+            "type": "m.room.message",
+            "event_id": "$edit1:example.org",
+            "sender": "@alice:example.org",
+            "origin_server_ts": 1700000000000u64,
+            "content": {
+                "msgtype": "m.text",
+                "body": "* !todo add hacked",
+                "m.new_content": {
+                    "msgtype": "m.text",
+                    "body": "!todo add hacked"
+                },
+                "m.relates_to": {
+                    "rel_type": "m.replace",
+                    "event_id": "$ev1:example.org"
+                }
+            }
+        });
+        let edit_ev: OriginalSyncRoomMessageEvent = serde_json::from_value(edit_json).unwrap();
+        assert!(is_edit_replacement(&edit_ev.content.relates_to));
     }
 }

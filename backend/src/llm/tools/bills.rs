@@ -32,21 +32,29 @@ pub async fn execute_tool(
             async {
                 let name_val = args
                     .get("name")
+                    .or_else(|| args.get("title"))
                     .and_then(|v| v.as_str())
-                    .ok_or("Field 'name' is required")?;
-                let amount_minor = if let Some(num) = args.get("amount").and_then(|v| v.as_f64()) {
-                    (num * 100.0).round() as i64
+                    .ok_or("Field 'name' (or 'title') is required")?;
+                let amount_str = if let Some(num) = args.get("amount").and_then(|v| v.as_f64()) {
+                    crate::domain::finance::money::format_decimal_f64(num)
+                        .map_err(|e| e.to_string())?
                 } else if let Some(s) = args.get("amount").and_then(|v| v.as_str()) {
-                    let f: f64 = s.parse().map_err(|_| "Invalid amount format")?;
-                    (f * 100.0).round() as i64
+                    s.to_string()
                 } else {
                     return Err("Field 'amount' is required".to_string());
                 };
-                let currency = args
+                let acct = *owner_id;
+                let settings = services.settings.get_or_default(&acct).await;
+                let raw_currency = args
                     .get("currency")
                     .and_then(|v| v.as_str())
-                    .unwrap_or("USD")
-                    .to_uppercase();
+                    .unwrap_or(&settings.currency);
+                let currency = crate::domain::finance::money::normalise_currency(raw_currency)
+                    .map_err(|e| e.to_string())?;
+                let exponent = crate::domain::finance::money::exponent_for(&currency);
+                let amount_minor =
+                    crate::domain::finance::money::parse_amount(&amount_str, exponent)
+                        .map_err(|e| e.to_string())?;
                 let category = args
                     .get("category")
                     .and_then(|v| v.as_str())
@@ -71,12 +79,17 @@ pub async fn execute_tool(
                     .and_then(|v| v.as_str())
                     .map(|s| s.to_string());
 
-                let acct = *owner_id;
-                let settings = services.settings.get_or_default(&acct).await;
-                let today = Utc::now()
-                    .with_timezone(&settings.tz())
-                    .format("%Y-%m-%d")
-                    .to_string();
+                let next_due_at = args
+                    .get("next_due_at")
+                    .or_else(|| args.get("due_date"))
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| {
+                        Utc::now()
+                            .with_timezone(&settings.tz())
+                            .format("%Y-%m-%d")
+                            .to_string()
+                    });
 
                 let (bill, _) = services
                     .recurring_bills
@@ -89,10 +102,10 @@ pub async fn execute_tool(
                             category: category.to_string(),
                             amount_minor,
                             currency,
-                            currency_exponent: 2,
+                            currency_exponent: i64::from(exponent),
                             frequency: frequency.to_string(),
                             due_day: Some(due_day),
-                            next_due_at: today,
+                            next_due_at,
                             total_installments: None,
                             auto_pay,
                             notes,

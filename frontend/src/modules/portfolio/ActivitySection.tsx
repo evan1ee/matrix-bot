@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { fetchApi } from '../../core/apiClient';
+import { formatInZone, useSettings } from '../../core/settings';
 import { PortfolioAuditEntry, AuditVerificationResult } from './types';
 import {
   History,
@@ -31,10 +32,14 @@ function formatQuantity(minor: number): string {
   return `${whole}.${fracStr}`;
 }
 
-function formatAmount(minor: number, exponent: number): string {
+export function formatAmount(minor: number, exponent: number): string {
   const scale = Math.pow(10, exponent);
   const isNegative = minor < 0;
   const absMinor = Math.abs(minor);
+  if (exponent <= 0) {
+    const formatted = Math.round(absMinor).toLocaleString();
+    return isNegative ? `-${formatted}` : formatted;
+  }
   const whole = Math.floor(absMinor / scale);
   const frac = (absMinor % scale).toString().padStart(exponent, '0');
   const formatted = `${whole.toLocaleString()}.${frac}`;
@@ -47,25 +52,23 @@ function formatSignedAmount(minor: number, exponent: number): string {
   return `${sign}${formatAmount(minor, exponent)}`;
 }
 
-function formatDate(iso: string | null | undefined): string {
+function formatDate(iso: string | null | undefined, timezone: string): string {
   if (!iso) return '—';
-  try {
-    const d = new Date(iso);
-    return d.toLocaleString(undefined, {
+  return (
+    formatInZone(iso, timezone, {
       month: 'short',
       day: 'numeric',
       year: 'numeric',
       hour: '2-digit',
       minute: '2-digit',
-    });
-  } catch {
-    return iso;
-  }
+    }) || iso
+  );
 }
 
 type FilterType = 'all' | 'buy' | 'sell' | 'cash' | 'record';
 
 export const ActivitySection: React.FC<ActivitySectionProps> = () => {
+  const { timezone } = useSettings();
   const [activeFilter, setActiveFilter] = useState<FilterType>('all');
   const [verificationResult, setVerificationResult] = useState<AuditVerificationResult | null>(null);
 
@@ -349,7 +352,7 @@ export const ActivitySection: React.FC<ActivitySectionProps> = () => {
 
                   {/* Timestamp */}
                   <td className="py-2.5 pl-3 text-right align-middle text-neutral-400 whitespace-nowrap text-[11px]">
-                    {formatDate(entry.created_at)}
+                    {formatDate(entry.created_at, timezone)}
                   </td>
                 </tr>
               ))}

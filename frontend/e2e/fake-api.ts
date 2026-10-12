@@ -795,7 +795,8 @@ export class FakeApi {
       stay_duration_days: partial.stay_duration_days ?? duration,
       spend_amount_minor: partial.spend_amount_minor ?? 0,
       spend_currency: partial.spend_currency ?? 'USD',
-      spend_currency_exponent: partial.spend_currency_exponent ?? 2,
+      spend_currency_exponent:
+        partial.spend_currency_exponent ?? exponentFor(partial.spend_currency ?? 'USD'),
       rating: partial.rating ?? 5,
       category: partial.category ?? 'sightseeing',
       note: partial.note ?? null,
@@ -928,7 +929,7 @@ export class FakeApi {
       category: 'subscription',
       amount_minor: 1599,
       currency: 'USD',
-      currency_exponent: 2,
+      currency_exponent: exponentFor(partial.currency ?? 'USD'),
       frequency: 'monthly',
       due_day: 15,
       next_due_at: new Date(Date.now() + 86400000 * 7).toISOString(),
@@ -2487,12 +2488,26 @@ export class FakeApi {
     if (path === '/footprints/stats' && method === 'GET') {
       const countries = new Set(this.footprints.map((f) => f.country).filter(Boolean));
       const days = this.footprints.reduce((sum, f) => sum + f.stay_duration_days, 0);
-      const spendMinor = this.footprints.reduce((sum, f) => sum + f.spend_amount_minor, 0);
+      const byCurr = new Map<string, { currency: string; currency_exponent: number; total_spend_minor: number }>();
+      for (const f of this.footprints) {
+        if (f.spend_amount_minor > 0) {
+          const cur = byCurr.get(f.spend_currency);
+          if (cur) {
+            cur.total_spend_minor += f.spend_amount_minor;
+          } else {
+            byCurr.set(f.spend_currency, {
+              currency: f.spend_currency,
+              currency_exponent: f.spend_currency_exponent,
+              total_spend_minor: f.spend_amount_minor,
+            });
+          }
+        }
+      }
       return json(route, 200, {
         total_places: this.footprints.length,
         total_countries: countries.size,
         total_days_traveled: days,
-        spend_by_currency: spendMinor > 0 ? [{ currency: 'USD', currency_exponent: 2, total_spend_minor: spendMinor }] : [],
+        spend_by_currency: Array.from(byCurr.values()),
       });
     }
     if (path.startsWith('/footprints/geocode') && method === 'GET') {
@@ -2516,6 +2531,8 @@ export class FakeApi {
     if (path === '/footprints' && method === 'POST') {
       const title = String(body?.title ?? '').trim();
       if (!title) return json(route, 400, { error: 'Title required', code: 400 });
+      const spendCurrency = String(body?.spend_currency ?? 'USD').toUpperCase();
+      const exp = exponentFor(spendCurrency);
       const fp = this.seedFootprint({
         title,
         latitude: body?.latitude ?? 0,
@@ -2525,8 +2542,11 @@ export class FakeApi {
         address: body?.address ?? null,
         arrival_date: body?.arrival_date ?? '2026-06-01',
         departure_date: body?.departure_date ?? null,
-        spend_amount_minor: body?.spend_amount ? Math.round(parseFloat(body.spend_amount) * 100) : 0,
-        spend_currency: body?.spend_currency ?? 'USD',
+        spend_amount_minor: body?.spend_amount
+          ? Math.round(parseFloat(body.spend_amount) * 10 ** exp)
+          : 0,
+        spend_currency: spendCurrency,
+        spend_currency_exponent: exp,
         rating: body?.rating ?? 5,
         category: body?.category ?? 'sightseeing',
         note: body?.note ?? null,
@@ -2549,6 +2569,15 @@ export class FakeApi {
       if (body?.city) fp.city = body.city;
       if (body?.note !== undefined) fp.note = body.note;
       if (body?.rating !== undefined) fp.rating = body.rating;
+      if (body?.spend_currency) {
+        fp.spend_currency = String(body.spend_currency).toUpperCase();
+        fp.spend_currency_exponent = exponentFor(fp.spend_currency);
+      }
+      if (body?.spend_amount !== undefined) {
+        fp.spend_amount_minor = body.spend_amount
+          ? Math.round(parseFloat(body.spend_amount) * 10 ** fp.spend_currency_exponent)
+          : 0;
+      }
       fp.updated_at = new Date().toISOString();
       return json(route, 200, fp);
     }
@@ -3053,12 +3082,13 @@ export class FakeApi {
       return json(route, 200, this.bills);
     }
     if (path === '/recurring-bills' && method === 'POST') {
+      const currency = String(body?.currency ?? 'USD').toUpperCase();
       const bill = this.seedRecurringBill({
         name: String(body?.name ?? ''),
         category: String(body?.category ?? 'subscription'),
         amount_minor: Number(body?.amount_minor ?? 0),
-        currency: String(body?.currency ?? 'USD'),
-        currency_exponent: Number(body?.currency_exponent ?? 2),
+        currency,
+        currency_exponent: Number(body?.currency_exponent ?? exponentFor(currency)),
         frequency: String(body?.frequency ?? 'monthly'),
         due_day: body?.due_day ?? null,
         next_due_at: String(body?.next_due_at ?? new Date().toISOString()),
@@ -3085,9 +3115,28 @@ export class FakeApi {
       });
       return json(route, 200, bill);
     }
-    const billDelMatch = path.match(/^\/recurring-bills\/(\d+)$/);
-    if (billDelMatch && method === 'DELETE') {
-      const id = Number(billDelMatch[1]);
+    const billIdMatch = path.match(/^\/recurring-bills\/(\d+)$/);
+    if (billIdMatch && (method === 'PATCH' || method === 'PUT')) {
+      const id = Number(billIdMatch[1]);
+      const bill = this.bills.find((b) => b.id === id);
+      if (!bill) return json(route, 404, { error: 'Bill not found', code: 404 });
+      if (body?.name !== undefined) bill.name = String(body.name);
+      if (body?.category !== undefined) bill.category = String(body.category);
+      if (body?.currency !== undefined) {
+        bill.currency = String(body.currency).toUpperCase();
+        bill.currency_exponent = exponentFor(bill.currency);
+      }
+      if (body?.amount_minor !== undefined) bill.amount_minor = Number(body.amount_minor);
+      if (body?.frequency !== undefined) bill.frequency = String(body.frequency);
+      if (body?.due_day !== undefined) bill.due_day = body.due_day;
+      if (body?.next_due_at !== undefined) bill.next_due_at = String(body.next_due_at);
+      if (body?.notes !== undefined) bill.notes = body.notes;
+      if (body?.status !== undefined) bill.status = String(body.status);
+      bill.updated_at = new Date().toISOString();
+      return json(route, 200, bill);
+    }
+    if (billIdMatch && method === 'DELETE') {
+      const id = Number(billIdMatch[1]);
       const idx = this.bills.findIndex((b) => b.id === id);
       if (idx >= 0) {
         this.bills.splice(idx, 1);

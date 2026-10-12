@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { fetchApi } from '../../core/apiClient';
+import { currencyExponent, nowInZone, todayInZone, useSettings } from '../../core/settings';
 import { Footprint, CreateFootprintInput, NominatimSearchResult } from './types';
 import { X, MapPin, Calendar, Star, DollarSign, Search, Loader2, Compass } from 'lucide-react';
 import { DatePicker } from '../../components/DatePicker';
@@ -28,6 +29,8 @@ export const FootprintModal: React.FC<FootprintModalProps> = ({
   initialData,
   initialCoordinates,
 }) => {
+  const settings = useSettings();
+  const timezone = settings?.timezone || 'UTC';
   const [title, setTitle] = useState('');
   const [latitude, setLatitude] = useState(0);
   const [longitude, setLongitude] = useState(0);
@@ -65,16 +68,17 @@ export const FootprintModal: React.FC<FootprintModalProps> = ({
         ? initialData.category
         : 'sightseeing';
       setCategory(validCategory);
+      const exp = initialData.spend_currency_exponent ?? currencyExponent(initialData.spend_currency);
       setSpendAmount(
         initialData.spend_amount_minor > 0
-          ? (initialData.spend_amount_minor / Math.pow(10, initialData.spend_currency_exponent)).toFixed(2)
+          ? (initialData.spend_amount_minor / Math.pow(10, exp)).toFixed(exp)
           : ''
       );
       setSpendCurrency(initialData.spend_currency);
       setNote(initialData.note || '');
       setErrorMsg(null);
     } else {
-      const today = new Date().toISOString().split('T')[0];
+      const today = todayInZone(timezone);
       setTitle('');
       setLatitude(initialCoordinates?.lat || 0);
       setLongitude(initialCoordinates?.lon || 0);
@@ -96,7 +100,7 @@ export const FootprintModal: React.FC<FootprintModalProps> = ({
         reverseGeocode(initialCoordinates.lat, initialCoordinates.lon);
       }
     }
-  }, [initialData, initialCoordinates, isOpen]);
+  }, [initialData, initialCoordinates, isOpen, timezone]);
 
   const reverseGeocode = async (lat: number, lon: number) => {
     try {
@@ -336,6 +340,7 @@ export const FootprintModal: React.FC<FootprintModalProps> = ({
                 value={arrivalDate}
                 onChange={setArrivalDate}
                 placeholder="Arrival date"
+                now={nowInZone(timezone)}
               />
             </div>
             <div>
@@ -347,6 +352,7 @@ export const FootprintModal: React.FC<FootprintModalProps> = ({
                 value={departureDate}
                 onChange={setDepartureDate}
                 placeholder="Departure date"
+                now={nowInZone(timezone)}
               />
             </div>
           </div>
@@ -384,9 +390,15 @@ export const FootprintModal: React.FC<FootprintModalProps> = ({
               <div className="flex gap-2">
                 <input
                   type="number"
-                  step="0.01"
+                  step={
+                    currencyExponent(spendCurrency) === 0
+                      ? '1'
+                      : currencyExponent(spendCurrency) === 3
+                        ? '0.001'
+                        : '0.01'
+                  }
                   min="0"
-                  placeholder="0.00"
+                  placeholder={(0).toFixed(currencyExponent(spendCurrency))}
                   value={spendAmount}
                   onChange={(e) => setSpendAmount(e.target.value)}
                   className="flex-1 h-9 px-3 rounded-md bg-white dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-xs text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-500 focus:outline-none focus:border-neutral-500 font-mono"
@@ -403,6 +415,9 @@ export const FootprintModal: React.FC<FootprintModalProps> = ({
                   <option value="CNY">CNY</option>
                   <option value="CAD">CAD</option>
                   <option value="AUD">AUD</option>
+                  {!['USD', 'EUR', 'GBP', 'JPY', 'CNY', 'CAD', 'AUD'].includes(spendCurrency) && (
+                    <option value={spendCurrency}>{spendCurrency}</option>
+                  )}
                 </select>
               </div>
             </div>

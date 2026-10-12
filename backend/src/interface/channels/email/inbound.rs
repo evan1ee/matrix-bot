@@ -94,8 +94,6 @@ pub fn verify_dmarc(
         .ok_or_else(|| DmarcError::NotPassed("invalid from address".to_owned()))?;
     let sender_domain = sender_domain.trim().to_ascii_lowercase();
 
-    let mut last_err = None;
-
     for header in headers {
         let trimmed = header.trim();
         let authserv_token = trimmed
@@ -108,33 +106,29 @@ pub fn verify_dmarc(
             continue;
         }
 
+        // Only evaluate the topmost Authentication-Results header for our MTA;
+        // a lower (earlier/forged) header must never rescue a failed check.
         let lower = trimmed.to_ascii_lowercase();
 
         if !has_dmarc_pass(&lower) {
-            last_err = Some(DmarcError::NotPassed(trimmed.to_owned()));
-            continue;
+            return Err(DmarcError::NotPassed(trimmed.to_owned()));
         }
 
         if let Some(dmarc_domain) = extract_header_from_domain(&lower) {
             let aligned = sender_domain == dmarc_domain
                 || sender_domain.ends_with(&format!(".{dmarc_domain}"));
             if !aligned {
-                last_err = Some(DmarcError::DomainMismatch {
+                return Err(DmarcError::DomainMismatch {
                     dmarc_domain,
-                    sender_domain: sender_domain.clone(),
+                    sender_domain,
                 });
-                continue;
             }
         }
 
         return Ok(());
     }
 
-    if let Some(err) = last_err {
-        Err(err)
-    } else {
-        Err(DmarcError::AuthServNotFound(authserv_id.to_owned()))
-    }
+    Err(DmarcError::AuthServNotFound(authserv_id.to_owned()))
 }
 
 fn has_dmarc_pass(header_lower: &str) -> bool {
@@ -612,5 +606,15 @@ mod tests {
             Some(&allowed_alice),
         );
         assert!(res_ok.is_ok());
+    }
+
+    #[test]
+    fn test_dmarc_rejects_forged_lower_authentication_results_header() {
+        let headers = [
+            "mx.example.com; dmarc=fail header.from=example.com",
+            "mx.example.com; dmarc=pass header.from=example.com",
+        ];
+        let res = verify_dmarc(&headers, "mx.example.com", "alice@example.com");
+        assert!(matches!(res, Err(DmarcError::NotPassed(_))));
     }
 }

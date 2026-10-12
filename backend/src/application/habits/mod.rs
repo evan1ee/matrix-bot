@@ -28,8 +28,9 @@ impl HabitService {
         owner: &AccountId,
         today_str: &str,
     ) -> Result<Vec<HabitWithStatus>, AppError> {
+        validate_date(today_str)?;
         let items =
-            repositories::habits::find_all_with_status(&self.pool, owner, today_str).await?;
+            repositories::habits::find_all_with_status(&self.pool, owner, today_str.trim()).await?;
         Ok(items)
     }
 
@@ -151,6 +152,8 @@ impl HabitService {
         log_date: &str,
         note: Option<&str>,
     ) -> Result<bool, AppError> {
+        validate_date(log_date)?;
+        let log_date = log_date.trim();
         let habit = repositories::habits::find_by_id(&self.pool, id, owner)
             .await?
             .ok_or_else(|| AppError::NotFound(format!("Habit #{id} not found")))?;
@@ -183,9 +186,19 @@ impl HabitService {
         owner: &AccountId,
         today_str: &str,
     ) -> Result<HabitStatsSummary, AppError> {
-        let habits = self.list_with_status(owner, today_str).await?;
+        validate_date(today_str)?;
+        let habits = self.list_with_status(owner, today_str.trim()).await?;
         Ok(HabitStatsSummary::from_habits(&habits))
     }
+}
+
+fn validate_date(date_str: &str) -> Result<(), AppError> {
+    if chrono::NaiveDate::parse_from_str(date_str.trim(), "%Y-%m-%d").is_err() {
+        return Err(AppError::Validation(
+            "Invalid date format. Expected YYYY-MM-DD.".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -250,5 +263,12 @@ mod tests {
             .await
             .unwrap()
             .is_empty());
+    }
+
+    #[test]
+    fn validate_date_rejects_malformed_dates() {
+        assert!(super::validate_date("2026-09-30").is_ok());
+        assert!(super::validate_date("not-a-date").is_err());
+        assert!(super::validate_date("2026-02-30").is_err());
     }
 }

@@ -135,7 +135,7 @@ async fn handle_list(services: &AppServices, owner: &AccountId) -> String {
         let dep = fp
             .departure_date
             .as_deref()
-            .map(|d| format!(" → {}", d))
+            .map(|d| format!(" → {}", html_escape(d)))
             .unwrap_or_default();
         out.push_str(&format!(
             "<li><strong>#{}</strong>: <strong>{}</strong>{} — <em>{}</em> ({} {}{})</li>",
@@ -143,7 +143,7 @@ async fn handle_list(services: &AppServices, owner: &AccountId) -> String {
             html_escape(&fp.title),
             loc,
             stars,
-            fp.arrival_date,
+            html_escape(&fp.arrival_date),
             dep,
             if fp.stay_duration_days > 1 {
                 format!(", {} days", fp.stay_duration_days)
@@ -218,7 +218,7 @@ async fn handle_add(services: &AppServices, owner: &AccountId, args: &str) -> St
              Added <strong>{}</strong> (Arrival: {}) {}<br/>\
              <em>Open the web map to drop an exact star pin!</em></p>",
             html_escape(&fp.title),
-            fp.arrival_date,
+            html_escape(&fp.arrival_date),
             "⭐".repeat(fp.rating as usize)
         ),
         Err(e) => {

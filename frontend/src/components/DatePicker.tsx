@@ -15,6 +15,8 @@ export interface DatePickerProps {
   size?: 'sm' | 'default';
   align?: 'left' | 'right';
   displayValue?: string;
+  /** "Now" as a naive wall clock in the zone the caller works in. */
+  now?: Date;
 }
 
 const WEEKDAY_INITIALS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
@@ -69,6 +71,7 @@ export const DatePicker: React.FC<DatePickerProps> = ({
   size = 'default',
   align = 'left',
   displayValue,
+  now: nowProp,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [isYearPickerOpen, setIsYearPickerOpen] = useState(false);
@@ -76,16 +79,16 @@ export const DatePicker: React.FC<DatePickerProps> = ({
 
   const parsedValue = useMemo(() => parseIsoDate(value), [value]);
   const [viewMonth, setViewMonth] = useState(() =>
-    startOfMonth(parsedValue ?? new Date())
+    startOfMonth(parsedValue ?? nowProp ?? new Date())
   );
 
   const containerRef = useRef<HTMLDivElement>(null);
   const hiddenInputRef = useRef<HTMLInputElement>(null);
 
   const today = useMemo(() => {
-    const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0);
-  }, []);
+    const refNow = nowProp ?? new Date();
+    return new Date(refNow.getFullYear(), refNow.getMonth(), refNow.getDate(), 12, 0, 0);
+  }, [nowProp]);
   const todayStr = useMemo(() => formatIsoDate(today), [today]);
 
   useEffect(() => {

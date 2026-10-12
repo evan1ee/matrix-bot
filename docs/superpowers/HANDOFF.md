@@ -65,18 +65,20 @@ app.rs / main.rs             Composition roots, supervision, graceful shutdown
 
 ## 3. Verified System Baseline
 
+- **Adversarial Security & Correctness Review (`reviews/2026-10-11-adversarial-review.md`):** All 53 verified findings (`C1`–`C2`, `H1`–`H13`, `M1`–`M26`, `L1`–`L12`) across `matrix-bot`, `matrix-bot-inference`, and `frontend` are fixed (`Status: F`) with regression tests.
 - **Rust Backend:**
   - `cargo check -p matrix-bot --all-targets`: Clean (zero errors, zero warnings).
-  - `cargo clippy -p matrix-bot --all-targets -- -D warnings` and `-p matrix-bot-inference`: Clean.
-  - `cargo test -p matrix-bot --lib`: 1591 passed / 0 failed at the last fully green parallel run (before the review fix pass, which added 2 tests). The touched groups pass when run serially. Repeated full parallel runs against the local `pg18-test` later became unreliable (`PoolTimedOut` in unrelated tests, different ones each run), so re-run the full suite on a fresh server or in CI before merging.
+  - `cargo clippy --workspace --all-targets -- -D warnings`: Clean (zero warnings).
+  - `cargo sqlx prepare --workspace --check -- -p matrix-bot --all-targets`: Clean (zero query cache drift).
+  - `cargo test -p matrix-bot --lib`: 1622 unit/integration tests across all module groups pass (`0 failed`, `--test-threads=2`).
   - `cargo test -p matrix-bot --test architecture`: 39 passed / 0 failed.
-  - `cargo test -p matrix-bot live_postgres`: 3 passed / 0 failed.
+  - `cargo test -p matrix-bot live_postgres -- --ignored --test-threads=1`: 3 passed / 0 failed.
   - `cargo run --bin generate-openapi && git diff --exit-code backend/openapi.json`: Byte-identical (zero drift).
 - **Inference Server:**
-  - `cargo test -p matrix-bot-inference`: 94 passed / 0 failed.
+  - `cargo test -p matrix-bot-inference --all-targets`: 97 passed / 0 failed.
 - **Frontend SPA:**
-  - `npm --prefix frontend run build`: Clean (1779 modules transformed, zero TypeScript errors).
-  - `npm --prefix frontend run test:e2e`: 223 passed / 0 failed (100% green across all Playwright specs).
+  - `npm --prefix frontend run build` and `npm --prefix frontend run typecheck:e2e`: Clean (zero TypeScript errors).
+  - `npm --prefix frontend run test:e2e`: 100% green across touched and core Playwright specs (including new zero-decimal currency and timezone regression specs).
 
 ---
 
@@ -167,6 +169,11 @@ Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in sequence:
   - *Ruling: CLI/SQL-only admin bootstrap (`matrix-bot admin grant|revoke <account_id>`) — eliminates first-user auto-promotion race conditions and requires an enrolled passkey before granting or using admin privileges — cost if wrong: operator runs one CLI command after first passkey enrollment.*
   - *Ruling: `AdminSession` for admin `GET`s and `AdminUser` (5-minute step-up window) for admin writes and secret connectivity tests — prevents unnecessary WebAuthn prompts when browsing the Admin Console while gating all mutations and secret operations — cost if wrong: none, secret `GET` returns masked metadata only.*
   - *Ruling: Keep only the 20 hot-reloadable settings in `SettingRegistry` and the 6 hot-reloadable secret providers in `SecretProvider` (`OpenAi`, `Anthropic`, `Tavily`, `Stt`, `Tts`, `Generic`), keeping restart-required settings and credentials (channels, `EMBEDDING_MODEL`, and S3) in `.env` — avoids misleading Admin UI settings/secrets that cannot hot-reload and keeps `domain/config/registry.rs` under the 500-line limit — cost if wrong: changing channel adapters, S3, or embedding model requires `.env` edit + restart, which is already required by their lifecycle.*
+- **Rulings (2026-10-12 — Adversarial Review Remediation):**
+  - *Ruling: Passkey enrollment via `/api/v1/account/passkeys/register/*` requires `VerifiedUser` (5-minute step-up window) and rejects MCP/recovery-restricted sessions; recovery enrollment uses `/api/v1/auth/recovery/*` exclusively (`C2`), and Matrix login sessions carry `last_verified_at = NULL` (`H1`) — closes privilege escalation from unverified/MCP/recovery sessions and Matrix tokens — cost if wrong: enrolling an additional passkey from the web console prompts for existing passkey step-up.*
+  - *Ruling: Room/channel delivery targets (`authorize_delivery`, `H4`/`M12`/`M26`) allow only `web`, an account's cached Matrix room, or a conversation address (`discord:`, `telegram:`, `email:`) matching the account's linked `platform_identities`; synthetic origins (`mcp`, `agent:*`) resolve to the user's saved default room or `web` — prevents cross-user message injection via raw room IDs or foreign channel addresses — cost if wrong: rooms not yet in the user's room cache cannot be targeted by raw ID until synced.*
+  - *Ruling: All outbound HTTP clients for user-configurable or untrusted URLs (`llm/client.rs`, `web/metadata.rs`, `H2`/`H3`/`M14`) disable automatic redirect following or re-validate each redirect hop and pin validated DNS socket addresses via `reqwest::ClientBuilder::resolve_to_addrs` — prevents SSRF via open redirects, IPv4-mapped IPv6 (`::ffff:127.0.0.1`), and DNS rebinding — cost if wrong: none.*
+  - *Ruling: Minor-unit currency exponents (`domain::finance::money::exponent_for`, `H7`/`H8`/`H9`/`M5`/`M19`/`H11`/`H13`/`M23`) are enforced end-to-end across recurring bills, footprints, portfolio quotes/alerts, net worth (skipping unconvertible currencies rather than assuming 1.0 EUR), LLM tool inputs, and the SPA — eliminates 100× scaling bugs on zero-decimal (`JPY`) and three-decimal (`KWD`) currencies — cost if wrong: none.*
 - **Account Identity Model:** One human account (`accounts.id`) links multiple chat identities across Matrix, Discord, Telegram, and Email via `platform_identities`. Instance-wide tables (`app_settings`, `provider_secrets`, `config_audit_log`) are global and registered in `AUDIT_ACTOR_UNTOUCHED`.
 - **File Length & Code Quality:** No file in `backend/src/` or `inference/src/` may exceed 500 lines of production code (target < 300 lines). Only `config/` reads environment variables.
 

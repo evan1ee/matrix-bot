@@ -251,6 +251,19 @@ impl AccountService {
         Ok(token)
     }
 
+    pub async fn create_unverified_session(
+        &self,
+        account_id: &AccountId,
+        user_agent: Option<&str>,
+        ip: Option<&str>,
+        restricted_until: Option<DateTime<Utc>>,
+    ) -> Result<String, AppError> {
+        let token =
+            sessions::create_unverified(&self.pool, account_id, user_agent, ip, restricted_until)
+                .await?;
+        Ok(token)
+    }
+
     pub async fn resolve_session(&self, token: &str) -> Result<Option<Session>, AppError> {
         Ok(sessions::resolve(&self.pool, token).await?)
     }

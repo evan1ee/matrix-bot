@@ -77,7 +77,7 @@ pub async fn list_categories(
 }
 
 pub async fn find_category_by_name(
-    pool: &PgPool,
+    conn: impl sqlx::PgExecutor<'_>,
     owner_id: &AccountId,
     name: &str,
 ) -> Result<Option<Category>, sqlx::Error> {
@@ -91,7 +91,7 @@ pub async fn find_category_by_name(
         owner_id.as_uuid(),
         name
     )
-    .fetch_optional(pool)
+    .fetch_optional(conn)
     .await?;
 
     Ok(row.map(Into::into))

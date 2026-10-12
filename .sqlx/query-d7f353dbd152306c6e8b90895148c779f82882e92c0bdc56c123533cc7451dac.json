@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id, room_id, owner_id, sender_name, message, trigger_at,\n            recurrence, status, retry_count, source_kind, source_id, created_at\n        FROM reminders\n        WHERE id = $1\n        ",
+  "query": "SELECT id, room_id, owner_id, sender_name, message, trigger_at, recurrence, status, retry_count, source_kind, source_id, created_at FROM reminders WHERE status = 'pending' AND trigger_at <= $1 AND retry_count < $2 ORDER BY trigger_at ASC, id ASC LIMIT $3 OFFSET $4",
   "describe": {
     "columns": [
       {
@@ -138,6 +138,9 @@
     ],
     "parameters": {
       "Left": [
+        "Timestamptz",
+        "Int8",
+        "Int8",
         "Int8"
       ]
     },
@@ -156,5 +159,5 @@
       true
     ]
   },
-  "hash": "d0325f77eb02493a7400f5ed7dda3e65590be1bb60fc7e647bd0f2b81e65783a"
+  "hash": "d7f353dbd152306c6e8b90895148c779f82882e92c0bdc56c123533cc7451dac"
 }

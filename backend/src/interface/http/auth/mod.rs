@@ -6,7 +6,7 @@ pub mod recovery;
 pub mod types;
 pub mod webauthn;
 
-pub use extractor::{AdminSession, AdminUser, VerifiedUser};
+pub use extractor::{AdminSession, AdminUser, McpUser, VerifiedUser};
 pub use handlers::*;
 pub use types::*;
 
@@ -68,6 +68,21 @@ mod tests {
         }
         let (mut parts, _) = builder.body(()).unwrap().into_parts();
         AuthUser::from_request_parts(&mut parts, state).await
+    }
+
+    async fn extract_mcp_bearer(
+        state: &ApiState,
+        method: Method,
+        bearer: Option<&str>,
+    ) -> Result<McpUser, ApiError> {
+        let mut builder = axum::http::Request::builder()
+            .method(method)
+            .uri("/api/v1/mcp");
+        if let Some(value) = bearer {
+            builder = builder.header(header::AUTHORIZATION, format!("Bearer {value}"));
+        }
+        let (mut parts, _) = builder.body(()).unwrap().into_parts();
+        McpUser::from_request_parts(&mut parts, state).await
     }
 
     /// A signed-in account, and the cookie proving it.
@@ -285,10 +300,9 @@ mod tests {
         assert!(lapsed.may_perform_sensitive_action(later));
     }
 
-    /// An MCP token authenticates, but it is a machine credential: there is
-    /// nobody at the far end to confirm anything with a passkey. It used to
-    /// report its creation time as the last verification, so for the first five
-    /// minutes of its life it opened every step-up-gated route.
+    /// An MCP token authenticates on MCP protocol routes (`McpUser`), is
+    /// rejected on general REST routes (`AuthUser`), and never satisfies
+    /// step-up.
     #[tokio::test]
     async fn test_an_mcp_token_never_satisfies_step_up() {
         let state = state().await;
@@ -305,9 +319,18 @@ mod tests {
             .await
             .unwrap();
 
-        let user = extract_bearer(&state, Method::GET, Some(&raw), None)
+        let err = extract_bearer(&state, Method::GET, Some(&raw), None)
             .await
-            .expect("a fresh MCP token must still authenticate");
+            .unwrap_err();
+        assert_eq!(
+            err.status,
+            axum::http::StatusCode::FORBIDDEN,
+            "an MCP token must be rejected on non-MCP AuthUser routes"
+        );
+
+        let user = extract_mcp_bearer(&state, Method::POST, Some(&raw))
+            .await
+            .expect("a fresh MCP token must authenticate on MCP protocol routes");
         assert_eq!(user.owner_id(), account.to_string());
 
         assert!(

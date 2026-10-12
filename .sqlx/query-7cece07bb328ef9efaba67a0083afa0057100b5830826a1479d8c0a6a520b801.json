@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO todos (room_id, owner_id, sender_name, text, priority, completed, created_at)\n            VALUES ('!r', $1, 'Alice', 'Buy groceries', 'high', FALSE, '2026-09-06 09:15:00+00'::timestamptz)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7cece07bb328ef9efaba67a0083afa0057100b5830826a1479d8c0a6a520b801"
+}

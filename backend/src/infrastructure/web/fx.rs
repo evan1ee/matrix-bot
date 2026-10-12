@@ -86,3 +86,17 @@ pub async fn get_rates(client: &reqwest::Client) -> HashMap<String, f64> {
 
     new_rates
 }
+
+static DEFAULT_FX_CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+
+/// Retrieves the current FX rates against EUR using a shared internal HTTP client.
+pub async fn get_cached_rates() -> HashMap<String, f64> {
+    let client = DEFAULT_FX_CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .use_rustls_tls()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .expect("Failed to build FX HTTP client")
+    });
+    get_rates(client).await
+}

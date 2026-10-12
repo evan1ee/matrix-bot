@@ -120,7 +120,8 @@ pub async fn execute_tool(
                 };
 
                 let price_str = if let Some(num) = args.get("price").and_then(|v| v.as_f64()) {
-                    format!("{:.2}", num)
+                    crate::domain::finance::money::format_decimal_f64(num)
+                        .map_err(|e| e.to_string())?
                 } else if let Some(s) = args.get("price").and_then(|v| v.as_str()) {
                     s.to_string()
                 } else {
@@ -193,7 +194,8 @@ pub async fn execute_tool(
                 };
 
                 let price_str = if let Some(num) = args.get("price").and_then(|v| v.as_f64()) {
-                    format!("{:.2}", num)
+                    crate::domain::finance::money::format_decimal_f64(num)
+                        .map_err(|e| e.to_string())?
                 } else if let Some(s) = args.get("price").and_then(|v| v.as_str()) {
                     s.to_string()
                 } else {

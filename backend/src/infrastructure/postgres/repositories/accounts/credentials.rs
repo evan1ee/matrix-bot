@@ -140,6 +140,13 @@ pub async fn delete(
 ) -> Result<DeleteOutcome, sqlx::Error> {
     let mut tx = pool.begin().await?;
 
+    // Serialise concurrent credential deletions for the same account so two
+    // simultaneous requests cannot both observe count == 2 and delete the last passkey.
+    let mut lock_qb = sqlx::QueryBuilder::new("SELECT id FROM accounts WHERE id = ");
+    lock_qb.push_bind(account_id.as_uuid());
+    lock_qb.push(" FOR UPDATE");
+    lock_qb.build().execute(&mut *tx).await?;
+
     // If only one passkey remains and no Matrix link exists, prevent self-lockout
     let count = sqlx::query_scalar!(
         r#"SELECT COUNT(*) AS "count!" FROM webauthn_credentials WHERE account_id = $1"#,
@@ -401,5 +408,25 @@ mod tests {
         let outcome = delete(&pool, &acct, "cred_only").await.unwrap();
         assert_eq!(outcome, DeleteOutcome::Removed);
         assert_eq!(count_for_account(&pool, &acct).await.unwrap(), 0);
+    }
+
+    #[tokio::test]
+    async fn test_concurrent_passkey_deletes_cannot_remove_last_passkey() {
+        let pool = db().await;
+        let acct = AccountId::from_seed("acct_a");
+        add_raw(&pool, "cred_1", "acct_a").await;
+        add_raw(&pool, "cred_2", "acct_a").await;
+
+        let (r1, r2) = tokio::join!(
+            delete(&pool, &acct, "cred_1"),
+            delete(&pool, &acct, "cred_2"),
+        );
+        let outcomes = [r1.unwrap(), r2.unwrap()];
+        assert!(
+            outcomes.contains(&DeleteOutcome::Removed)
+                && outcomes.contains(&DeleteOutcome::WouldLockOut),
+            "expected one Removed and one WouldLockOut, got {outcomes:?}"
+        );
+        assert_eq!(count_for_account(&pool, &acct).await.unwrap(), 1);
     }
 }

@@ -215,6 +215,7 @@ pub async fn create_bill(
         payload.remind_room_id.as_deref(),
     )?;
 
+    let default_exp = crate::domain::finance::money::exponent_for(&payload.currency) as i64;
     let input = crate::domain::recurring_bills::NewRecurringBill {
         room_id: "web".to_string(),
         sender_name: user.display_name,
@@ -222,7 +223,7 @@ pub async fn create_bill(
         category: payload.category,
         amount_minor: payload.amount_minor,
         currency: payload.currency,
-        currency_exponent: payload.currency_exponent.unwrap_or(2),
+        currency_exponent: payload.currency_exponent.unwrap_or(default_exp),
         frequency: payload.frequency.unwrap_or_else(|| "monthly".to_string()),
         due_day: payload.due_day,
         next_due_at: payload.next_due_at,

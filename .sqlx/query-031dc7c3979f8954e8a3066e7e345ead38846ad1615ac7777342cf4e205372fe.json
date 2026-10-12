@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT action, symbol, quantity_minor, amount_minor,\n               currency, currency_exponent, created_at\n        FROM portfolio_audit_log\n        WHERE owner_id = $1 AND date(created_at)::text = $2\n        ORDER BY created_at\n        ",
+  "query": "\n        SELECT action, symbol, quantity_minor, amount_minor,\n               currency, currency_exponent, created_at\n        FROM portfolio_audit_log\n        WHERE owner_id = $1 AND date(created_at AT TIME ZONE $3)::text = $2\n        ORDER BY created_at\n        ",
   "describe": {
     "columns": [
       {
@@ -84,6 +84,7 @@
     "parameters": {
       "Left": [
         "Uuid",
+        "Text",
         "Text"
       ]
     },
@@ -97,5 +98,5 @@
       true
     ]
   },
-  "hash": "c0203ae46e76453a2f5e731240880dceb1784fa79fa6abe5f0251fe37d79e937"
+  "hash": "031dc7c3979f8954e8a3066e7e345ead38846ad1615ac7777342cf4e205372fe"
 }

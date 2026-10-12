@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE reminders SET status = 'triggered' WHERE id = $1 AND status = 'pending'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2bc44e7336734ea671a4e67eb8cbe48adcb3ebdb6be3c1b7e80efe4369d0313c"
+}

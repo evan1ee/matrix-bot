@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchApi } from '../../core/apiClient';
+import { currencyExponent } from '../../core/settings';
 import { WeeklyRetrospective } from './types';
 import {
   Calendar, DollarSign, CheckCircle2, TrendingUp,
@@ -55,9 +56,20 @@ export const RetrospectiveModal: React.FC<RetrospectiveModalProps> = ({
     }
   };
 
-  const spentDec = retro ? (retro.total_spent_minor / 100).toFixed(2) : '0.00';
-  const incomeDec = retro ? (retro.total_income_minor / 100).toFixed(2) : '0.00';
-  const netDec = retro ? (retro.net_cashflow_minor / 100).toFixed(2) : '0.00';
+  const primaryExp =
+    retro?.spends_by_currency?.find((s) => s.currency === retro.currency)?.currency_exponent ??
+    currencyExponent(retro?.currency ?? 'USD');
+  const primaryScale = Math.pow(10, primaryExp);
+  const spentDec = retro
+    ? (retro.total_spent_minor / primaryScale).toFixed(primaryExp)
+    : (0).toFixed(primaryExp);
+  const netDec = retro
+    ? (retro.net_cashflow_minor / primaryScale).toFixed(primaryExp)
+    : (0).toFixed(primaryExp);
+  const billsExp =
+    retro?.upcoming_bills_by_currency?.find((b) => b.currency === retro.currency)
+      ?.currency_exponent ?? primaryExp;
+  const billsScale = Math.pow(10, billsExp);
   const isNetPositive = (retro?.net_cashflow_minor ?? 0) >= 0;
 
   return (
@@ -179,7 +191,7 @@ export const RetrospectiveModal: React.FC<RetrospectiveModalProps> = ({
                 <div className="flex items-center gap-2">
                   <Bell className="w-4 h-4 text-neutral-500 shrink-0" />
                   <span>
-                    Upcoming (Next 7 Days): <strong className="font-semibold">{retro.upcoming_bills_count} bills</strong> ({retro.formatted_upcoming_bills || `${retro.currency} ${(retro.upcoming_bills_total_minor / 100).toFixed(2)}`}) &amp; <strong className="font-semibold">{retro.upcoming_reminders_count} reminders</strong>
+                    Upcoming (Next 7 Days): <strong className="font-semibold">{retro.upcoming_bills_count} bills</strong> ({retro.formatted_upcoming_bills || `${retro.currency} ${(retro.upcoming_bills_total_minor / billsScale).toFixed(billsExp)}`}) &amp; <strong className="font-semibold">{retro.upcoming_reminders_count} reminders</strong>
                   </span>
                 </div>
               </div>

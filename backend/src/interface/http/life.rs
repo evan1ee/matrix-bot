@@ -157,10 +157,10 @@ pub struct DeleteDayResponse {
     pub date: String,
 }
 
-fn get_today_string() -> String {
+fn get_today_string(tz: chrono_tz::Tz) -> String {
     chrono::Utc::now()
-        .naive_utc()
-        .date()
+        .with_timezone(&tz)
+        .date_naive()
         .format("%Y-%m-%d")
         .to_string()
 }
@@ -179,7 +179,12 @@ pub async fn get_profile_and_stats(
     user: AuthUser,
     State(state): State<ApiState>,
 ) -> Result<Json<LifeProfileStats>, ApiError> {
-    let today = get_today_string();
+    let settings = state
+        .services
+        .settings
+        .get_or_default(&user.account_id)
+        .await;
+    let today = get_today_string(settings.tz());
     let stats = state
         .services
         .life
@@ -403,7 +408,12 @@ pub async fn update_time_allocation(
         ));
     }
 
-    let today = get_today_string();
+    let settings = state
+        .services
+        .settings
+        .get_or_default(&user.account_id)
+        .await;
+    let today = get_today_string(settings.tz());
     let existing = state
         .services
         .life
@@ -593,7 +603,7 @@ mod tests {
         let updated_time = update_time_allocation(
             user.clone(),
             State(state.clone()),
-            Path(get_today_string()),
+            Path(get_today_string(chrono_tz::UTC)),
             Json(UpdateTimeAllocationInput {
                 time_allocation: blocks,
             }),

@@ -33,6 +33,8 @@ pub struct StorageConfig {
     pub s3_force_path_style: bool,
 }
 
+pub const DEFAULT_SIGNING_SECRET: &str = "matrix-bot-default-signing-secret";
+
 impl StorageConfig {
     /// Builds configuration from environment variables.
     pub fn from_env(web_url: Option<String>) -> Self {
@@ -41,7 +43,7 @@ impl StorageConfig {
         let local_dir =
             env::var("STORAGE_LOCAL_DIR").unwrap_or_else(|_| "data/storage".to_string());
         let signing_secret = env::var("STORAGE_SIGNING_SECRET")
-            .unwrap_or_else(|_| "matrix-bot-default-signing-secret".to_string());
+            .unwrap_or_else(|_| DEFAULT_SIGNING_SECRET.to_string());
 
         let s3_endpoint = env::var("S3_ENDPOINT")
             .ok()
@@ -79,7 +81,7 @@ impl Default for StorageConfig {
             driver: StorageDriver::Local,
             local_dir: "data/storage".to_string(),
             web_url: None,
-            signing_secret: "matrix-bot-default-signing-secret".to_string(),
+            signing_secret: DEFAULT_SIGNING_SECRET.to_string(),
             s3_endpoint: None,
             s3_bucket: None,
             s3_region: None,

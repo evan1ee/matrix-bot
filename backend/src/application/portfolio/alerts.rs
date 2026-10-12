@@ -125,7 +125,7 @@ impl PortfolioService {
         };
         let mut triggered = Vec::new();
         match self
-            .trigger_alerts_for_symbol(symbol, quote.price, &mut triggered)
+            .trigger_alerts_for_quote(symbol, &quote.currency, quote.price, &mut triggered)
             .await
         {
             Err(err) if triggered.is_empty() => Err(err),
@@ -137,17 +137,57 @@ impl PortfolioService {
         }
     }
 
-    /// Marks the active alerts on `symbol` that `price` meets and appends
-    /// each to `triggered` as soon as it is marked, so a later failure cannot
-    /// hide it from the caller.
+    /// Marks the active alerts on `symbol` that `price` (in the alert's own currency)
+    /// meets and appends each to `triggered` as soon as it is marked.
+    #[cfg(test)]
     pub(crate) async fn trigger_alerts_for_symbol(
         &self,
         symbol: &str,
         price: f64,
         triggered: &mut Vec<TriggeredAlert>,
     ) -> Result<(), AppError> {
+        self.trigger_alerts_for_quote(symbol, "", price, triggered)
+            .await
+    }
+
+    pub(crate) async fn trigger_alerts_for_quote(
+        &self,
+        symbol: &str,
+        quote_currency: &str,
+        price: f64,
+        triggered: &mut Vec<TriggeredAlert>,
+    ) -> Result<(), AppError> {
+        let mut cached_rates = None;
         for alert in self.list_active_alerts_for_symbol(symbol).await? {
-            let price_minor = price_to_minor(price, alert.currency_exponent);
+            let alert_price = if quote_currency.is_empty()
+                || quote_currency.eq_ignore_ascii_case(&alert.currency)
+            {
+                price
+            } else {
+                let rates = match &cached_rates {
+                    Some(r) => r,
+                    None => {
+                        let r = crate::infrastructure::web::fx::get_cached_rates().await;
+                        cached_rates.insert(r)
+                    }
+                };
+                let Some(rate) = crate::domain::finance::fx::try_get_rate_between(
+                    quote_currency,
+                    &alert.currency,
+                    rates,
+                ) else {
+                    warn!(
+                        alert_id = alert.id,
+                        %symbol,
+                        quote_currency,
+                        alert_currency = %alert.currency,
+                        "Skipping alert check: no FX rate between quote and alert currency"
+                    );
+                    continue;
+                };
+                price * rate
+            };
+            let price_minor = price_to_minor(alert_price, alert.currency_exponent);
             if !alert
                 .parsed_condition()
                 .is_met(price_minor, alert.target_price_minor)

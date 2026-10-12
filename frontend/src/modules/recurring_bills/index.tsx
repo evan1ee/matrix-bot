@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchApi } from '../../core/apiClient';
 import { FrontendModule } from '../../core/types';
-import { useSettings } from '../../core/settings';
+import { currencyExponent, useSettings, utcIsoToZonedInput } from '../../core/settings';
 import {
   RefreshCcw,
   Plus,
@@ -133,7 +133,8 @@ export const RecurringBillsView: React.FC = () => {
     const map = new Map<string, number>();
     for (const b of bills) {
       const cur = (b.currency || displayCurrency).toUpperCase();
-      let monthly = b.amount_minor / Math.pow(10, b.currency_exponent ?? 2);
+      const exp = b.currency_exponent ?? currencyExponent(cur);
+      let monthly = b.amount_minor / Math.pow(10, exp);
       if (b.frequency === 'yearly') monthly /= 12;
       else if (b.frequency === 'weekly') monthly *= 4.33;
       else if (b.frequency === 'quarterly') monthly /= 3;
@@ -168,12 +169,12 @@ export const RecurringBillsView: React.FC = () => {
           </div>
           <div className="mt-1 text-2xl font-semibold font-sans tabular-nums tracking-tight text-neutral-900 dark:text-neutral-100 truncate">
             {monthlyCommitments.length === 0
-              ? `${displayCurrency} 0.00`
-              : `${monthlyCommitments[0].currency} ${monthlyCommitments[0].amount.toFixed(2)}`}
+              ? `${displayCurrency} ${(0).toFixed(currencyExponent(displayCurrency))}`
+              : `${monthlyCommitments[0].currency} ${monthlyCommitments[0].amount.toFixed(currencyExponent(monthlyCommitments[0].currency))}`}
           </div>
           <p className="mt-1 text-[11px] text-neutral-500 font-mono truncate">
             {monthlyCommitments.length > 1
-              ? `+ ${monthlyCommitments.slice(1).map((c) => `${c.currency} ${c.amount.toFixed(2)}`).join(' · ')}`
+              ? `+ ${monthlyCommitments.slice(1).map((c) => `${c.currency} ${c.amount.toFixed(currencyExponent(c.currency))}`).join(' · ')}`
               : 'Normalized monthly cost'}
           </p>
         </div>
@@ -291,8 +292,15 @@ export const RecurringBillsView: React.FC = () => {
               {filteredBills.map((bill) => {
                 const badge = getCategoryBadge(bill.category);
                 const BadgeIcon = badge.icon;
-                const formattedAmount = (bill.amount_minor / 100).toFixed(2);
-                const isOverdue = new Date(bill.next_due_at) < new Date();
+                const exp = bill.currency_exponent ?? currencyExponent(bill.currency);
+                const formattedAmount = (bill.amount_minor / Math.pow(10, exp)).toFixed(exp);
+                const dueUtc = bill.next_due_at.includes('Z')
+                  ? bill.next_due_at
+                  : `${bill.next_due_at.replace(' ', 'T')}Z`;
+                const isOverdue = new Date(dueUtc) < new Date();
+                const displayDueDate =
+                  utcIsoToZonedInput(bill.next_due_at, settings?.timezone || 'UTC').slice(0, 10) ||
+                  bill.next_due_at.slice(0, 10);
 
                 return (
                   <tr
@@ -343,7 +351,7 @@ export const RecurringBillsView: React.FC = () => {
 
                     <td className="py-3.5 px-4 font-mono text-xs">
                       <span className={isOverdue ? 'text-rose-600 font-medium' : 'text-neutral-600 dark:text-neutral-300'}>
-                        {bill.next_due_at.slice(0, 10)}
+                        {displayDueDate}
                       </span>
                     </td>
 
@@ -392,6 +400,7 @@ export const RecurringBillsView: React.FC = () => {
                             setFormError(null);
                             setIsModalOpen(true);
                           }}
+                          title="Edit Bill"
                           className="p-1 text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 rounded transition-colors cursor-pointer"
                         >
                           <Pencil className="w-3.5 h-3.5" />

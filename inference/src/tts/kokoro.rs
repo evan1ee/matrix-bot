@@ -251,11 +251,23 @@ pub async fn synthesize(
         .map_err(|e| TtsError::Engine(format!("Worker thread panicked: {}", e)))?
 }
 
+const KOKORO_ARCHIVE_SHA256: &str =
+    "a3f4c73d043860e3fd2e5b06f36795eb81de0fc8e8de6df703245edddd87dbad";
+
 pub async fn ensure_model_downloaded(model_dir: &Path) -> Result<(), TtsError> {
-    ensure_model_from(KOKORO_ARCHIVE_URL, model_dir).await
+    ensure_model_from_verified(KOKORO_ARCHIVE_URL, Some(KOKORO_ARCHIVE_SHA256), model_dir).await
 }
 
+#[cfg(test)]
 async fn ensure_model_from(url: &str, model_dir: &Path) -> Result<(), TtsError> {
+    ensure_model_from_verified(url, None, model_dir).await
+}
+
+async fn ensure_model_from_verified(
+    url: &str,
+    expected_sha256: Option<&str>,
+    model_dir: &Path,
+) -> Result<(), TtsError> {
     if model_present(model_dir) {
         return Ok(());
     }
@@ -274,9 +286,11 @@ async fn ensure_model_from(url: &str, model_dir: &Path) -> Result<(), TtsError> 
     let staging = parent.join(STAGING_DIR_NAME);
 
     info!("Kokoro TTS model missing; downloading {}", url);
-    let downloaded = crate::download::download_to(url, &archive)
-        .await
-        .map_err(|e| TtsError::ModelDownload(e.0));
+    let downloaded = match expected_sha256 {
+        Some(sha) => crate::download::download_verified(url, &archive, sha).await,
+        None => crate::download::download_to(url, &archive).await,
+    }
+    .map_err(|e| TtsError::ModelDownload(e.0));
 
     let installed = match downloaded {
         Ok(()) => {

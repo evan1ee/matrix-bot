@@ -160,7 +160,8 @@ pub async fn execute_tool(
         "record_finance_entry" | "add_expense" => Some(
             async {
                 let amount_str = if let Some(num) = args.get("amount").and_then(|v| v.as_f64()) {
-                    format!("{:.2}", num)
+                    crate::domain::finance::money::format_decimal_f64(num)
+                        .map_err(|e| e.to_string())?
                 } else if let Some(s) = args.get("amount").and_then(|v| v.as_str()) {
                     s.to_string()
                 } else {

@@ -12,6 +12,7 @@ import {
   Check,
 } from 'lucide-react';
 import { Holding } from './types';
+import { formatShortTimeInZone } from '../../core/settings';
 import { formatMinor, formatQuantity, formatSigned, plColor, QUANTITY_EXPONENT } from './utils';
 import { SellRow } from './SellRow';
 import { EditSymbolModal, RemoveHoldingModal } from './HoldingModals';
@@ -234,7 +235,7 @@ export const HoldingTable: React.FC<HoldingTableProps> = ({
                   )}
                   {h.price_updated_at && (
                     <span className="text-[10px] text-neutral-400 dark:text-neutral-500 font-mono ml-1">
-                      · {new Date(h.price_updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      · {formatShortTimeInZone(h.price_updated_at, timezone)}
                     </span>
                   )}
                 </div>

@@ -59,11 +59,16 @@ pub const CLS_MODEL_NAME: &str = "ch_ppocr_mobile_v2.0_cls_infer.onnx";
 pub const REC_MODEL_NAME: &str = "ch_PP-OCRv4_rec_infer.onnx";
 
 const DET_MODEL_URL: &str =
-    "https://huggingface.co/SWHL/RapidOCR/resolve/main/PP-OCRv4/ch_PP-OCRv4_det_infer.onnx";
+    "https://huggingface.co/SWHL/RapidOCR/resolve/1cfba2e90fc938db55889873735088de210cc173/PP-OCRv4/ch_PP-OCRv4_det_infer.onnx";
+const DET_MODEL_SHA256: &str = "d2a7720d45a54257208b1e13e36a8479894cb74155a5efe29462512d42f49da9";
+
 const CLS_MODEL_URL: &str =
-    "https://huggingface.co/SWHL/RapidOCR/resolve/main/PP-OCRv1/ch_ppocr_mobile_v2.0_cls_infer.onnx";
+    "https://huggingface.co/SWHL/RapidOCR/resolve/1cfba2e90fc938db55889873735088de210cc173/PP-OCRv1/ch_ppocr_mobile_v2.0_cls_infer.onnx";
+const CLS_MODEL_SHA256: &str = "e47acedf663230f8863ff1ab0e64dd2d82b838fceb5957146dab185a89d6215c";
+
 const REC_MODEL_URL: &str =
-    "https://huggingface.co/SWHL/RapidOCR/resolve/main/PP-OCRv4/ch_PP-OCRv4_rec_infer.onnx";
+    "https://huggingface.co/SWHL/RapidOCR/resolve/1cfba2e90fc938db55889873735088de210cc173/PP-OCRv4/ch_PP-OCRv4_rec_infer.onnx";
+const REC_MODEL_SHA256: &str = "48fc40f24f6d2a207a2b1091d3437eb3cc3eb6b676dc3ef9c37384005483683b";
 
 /// Resolves model directory, checking inference subfolder or parent directory.
 pub fn resolve_model_dir(dir: &Path) -> PathBuf {
@@ -86,17 +91,13 @@ pub fn resolve_model_dir(dir: &Path) -> PathBuf {
     }
 }
 
-/// Whether every ONNX model OCR needs is present on disk.
-///
-/// All three are required: PaddleOCR runs detection, classification and
-/// recognition in sequence, so a partial download is not a usable install.
-pub fn models_present(dir: &Path) -> bool {
+pub fn resolve_effective_model_dir(dir: &Path) -> PathBuf {
     let resolved = resolve_model_dir(dir);
     if [DET_MODEL_NAME, CLS_MODEL_NAME, REC_MODEL_NAME]
         .iter()
         .all(|name| resolved.join(name).is_file())
     {
-        return true;
+        return resolved;
     }
     if dir == Path::new("models/ocr") || dir.ends_with("models/ocr") {
         let legacy = resolve_model_dir(Path::new("data/ocr_models"));
@@ -104,31 +105,50 @@ pub fn models_present(dir: &Path) -> bool {
             .iter()
             .all(|name| legacy.join(name).is_file())
         {
-            return true;
+            return legacy;
         }
     }
-    false
+    resolved
 }
+
+/// Whether every ONNX model OCR needs is present on disk.
+///
+/// All three are required: PaddleOCR runs detection, classification and
+/// recognition in sequence, so a partial download is not a usable install.
+pub fn models_present(dir: &Path) -> bool {
+    let resolved = resolve_effective_model_dir(dir);
+    [DET_MODEL_NAME, CLS_MODEL_NAME, REC_MODEL_NAME]
+        .iter()
+        .all(|name| resolved.join(name).is_file())
+}
+
+static DOWNLOAD_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// Checks that all required ONNX models exist locally; downloads any missing models.
 pub async fn ensure_models(model_dir: &Path) -> Result<(), OcrError> {
+    let _guard = DOWNLOAD_LOCK.lock().await;
+    if models_present(model_dir) {
+        return Ok(());
+    }
+
     let resolved_dir = resolve_model_dir(model_dir);
     if !resolved_dir.exists() {
-        std::fs::create_dir_all(&resolved_dir)
+        tokio::fs::create_dir_all(&resolved_dir)
+            .await
             .map_err(|e| OcrError::ModelDownload(format!("Failed to create model dir: {}", e)))?;
     }
 
     let models = [
-        (DET_MODEL_NAME, DET_MODEL_URL),
-        (CLS_MODEL_NAME, CLS_MODEL_URL),
-        (REC_MODEL_NAME, REC_MODEL_URL),
+        (DET_MODEL_NAME, DET_MODEL_URL, DET_MODEL_SHA256),
+        (CLS_MODEL_NAME, CLS_MODEL_URL, CLS_MODEL_SHA256),
+        (REC_MODEL_NAME, REC_MODEL_URL, REC_MODEL_SHA256),
     ];
 
-    for (name, url) in models {
+    for (name, url, sha256) in models {
         let dest = resolved_dir.join(name);
         if !dest.exists() {
             info!("OCR model {} missing; downloading from {}", name, url);
-            download_model(url, &dest).await?;
+            download_model(url, &dest, sha256).await?;
             info!("OCR model {} successfully downloaded to {:?}", name, dest);
         }
     }
@@ -136,41 +156,15 @@ pub async fn ensure_models(model_dir: &Path) -> Result<(), OcrError> {
     Ok(())
 }
 
-async fn download_model(url: &str, dest: &Path) -> Result<(), OcrError> {
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(120))
-        .build()
-        .map_err(|e| OcrError::ModelDownload(e.to_string()))?;
-
-    let response = client
-        .get(url)
-        .send()
+async fn download_model(url: &str, dest: &Path, sha256: &str) -> Result<(), OcrError> {
+    crate::download::download_verified(url, dest, sha256)
         .await
-        .map_err(|e| OcrError::ModelDownload(format!("Failed to request {}: {}", url, e)))?;
-
-    if !response.status().is_success() {
-        return Err(OcrError::ModelDownload(format!(
-            "Download failed with status {}: {}",
-            response.status(),
-            url
-        )));
-    }
-
-    let bytes = response.bytes().await.map_err(|e| {
-        OcrError::ModelDownload(format!("Failed to read stream from {}: {}", url, e))
-    })?;
-
-    let tmp_dest = dest.with_extension("tmp");
-    tokio::fs::write(&tmp_dest, &bytes)
-        .await
-        .map_err(|e| OcrError::ModelDownload(format!("Failed to write tmp model file: {}", e)))?;
-
-    tokio::fs::rename(&tmp_dest, dest)
-        .await
-        .map_err(|e| OcrError::ModelDownload(format!("Failed to persist model file: {}", e)))?;
-
-    Ok(())
+        .map_err(|e| OcrError::ModelDownload(e.0))
 }
+
+static OCR_ENGINE: std::sync::OnceLock<
+    std::sync::Mutex<Option<(PathBuf, paddle_ocr_rs::ocr_lite::OcrLite)>>,
+> = std::sync::OnceLock::new();
 
 /// Synchronous text recognition on raw image bytes using PaddleOCR ONNX models.
 pub fn run_ocr_sync(image_bytes: &[u8], model_dir: &Path) -> Result<OcrResult, OcrError> {
@@ -178,20 +172,7 @@ pub fn run_ocr_sync(image_bytes: &[u8], model_dir: &Path) -> Result<OcrResult, O
         image::load_from_memory(image_bytes).map_err(|e| OcrError::ImageDecode(e.to_string()))?;
     let rgb_img = dynamic_img.to_rgb8();
 
-    let resolved_dir = if models_present(model_dir) {
-        let r = resolve_model_dir(model_dir);
-        if [DET_MODEL_NAME, CLS_MODEL_NAME, REC_MODEL_NAME]
-            .iter()
-            .all(|name| r.join(name).is_file())
-        {
-            r
-        } else {
-            resolve_model_dir(Path::new("data/ocr_models"))
-        }
-    } else {
-        resolve_model_dir(model_dir)
-    };
-
+    let resolved_dir = resolve_effective_model_dir(model_dir);
     let det_path = resolved_dir.join(DET_MODEL_NAME);
     let cls_path = resolved_dir.join(CLS_MODEL_NAME);
     let rec_path = resolved_dir.join(REC_MODEL_NAME);
@@ -213,10 +194,20 @@ pub fn run_ocr_sync(image_bytes: &[u8], model_dir: &Path) -> Result<OcrResult, O
         .to_str()
         .ok_or_else(|| OcrError::MissingModel("Invalid UTF-8 in rec path".into()))?;
 
-    let mut ocr = paddle_ocr_rs::ocr_lite::OcrLite::new();
-    ocr.init_models(det_str, cls_str, rec_str, 2)
-        .map_err(|e| OcrError::Inference(format!("{:?}", e)))?;
+    let cell = OCR_ENGINE.get_or_init(|| std::sync::Mutex::new(None));
+    let mut guard = cell.lock().unwrap_or_else(|e| e.into_inner());
+    let needs_init = match guard.as_ref() {
+        Some((cached_dir, _)) => cached_dir != &resolved_dir,
+        None => true,
+    };
+    if needs_init {
+        let mut ocr = paddle_ocr_rs::ocr_lite::OcrLite::new();
+        ocr.init_models(det_str, cls_str, rec_str, 2)
+            .map_err(|e| OcrError::Inference(format!("{:?}", e)))?;
+        *guard = Some((resolved_dir, ocr));
+    }
 
+    let (_, ocr) = guard.as_mut().expect("just initialized");
     // Perform OCR inference with angle correction rollback
     let res = ocr
         .detect_angle_rollback(&rgb_img, 50, 1024, 0.5, 0.3, 1.6, true, false, 0.8)
@@ -234,10 +225,8 @@ pub fn run_ocr_sync(image_bytes: &[u8], model_dir: &Path) -> Result<OcrResult, O
     Ok(OcrResult::new(blocks))
 }
 
-/// Asynchronous entrypoint: ensures models are present, then delegates OCR inference to a blocking threadpool.
+/// Asynchronous entrypoint: delegates OCR inference to a blocking threadpool.
 pub async fn run_ocr(image_bytes: Vec<u8>, model_dir: PathBuf) -> Result<OcrResult, OcrError> {
-    ensure_models(&model_dir).await?;
-
     tokio::task::spawn_blocking(move || run_ocr_sync(&image_bytes, &model_dir))
         .await
         .map_err(|e| OcrError::Join(e.to_string()))?
@@ -311,6 +300,7 @@ mod tests {
 
         std::fs::write(dir.join(REC_MODEL_NAME), b"x").unwrap();
         assert!(models_present(&dir));
+        assert_eq!(resolve_effective_model_dir(&dir), dir);
 
         std::fs::remove_dir_all(&dir).ok();
     }

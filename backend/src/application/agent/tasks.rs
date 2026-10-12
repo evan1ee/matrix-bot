@@ -3,14 +3,16 @@ use uuid::Uuid;
 
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
-use crate::domain::agent::{AgentRun, AgentRunId, RunStatus, ScheduledTaskDefinition, TaskId};
+use crate::domain::agent::{
+    AgentRun, AgentRunId, CronSchedule, RunStatus, ScheduledTaskDefinition, TaskId,
+};
 use crate::infrastructure::postgres::repositories;
 use crate::utils::time::now_at_storage_precision;
 
 use super::AgentService;
 
 impl AgentService {
-    /// Upserts a scheduled recurring task definition.
+    /// Upserts a scheduled recurring task definition after validating `cron_expression`.
     pub async fn schedule_task(
         &self,
         account_id: &AccountId,
@@ -19,12 +21,14 @@ impl AgentService {
         config: serde_json::Value,
         next_run_at: DateTime<Utc>,
     ) -> Result<ScheduledTaskDefinition, AppError> {
+        let cron_expression = cron_expression.into();
+        let _schedule = CronSchedule::parse(&cron_expression)?;
         let now = now_at_storage_precision();
         let task = ScheduledTaskDefinition {
             id: Uuid::new_v4(),
             account_id: *account_id,
             task_id,
-            cron_expression: cron_expression.into(),
+            cron_expression,
             enabled: true,
             config,
             last_run_at: None,
@@ -102,8 +106,9 @@ impl AgentService {
             );
             repositories::jobs::enqueue(&mut *tx, &job).await?;
 
-            // Push next run ahead by 1 hour placeholder until cron parser computes next instant
-            let next_run = now + chrono::Duration::hours(1);
+            let next_run = CronSchedule::parse(&task.cron_expression)
+                .and_then(|s| s.next_after(now))
+                .unwrap_or_else(|_| now + chrono::Duration::hours(1));
             repositories::agent::update_task_next_run(&mut *tx, task.id, now, next_run, now)
                 .await?;
         }

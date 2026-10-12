@@ -11,9 +11,9 @@ use std::cmp::Ordering;
 /// the item is kept for the web UI and delivered nowhere in Matrix.
 pub const WEB_ROOM: &str = "web";
 
-/// Placeholders a client sends to mean "no particular room" rather than a
-/// room called "web".
-const NO_ROOM_PLACEHOLDERS: [&str; 2] = [WEB_ROOM, "web_chat"];
+/// Placeholders a client or internal caller sends to mean "no particular room"
+/// rather than a literal room name.
+const NO_ROOM_PLACEHOLDERS: [&str; 4] = [WEB_ROOM, "web_chat", "mcp", "agent:internal"];
 
 /// A Matrix room that both the bot and one of the account's linked Matrix
 /// identities have joined.
@@ -122,9 +122,9 @@ impl<'a> RoomTarget<'a> {
 /// Resolves a loosely named room against the cache: an exact name (ignoring
 /// case) or room id first, then a name containing `query`.
 ///
-/// Falls back to `query` itself, unchanged, when nothing matches — the caller
-/// stores what the user typed rather than silently redirecting the action to
-/// another room.
+/// Falls back to [`WEB_ROOM`] when nothing matches so an unmatched name or
+/// cross-channel address (`email:…`, `telegram:…`) is never stored as a
+/// deliverable target.
 pub fn match_named<'a>(query: &'a str, rooms: &'a [CachedRoom]) -> &'a str {
     let wanted = query.to_lowercase();
     let exact = rooms
@@ -137,7 +137,7 @@ pub fn match_named<'a>(query: &'a str, rooms: &'a [CachedRoom]) -> &'a str {
     };
     exact
         .or_else(partial)
-        .map_or(query, |r| r.room.room_id.as_str())
+        .map_or(WEB_ROOM, |r| r.room.room_id.as_str())
 }
 
 /// Picks the room an account is reached in when an action names none.
@@ -147,7 +147,7 @@ pub fn match_named<'a>(query: &'a str, rooms: &'a [CachedRoom]) -> &'a str {
 /// 2. a cached room named after the localpart of one of the account's linked
 ///    Matrix ids (in link order) — a DM whose direct flag the client never
 ///    set is typically named after the other member;
-/// 3. the dev room from the user's settings, if not blank;
+/// 3. the dev room from the user's settings, if present in the account's cached rooms;
 /// 4. the most recently cached room of any kind.
 ///
 /// `rooms` must be in picker order (as the repository returns them). Every
@@ -181,7 +181,13 @@ pub fn default_room<'a>(
                 .map(|r| r.room.room_id.as_str())
         })
     };
-    let dev_room = || dev_room_id.filter(|id| !id.trim().is_empty());
+    let dev_room = || {
+        let id = dev_room_id.map(str::trim).filter(|id| !id.is_empty())?;
+        rooms
+            .iter()
+            .find(|r| r.room.room_id == id)
+            .map(|r| r.room.room_id.as_str())
+    };
 
     most_recent(true)
         .or_else(named_after_user)
@@ -236,7 +242,15 @@ mod tests {
 
     #[test]
     fn a_blank_or_placeholder_target_means_the_user_default() {
-        for query in [None, Some(""), Some("  "), Some("web"), Some(" web_chat ")] {
+        for query in [
+            None,
+            Some(""),
+            Some("  "),
+            Some("web"),
+            Some(" web_chat "),
+            Some("mcp"),
+            Some("agent:internal"),
+        ] {
             assert_eq!(
                 RoomTarget::parse(query),
                 RoomTarget::UserDefault,
@@ -280,9 +294,11 @@ mod tests {
     }
 
     #[test]
-    fn an_unmatched_name_is_kept_as_typed() {
+    fn an_unmatched_name_falls_back_to_the_web_room() {
         let rooms = [cached("!dev:x", "Dev Channel", false, "1")];
-        assert_eq!(match_named("ops", &rooms), "ops");
+        assert_eq!(match_named("ops", &rooms), WEB_ROOM);
+        assert_eq!(match_named("email:victim@example.com", &rooms), WEB_ROOM);
+        assert_eq!(match_named("telegram:999", &rooms), WEB_ROOM);
     }
 
     #[test]
@@ -315,11 +331,19 @@ mod tests {
     }
 
     #[test]
-    fn then_the_dev_room_from_settings() {
-        let rooms = [cached("!general:x", "general", false, "1")];
+    fn then_the_dev_room_from_settings_when_cached() {
+        let rooms = [
+            cached("!general:x", "general", false, "2"),
+            cached("!dev:x", "dev", false, "1"),
+        ];
         assert_eq!(
             default_room(&rooms, &mxids(&["@evan:x"]), Some("!dev:x")),
             Some("!dev:x")
+        );
+        // An uncached dev_room_id is ignored rather than returned blindly.
+        assert_eq!(
+            default_room(&rooms, &mxids(&["@evan:x"]), Some("!stranger:x")),
+            Some("!general:x")
         );
     }
 
@@ -374,7 +398,7 @@ mod tests {
         ];
         assert_eq!(match_named("%", &rooms), "!pct:x");
         assert_eq!(match_named("_", &rooms), "!under:x");
-        assert_eq!(match_named("gen%", &rooms), "gen%");
+        assert_eq!(match_named("gen%", &rooms), WEB_ROOM);
     }
 
     #[test]

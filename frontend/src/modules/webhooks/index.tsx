@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchApi } from '../../core/apiClient';
+import { formatDateTimeInZone, useSettings } from '../../core/settings';
 import { FrontendModule, SystemEvent } from '../../core/types';
 import {
   Plus, Trash2, RefreshCw, Send,
@@ -25,6 +26,7 @@ const WebhooksView: React.FC<{
   isConnected?: boolean;
 }> = () => {
   const queryClient = useQueryClient();
+  const { timezone } = useSettings();
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -245,7 +247,7 @@ const WebhooksView: React.FC<{
                         <div>
                           Last Triggered:{' '}
                           <span className="text-neutral-800 dark:text-neutral-200">
-                            {new Date(hook.last_triggered_at).toLocaleString()}
+                            {formatDateTimeInZone(hook.last_triggered_at, timezone)}
                           </span>
                         </div>
                       </>

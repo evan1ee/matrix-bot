@@ -152,6 +152,19 @@ impl ReminderFireHandler {
         if !self.outbound.is_connected(channel) {
             return Err(JobError::Unavailable(CHANNEL_RETRY));
         }
+        if let Err(reason) = self
+            .outbound
+            .authorize_delivery(&reminder.owner_id, &address)
+            .await
+        {
+            error!(
+                reminder_id = reminder.id,
+                %reason,
+                "Reminder delivery unauthorized; marking failed"
+            );
+            self.services.reminders.mark_failed(reminder.id).await?;
+            return Err(JobError::Permanent(anyhow::anyhow!(reason)));
+        }
         let sent = self
             .outbound
             .send(message(Target::Conversation(address), &plain, &html))
@@ -589,6 +602,32 @@ mod tests {
             .await;
 
         assert!(matches!(out, Err(JobError::Permanent(_))), "{out:?}");
+        assert_eq!(current(&f).await.status, ReminderStatus::Failed);
+    }
+
+    #[tokio::test]
+    async fn an_unauthorized_room_marks_the_reminder_failed_without_sending() {
+        let f = fixture_in(
+            "acct_fire_unauth",
+            RecurrencePattern::None,
+            None,
+            "!victim_dm:test",
+        )
+        .await;
+        let fake = FakeOutbound::connected();
+        *fake.auth_error.lock().unwrap() =
+            Some("Delivery rejected: owner is not joined to room !victim_dm:test".to_string());
+        let handler = ReminderFireHandler::new(f.services.clone(), fake.clone());
+
+        let out = handler
+            .run(
+                &ctx(&f.owner, 1),
+                payload(&f.reminder, f.reminder.trigger_at),
+            )
+            .await;
+
+        assert!(matches!(out, Err(JobError::Permanent(_))), "{out:?}");
+        assert!(fake.room_sends().is_empty());
         assert_eq!(current(&f).await.status, ReminderStatus::Failed);
     }
 }

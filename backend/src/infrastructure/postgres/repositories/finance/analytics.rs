@@ -57,11 +57,12 @@ pub async fn monthly_cashflow_rows(
     owner_id: &AccountId,
     currency: &str,
     cutoff_start: DateTime<Utc>,
+    tz_name: &str,
 ) -> Result<Vec<CashflowRow>, sqlx::Error> {
     let rows = sqlx::query_as!(
         CashflowRow,
         r#"
-        SELECT substr(CAST(occurred_at AS TEXT), 1, 7) AS month_str,
+        SELECT to_char(occurred_at AT TIME ZONE $4, 'YYYY-MM') AS month_str,
                direction,
                CAST(SUM(amount_minor) AS BIGINT) AS total_minor
         FROM transactions
@@ -71,7 +72,8 @@ pub async fn monthly_cashflow_rows(
         "#,
         owner_id.as_uuid(),
         currency,
-        cutoff_start
+        cutoff_start,
+        tz_name
     )
     .fetch_all(pool)
     .await?;

@@ -1,5 +1,4 @@
 import React, { useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
 import {
   AlertTriangle,
   Check,
@@ -28,9 +27,8 @@ import {
   useSensitiveAction,
 } from '../core/security';
 import { addPasskey, describePasskeyError } from '../core/passkey';
-import { formatDateInZone, formatDateTimeInZone } from '../core/settings';
+import { formatDateInZone, formatDateTimeInZone, useSettings } from '../core/settings';
 import { copyToClipboard } from '../core/clipboard';
-import { useSettings } from '../core/settings';
 
 const Section: React.FC<{ title: string; hint?: string; children: React.ReactNode }> = ({
   title,
@@ -161,7 +159,6 @@ function parseDevice(userAgent?: string | null): ParsedDevice {
  */
 export const SecurityPanel: React.FC = () => {
   const settings = useSettings();
-  const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [freshCodes, setFreshCodes] = useState<string[] | null>(null);
   const [isAddingPasskey, setIsAddingPasskey] = useState(false);
@@ -184,13 +181,16 @@ export const SecurityPanel: React.FC = () => {
   const fmt = (iso: string | null) =>
     iso ? formatDateTimeInZone(iso, settings.timezone) : '—';
 
+  const addPasskeyMutation = useSensitiveAction(() => addPasskey(), [
+    SECURITY_KEYS.passkeys,
+    SECURITY_KEYS.events,
+  ]);
+
   const handleAddPasskey = async () => {
     setIsAddingPasskey(true);
     setError(null);
     try {
-      await addPasskey();
-      queryClient.invalidateQueries({ queryKey: SECURITY_KEYS.passkeys });
-      queryClient.invalidateQueries({ queryKey: SECURITY_KEYS.events });
+      await addPasskeyMutation.mutateAsync(undefined);
     } catch (err) {
       setError(describePasskeyError(err));
     } finally {

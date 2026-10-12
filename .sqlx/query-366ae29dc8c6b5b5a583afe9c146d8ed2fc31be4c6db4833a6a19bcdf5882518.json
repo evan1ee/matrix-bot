@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT t.direction, t.amount_minor, t.currency, t.currency_exponent,\n               c.name AS category_name, t.note, t.occurred_at\n        FROM transactions t\n        LEFT JOIN finance_categories c ON c.id = t.category_id\n        WHERE t.owner_id = $1 AND date(t.occurred_at)::text = $2\n        ORDER BY t.occurred_at\n        ",
+  "query": "\n        SELECT t.direction, t.amount_minor, t.currency, t.currency_exponent,\n               c.name AS \"category_name?\", t.note, t.occurred_at\n        FROM transactions t\n        LEFT JOIN finance_categories c ON c.id = t.category_id\n        WHERE t.owner_id = $1 AND date(t.occurred_at AT TIME ZONE $3)::text = $2\n        ORDER BY t.occurred_at\n        ",
   "describe": {
     "columns": [
       {
@@ -49,7 +49,7 @@
       },
       {
         "ordinal": 4,
-        "name": "category_name",
+        "name": "category_name?",
         "type_info": "Text",
         "origin": {
           "Table": {
@@ -84,6 +84,7 @@
     "parameters": {
       "Left": [
         "Uuid",
+        "Text",
         "Text"
       ]
     },
@@ -92,10 +93,10 @@
       false,
       false,
       false,
-      true,
+      false,
       true,
       false
     ]
   },
-  "hash": "1c4719279c105a4c14e2c029b10e9ed07b824b5905176826a232a15661e198e9"
+  "hash": "366ae29dc8c6b5b5a583afe9c146d8ed2fc31be4c6db4833a6a19bcdf5882518"
 }

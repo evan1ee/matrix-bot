@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Smile, Calendar, Sparkles } from 'lucide-react';
 import { triggerAiPrompt } from '../ai';
 import { fetchApi } from '../../core/apiClient';
+import { todayInZone, useSettings } from '../../core/settings';
 import type {
   LifeProfileResponse,
   LifeProfileStats,
@@ -19,6 +20,7 @@ import { LifeProfileModal } from './LifeProfileModal';
 
 export const LifeView: React.FC = () => {
   const queryClient = useQueryClient();
+  const { timezone } = useSettings();
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedDay, setSelectedDay] = useState<LifeDayItem | null>(null);
   const [isDayModalOpen, setIsDayModalOpen] = useState(false);
@@ -61,7 +63,7 @@ export const LifeView: React.FC = () => {
 
   const handleSelectDate = async (date: string) => {
     setSelectedDate(date);
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = todayInZone(timezone);
     let dayType: 'past' | 'present' | 'future' = 'past';
     if (date === todayStr) {
       dayType = 'present';
@@ -154,7 +156,7 @@ export const LifeView: React.FC = () => {
     const birthYear = birthParts[0];
     const lifespan = profile.expected_lifespan_years || 80;
     const endYear = birthYear + lifespan - 1;
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = todayInZone(timezone);
 
     const loggedMap = new Map<
       string,
@@ -214,7 +216,7 @@ export const LifeView: React.FC = () => {
       }
     }
     return result;
-  }, [profile, horizonDays]);
+  }, [profile, horizonDays, timezone]);
 
   return (
     <div className="space-y-6">

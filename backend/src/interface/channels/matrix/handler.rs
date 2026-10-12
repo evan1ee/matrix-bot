@@ -61,7 +61,12 @@ pub fn register_handlers(
         let ai_config = ai_config.clone();
 
         async move {
-            if room.state() != RoomState::Joined || ev.sender == own_id {
+            if room.state() != RoomState::Joined
+                || ev.sender == own_id
+                || crate::interface::channels::matrix::inbound::is_edit_replacement(
+                    &ev.content.relates_to,
+                )
+            {
                 return;
             }
 

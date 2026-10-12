@@ -1,9 +1,11 @@
 pub mod approval;
+pub mod cron;
 pub mod run;
 pub mod step;
 pub mod task;
 
 pub use approval::{ApprovalId, ApprovalRequest, ApprovalStatus, APPROVAL_TTL_HOURS};
+pub use cron::CronSchedule;
 pub use run::{AgentRun, AgentRunId, RunStatus};
 pub use step::{
     interrupted_approved_execution, model_steps, pending_approved_call, step_budget, AgentStep,
@@ -28,6 +30,9 @@ pub enum AgentError {
 
     #[error("invalid task id: {0}")]
     InvalidTaskId(String),
+
+    #[error("invalid cron expression: {0}")]
+    InvalidCronExpression(String),
 
     #[error("invalid status value: {0}")]
     InvalidStatus(String),

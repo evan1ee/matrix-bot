@@ -147,7 +147,7 @@ export const FootprintsList: React.FC<FootprintsListProps> = ({
             const isSelected = selectedFootprint?.id === fp.id;
             const formattedSpend =
               fp.spend_amount_minor > 0
-                ? `${(fp.spend_amount_minor / Math.pow(10, fp.spend_currency_exponent)).toFixed(2)} ${fp.spend_currency}`
+                ? `${(fp.spend_amount_minor / Math.pow(10, fp.spend_currency_exponent)).toFixed(fp.spend_currency_exponent)} ${fp.spend_currency}`
                 : null;
 
             return (

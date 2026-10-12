@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchApi } from '../../core/apiClient';
+import { todayInZone, useSettings } from '../../core/settings';
 import type { FrontendModule, SystemEvent } from '../../core/types';
 import type {
   LifeDayItem,
@@ -14,8 +15,17 @@ import { ReflectionCard } from './components/ReflectionCard';
 
 export const MoodView: React.FC = () => {
   const queryClient = useQueryClient();
-  const todayStr = useMemo(() => new Date().toISOString().split('T')[0], []);
-  const [selectedDate, setSelectedDate] = useState<string>(todayStr);
+  const { timezone } = useSettings();
+  const todayStr = useMemo(() => todayInZone(timezone), [timezone]);
+  const [selectedDate, setSelectedDate] = useState<string>(() => todayInZone(timezone));
+  const prevTodayRef = useRef(todayStr);
+
+  useEffect(() => {
+    if (selectedDate === prevTodayRef.current && todayStr !== prevTodayRef.current) {
+      setSelectedDate(todayStr);
+    }
+    prevTodayRef.current = todayStr;
+  }, [todayStr, selectedDate]);
 
   // Form state
   const [selectedMood, setSelectedMood] = useState<MoodType>('good');

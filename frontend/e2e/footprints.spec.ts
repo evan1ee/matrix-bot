@@ -100,6 +100,30 @@ test.describe('Footprints (Travel & Places Visited)', () => {
     expect(api.footprints.length).toBe(0);
   });
 
+  test('renders and pre-fills zero-decimal currency (JPY) spend without dividing by 100', async ({
+    app,
+    api,
+  }) => {
+    api.seedFootprint({
+      title: 'Shibuya Ramen',
+      country: 'Japan',
+      city: 'Tokyo',
+      category: 'food',
+      rating: 5,
+      spend_amount_minor: 5000,
+      spend_currency: 'JPY',
+      spend_currency_exponent: 0,
+    });
+
+    await gotoFootprints(app);
+    await expect(app.getByRole('heading', { name: 'Shibuya Ramen' })).toBeVisible();
+    await expect(app.getByText('5000 JPY').first()).toBeVisible();
+
+    await app.getByTitle('Edit Footprint').click();
+    await expect(app.getByRole('heading', { name: 'Edit Visited Place' })).toBeVisible();
+    await expect(app.getByPlaceholder('0')).toHaveValue('5000');
+  });
+
   test('captures screenshots of top-and-down map and grid card layout in dark and light modes', async ({
     app,
     api,

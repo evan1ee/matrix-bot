@@ -218,7 +218,7 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         .with_embedding_model(&config.embedding_model);
     // Built once and cloned into every reconnect generation, so `SyncHealth`
     // survives a Matrix reconnect.
-    let handles = BotHandles::default();
+    let mut handles = BotHandles::default();
     let modules = build_modules(&config).await;
     let discord = config
         .discord
@@ -278,6 +278,7 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         }
         ChannelRegistry::from_unique(adapters)
     });
+    handles.outbound = Some(Arc::downgrade(&channels));
     let ocr = crate::infrastructure::inference::ocr::OcrClient::new(config.ocr_base_url.clone());
     let registry = jobs::Registry::new(crate::interface::jobs::handlers(
         &services,

@@ -316,6 +316,22 @@ impl AccountModule {
     }
 }
 
+/// Announces that a recovery completed to every linked identity of `account_id`.
+pub async fn announce_recovery_completed(
+    services: &AppServices,
+    outbound: Option<&Weak<ChannelRegistry>>,
+    account_id: &AccountId,
+) {
+    announce_account(
+        outbound,
+        &services.identity,
+        account_id,
+        SecurityEventKind::RecoveryCompleted,
+        None,
+    )
+    .await;
+}
+
 /// Redeems a matured recovery code presented in the web UI.
 pub async fn redeem_matured_recovery(
     services: &AppServices,
@@ -324,14 +340,7 @@ pub async fn redeem_matured_recovery(
 ) -> Result<AccountId, RecoveryRejection> {
     match services.accounts.redeem_recovery_request(code).await {
         Ok(MaturedRecovery::Ready { account_id }) => {
-            announce_account(
-                outbound,
-                &services.identity,
-                &account_id,
-                SecurityEventKind::RecoveryCompleted,
-                None,
-            )
-            .await;
+            announce_recovery_completed(services, outbound, &account_id).await;
             Ok(account_id)
         }
         Ok(MaturedRecovery::TooEarly) => Err(RecoveryRejection::TooEarly),

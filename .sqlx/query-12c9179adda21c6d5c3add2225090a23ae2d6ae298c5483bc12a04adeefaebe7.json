@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT quantity_minor, avg_cost_minor FROM portfolio_holdings WHERE owner_id = $1 AND symbol = 'AAPL'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "quantity_minor",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "portfolio_holdings",
+            "name": "quantity_minor"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "avg_cost_minor",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "portfolio_holdings",
+            "name": "avg_cost_minor"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "12c9179adda21c6d5c3add2225090a23ae2d6ae298c5483bc12a04adeefaebe7"
+}

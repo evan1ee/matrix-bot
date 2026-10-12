@@ -32,19 +32,14 @@ impl CommandParser {
         let full_mxid = own_id.to_string();
         let short_mention = format!("@{}", localpart);
 
-        let body_lower = prompt_trimmed.to_lowercase();
-        let localpart_lower = localpart.to_lowercase();
-
         let is_html_mentioned = formatted_body
-            .map(|f| f.contains(&full_mxid) || f.contains(&short_mention))
+            .map(strip_mx_reply)
+            .map(|f| f.contains(&full_mxid) || contains_word_mention_ci(&f, &short_mention))
             .unwrap_or(false);
 
         let is_plain_mentioned = prompt_trimmed.contains(&full_mxid)
-            || body_lower.contains(&short_mention.to_lowercase())
-            || body_lower.starts_with(&format!("{}:", localpart_lower))
-            || body_lower.starts_with(&format!("{},", localpart_lower))
-            || body_lower.starts_with(&format!("@{}", localpart_lower))
-            || body_lower == localpart_lower;
+            || contains_word_mention_ci(prompt_trimmed, &short_mention)
+            || strip_leading_localpart_mention(prompt_trimmed, localpart).is_some();
 
         let is_mentioned = is_plain_mentioned || is_html_mentioned;
         let is_command_prefix = prompt_trimmed.starts_with('!') || prompt_trimmed.starts_with('/');
@@ -53,19 +48,12 @@ impl CommandParser {
             return None;
         }
 
-        let mut clean_body = prompt_trimmed
-            .replace(&full_mxid, "")
-            .replace(&short_mention, "")
-            .trim()
-            .to_string();
+        let without_mxid = prompt_trimmed.replace(&full_mxid, "");
+        let without_short = remove_word_mentions_ci(&without_mxid, &short_mention);
+        let mut clean_body = without_short.trim().to_string();
 
-        let clean_lower = clean_body.to_lowercase();
-        if clean_lower.starts_with(&format!("{}:", localpart_lower))
-            || clean_lower.starts_with(&format!("{},", localpart_lower))
-        {
-            clean_body = clean_body[localpart.len() + 1..].trim().to_string();
-        } else if clean_lower.starts_with(&localpart_lower) {
-            clean_body = clean_body[localpart.len()..].trim().to_string();
+        if let Some(after_localpart) = strip_leading_localpart_mention(&clean_body, localpart) {
+            clean_body = after_localpart.trim().to_string();
         }
 
         clean_body = clean_body
@@ -195,6 +183,91 @@ impl CommandParser {
             false
         }
     }
+}
+
+fn strip_mx_reply(formatted: &str) -> String {
+    if let Some(end_idx) = formatted.find("</mx-reply>") {
+        formatted[end_idx + "</mx-reply>".len()..].to_string()
+    } else {
+        formatted.to_string()
+    }
+}
+
+fn is_mention_boundary_after(c: Option<char>) -> bool {
+    match c {
+        None => true,
+        Some(ch) => !ch.is_alphanumeric() && ch != '_' && ch != '-',
+    }
+}
+
+fn is_mention_boundary_before(c: Option<char>) -> bool {
+    match c {
+        None => true,
+        Some(ch) => !ch.is_alphanumeric() && ch != '_' && ch != '-',
+    }
+}
+
+fn match_ci_prefix<'a>(haystack: &'a str, needle: &str) -> Option<&'a str> {
+    let mut h_chars = haystack.char_indices();
+    for nc in needle.chars() {
+        let (_, hc) = h_chars.next()?;
+        if !hc.to_lowercase().eq(nc.to_lowercase()) {
+            return None;
+        }
+    }
+    let next_byte = h_chars.next().map(|(i, _)| i).unwrap_or(haystack.len());
+    Some(&haystack[next_byte..])
+}
+
+/// Checks if `haystack` starts with `localpart` followed by `:`, `,`, or end-of-string.
+fn strip_leading_localpart_mention<'a>(haystack: &'a str, localpart: &str) -> Option<&'a str> {
+    let rest = match_ci_prefix(haystack, localpart)?;
+    if rest.is_empty() {
+        Some(rest)
+    } else if let Some(after) = rest.strip_prefix(':').or_else(|| rest.strip_prefix(',')) {
+        Some(after)
+    } else {
+        None
+    }
+}
+
+/// Checks whether `mention` (e.g. `@bot`) appears in `haystack` on word boundaries.
+fn contains_word_mention_ci(haystack: &str, mention: &str) -> bool {
+    let mut prev_char = None;
+    for (idx, ch) in haystack.char_indices() {
+        if is_mention_boundary_before(prev_char) {
+            if let Some(rest) = match_ci_prefix(&haystack[idx..], mention) {
+                if is_mention_boundary_after(rest.chars().next()) {
+                    return true;
+                }
+            }
+        }
+        prev_char = Some(ch);
+    }
+    false
+}
+
+/// Removes `mention` (e.g. `@bot`) from `haystack` only where it occurs on word boundaries.
+fn remove_word_mentions_ci(haystack: &str, mention: &str) -> String {
+    let mut out = String::with_capacity(haystack.len());
+    let mut idx = 0;
+    let mut prev_char = None;
+    while idx < haystack.len() {
+        if is_mention_boundary_before(prev_char) {
+            if let Some(rest) = match_ci_prefix(&haystack[idx..], mention) {
+                if is_mention_boundary_after(rest.chars().next()) {
+                    idx = haystack.len() - rest.len();
+                    prev_char = None;
+                    continue;
+                }
+            }
+        }
+        let ch = haystack[idx..].chars().next().unwrap();
+        out.push(ch);
+        idx += ch.len_utf8();
+        prev_char = Some(ch);
+    }
+    out
 }
 
 #[cfg(test)]
@@ -382,6 +455,55 @@ mod tests {
             "!room:matrix.org",
             &PlatformIdentity::matrix("@alice:matrix.org").unwrap(),
             true,
+        );
+        assert!(res.is_none());
+    }
+
+    #[test]
+    fn test_mention_does_not_corrupt_words_sharing_localpart_prefix() {
+        let bot_id = UserId::parse("@bot:matrix.org").unwrap();
+        let ctx = CommandParser::parse_message(
+            "@bot botanical garden",
+            None,
+            &bot_id,
+            "!room:matrix.org",
+            &alice(),
+        )
+        .unwrap();
+        assert_eq!(ctx.command, "botanical");
+        assert_eq!(ctx.raw_args, "garden");
+
+        // Substring mention (@botanical) is not a mention of @bot
+        assert!(CommandParser::parse_message(
+            "Visit @botanical garden",
+            None,
+            &bot_id,
+            "!room:matrix.org",
+            &alice(),
+        )
+        .is_none());
+
+        // Multibyte case-folding character before localpart must not panic
+        let _ = CommandParser::parse_message(
+            "İbot: hello",
+            None,
+            &bot_id,
+            "!room:matrix.org",
+            &alice(),
+        );
+    }
+
+    #[test]
+    fn test_html_mention_inside_mx_reply_only_is_ignored() {
+        let bot_id = UserId::parse("@hellobot:matrix.org").unwrap();
+        let body = "> <@hellobot:matrix.org> earlier reply\n\nI agree with that.";
+        let formatted = "<mx-reply><blockquote><a href=\"https://matrix.to/#/@hellobot:matrix.org\">@hellobot:matrix.org</a> earlier reply</blockquote></mx-reply>I agree with that.";
+        let res = CommandParser::parse_message(
+            body,
+            Some(formatted),
+            &bot_id,
+            "!room:matrix.org",
+            &alice(),
         );
         assert!(res.is_none());
     }

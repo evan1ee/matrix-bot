@@ -106,10 +106,23 @@ pub async fn redeem_recovery(
         .await
         .map_err(|e| ApiError::internal(format!("Database error during recovery check: {e}")))?;
 
+    if let Some(ref account_id) = resolved_account_id {
+        crate::interface::chat::account::announce_recovery_completed(
+            &state.services,
+            state.outbound.as_ref(),
+            account_id,
+        )
+        .await;
+    }
+
     // 2. If not found in static codes, try 24-hour matured recovery requests
     if resolved_account_id.is_none() {
-        match crate::interface::chat::account::redeem_matured_recovery(&state.services, None, code)
-            .await
+        match crate::interface::chat::account::redeem_matured_recovery(
+            &state.services,
+            state.outbound.as_ref(),
+            code,
+        )
+        .await
         {
             Ok(account_id) => {
                 resolved_account_id = Some(account_id);

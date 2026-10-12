@@ -104,8 +104,8 @@ export const FootprintsView: React.FC<{
         .map(
           (s) =>
             `${(s.total_spend_minor / Math.pow(10, s.currency_exponent)).toLocaleString(undefined, {
-              minimumFractionDigits: 2,
-              maximumFractionDigits: 2,
+              minimumFractionDigits: s.currency_exponent,
+              maximumFractionDigits: s.currency_exponent,
             })} ${s.currency}`
         )
         .join(' · ')
@@ -157,8 +157,8 @@ export const FootprintsView: React.FC<{
                   className="text-lg sm:text-xl font-semibold text-neutral-900 dark:text-neutral-100 font-sans tabular-nums whitespace-nowrap inline-flex items-baseline gap-1"
                 >
                   {(s.total_spend_minor / Math.pow(10, s.currency_exponent)).toLocaleString(undefined, {
-                    minimumFractionDigits: 2,
-                    maximumFractionDigits: 2,
+                    minimumFractionDigits: s.currency_exponent,
+                    maximumFractionDigits: s.currency_exponent,
                   })}
                   <span className="text-[11px] font-mono font-normal text-neutral-500">
                     {s.currency}

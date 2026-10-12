@@ -241,6 +241,7 @@ mod step_up_tests {
         ("POST", "/api/v1/account/sessions/revoke-others"),
         ("DELETE", "/api/v1/account/sessions/some-id"),
         ("POST", "/api/v1/account/recovery-codes"),
+        ("POST", "/api/v1/account/passkeys/add/start"),
         ("DELETE", "/api/v1/account/passkeys/some-id"),
         ("PUT", "/api/v1/account/passkeys/some-id"),
         ("GET", "/api/v1/notes/export"),

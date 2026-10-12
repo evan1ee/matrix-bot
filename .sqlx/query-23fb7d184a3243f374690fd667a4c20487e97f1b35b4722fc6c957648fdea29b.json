@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM mcp_tokens WHERE account_id = $1 AND (id = $2 OR prefix LIKE $3 ESCAPE '\\' OR token_hash = $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "23fb7d184a3243f374690fd667a4c20487e97f1b35b4722fc6c957648fdea29b"
+}

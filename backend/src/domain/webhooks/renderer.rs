@@ -96,6 +96,55 @@ fn format_inline_markdown(escaped: &str) -> String {
     res
 }
 
+/// Decodes HTML numeric and named entities (`&#106;`, `&#x6a;`, `&colon;`, etc.) so obfuscated
+/// `javascript:` / `data:` / `vbscript:` URI schemes cannot evade inspection.
+fn decode_html_entities_for_check(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut rest = s;
+    while let Some(amp) = rest.find('&') {
+        out.push_str(&rest[..amp]);
+        let after_amp = &rest[amp + 1..];
+        let end_pos = after_amp
+            .find(|c: char| c == ';' || !c.is_ascii_alphanumeric() && c != '#')
+            .unwrap_or(after_amp.len());
+        let entity = &after_amp[..end_pos];
+        let consumed = if after_amp[end_pos..].starts_with(';') {
+            end_pos + 1
+        } else {
+            end_pos
+        };
+        let decoded = if let Some(hex) = entity
+            .strip_prefix("#x")
+            .or_else(|| entity.strip_prefix("#X"))
+        {
+            u32::from_str_radix(hex, 16).ok().and_then(char::from_u32)
+        } else if let Some(dec) = entity.strip_prefix('#') {
+            dec.parse::<u32>().ok().and_then(char::from_u32)
+        } else {
+            match entity.to_ascii_lowercase().as_str() {
+                "colon" => Some(':'),
+                "tab" => Some('\t'),
+                "newline" => Some('\n'),
+                "amp" => Some('&'),
+                "quot" => Some('"'),
+                "apos" => Some('\''),
+                "lt" => Some('<'),
+                "gt" => Some('>'),
+                _ => None,
+            }
+        };
+        if let Some(ch) = decoded {
+            out.push(ch);
+            rest = &after_amp[consumed..];
+        } else {
+            out.push('&');
+            rest = after_amp;
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
 /// Sanitizes an HTML snippet for safe Matrix rendering by allowing only safe tags and attributes,
 /// escaping or stripping dangerous elements like <script>, <iframe>, event handlers, and javascript: links.
 pub fn sanitize_html(input: &str) -> String {
@@ -105,15 +154,32 @@ pub fn sanitize_html(input: &str) -> String {
     while let Some(c) = chars.next() {
         if c == '<' {
             let mut tag = String::new();
+            let mut in_quote: Option<char> = None;
+            let mut closed = false;
             while let Some(&next_c) = chars.peek() {
-                if next_c == '>' {
+                if let Some(q) = in_quote {
+                    if next_c == q {
+                        in_quote = None;
+                    }
+                    tag.push(chars.next().unwrap());
+                } else if next_c == '"' || next_c == '\'' {
+                    in_quote = Some(next_c);
+                    tag.push(chars.next().unwrap());
+                } else if next_c == '>' {
                     chars.next();
+                    closed = true;
                     break;
+                } else {
+                    tag.push(chars.next().unwrap());
                 }
-                tag.push(chars.next().unwrap());
             }
 
             let trimmed_tag = tag.trim();
+            if !closed {
+                out.push_str("&lt;");
+                out.push_str(&html_escape(trimmed_tag));
+                continue;
+            }
             let clean_tag = trimmed_tag.trim_start_matches('/').trim();
             let tag_name = clean_tag
                 .split_whitespace()
@@ -144,16 +210,20 @@ pub fn sanitize_html(input: &str) -> String {
             );
 
             let lower_tag = trimmed_tag.to_lowercase();
-            let stripped_whitespace: String =
-                lower_tag.chars().filter(|c| !c.is_whitespace()).collect();
+            let decoded_tag = decode_html_entities_for_check(&lower_tag).to_lowercase();
+            let stripped_whitespace: String = decoded_tag
+                .chars()
+                .filter(|c| !c.is_whitespace() && !c.is_control())
+                .collect();
             let has_dangerous_attr = stripped_whitespace.contains("javascript:")
                 || stripped_whitespace.contains("data:")
                 || stripped_whitespace.contains("vbscript:")
-                || lower_tag.contains("autofocus")
-                || lower_tag.contains("formaction")
-                || lower_tag
+                || decoded_tag.contains("autofocus")
+                || decoded_tag.contains("formaction")
+                || decoded_tag
                     .split(|c: char| {
                         c.is_whitespace()
+                            || c.is_control()
                             || c == '/'
                             || c == '>'
                             || c == '<'
@@ -311,5 +381,12 @@ mod tests {
             sanitize_html(legitimate),
             "<a href=\"https://example.com\" target=\"_blank\">Link</a> <b>bold</b>"
         );
+
+        let quoted_gt = "<a title=\">\" onclick=\"alert(1)\">x</a>";
+        assert!(!sanitize_html(quoted_gt).contains("onclick=\"alert(1)\""));
+
+        let entity_js = "<a href=\"&#106;avascript:alert(1)\">x</a> <a href=\"javascript&colon;alert(1)\">y</a>";
+        let sanitized_entity_js = sanitize_html(entity_js);
+        assert!(!sanitized_entity_js.contains("<a "));
     }
 }

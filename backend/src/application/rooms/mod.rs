@@ -127,11 +127,17 @@ impl RoomService {
     }
 
     /// The room an action asked for by `query` (a room id, a room name, or
-    /// nothing), falling back to [`WEB_ROOM`] when no Matrix room resolves.
-    /// Infallible for the same reason as [`Self::default_room`].
+    /// nothing), falling back to [`WEB_ROOM`] when no authorized Matrix room
+    /// resolves. Infallible for the same reason as [`Self::default_room`].
     pub async fn resolve_target_room(&self, account_id: &AccountId, query: Option<&str>) -> String {
         match RoomTarget::parse(query) {
-            RoomTarget::RoomId(room_id) => room_id.to_owned(),
+            RoomTarget::RoomId(room_id) => {
+                if self.is_cached(account_id, room_id).await.unwrap_or(false) {
+                    room_id.to_owned()
+                } else {
+                    WEB_ROOM.to_owned()
+                }
+            }
             RoomTarget::Named(name) => {
                 let rooms = self.cached_rooms_or_empty(account_id).await;
                 domain::match_named(name, &rooms).to_owned()
@@ -340,10 +346,15 @@ mod tests {
         for (query, expected) in [
             (None, "!direct:x"),
             (Some("web"), "!direct:x"),
-            (Some("!arbitrary:x"), "!arbitrary:x"),
+            (Some("mcp"), "!direct:x"),
+            (Some("agent:internal"), "!direct:x"),
+            (Some("!direct:x"), "!direct:x"),
+            (Some("!arbitrary:x"), WEB_ROOM),
             (Some("Dev Channel"), "!dev:x"),
             (Some("dev"), "!dev:x"),
-            (Some("ops"), "ops"),
+            (Some("ops"), WEB_ROOM),
+            (Some("email:victim@example.com"), WEB_ROOM),
+            (Some("telegram:999"), WEB_ROOM),
         ] {
             assert_eq!(
                 service.resolve_target_room(&acct, query).await,
@@ -368,11 +379,30 @@ mod tests {
         settings_service.save(&account, settings).await.unwrap();
         assert_eq!(
             service.default_room(&account).await.as_deref(),
+            None,
+            "an uncached dev_room_id must not be returned"
+        );
+
+        service
+            .replace_cached(
+                &account,
+                &[
+                    room("!general:x", "general", false),
+                    room("!dev:x", "dev", false),
+                ],
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            service.default_room(&account).await.as_deref(),
             Some("!dev:x")
         );
 
         service
-            .replace_cached(&account, &[room("!evan:x", "Evan", false)])
+            .replace_cached(
+                &account,
+                &[room("!evan:x", "Evan", false), room("!dev:x", "dev", false)],
+            )
             .await
             .unwrap();
         assert_eq!(

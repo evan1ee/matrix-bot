@@ -4,7 +4,15 @@ import { AlertCircle, RefreshCcw, X } from 'lucide-react';
 import { fetchApi } from '../../core/apiClient';
 import { CustomSelect } from '../../components/CustomSelect';
 import { DateTimePicker } from '../../components/DateTimePicker';
-import { CURRENCY_OPTIONS, nowInZone, useSettings } from '../../core/settings';
+import {
+  CURRENCY_OPTIONS,
+  currencyExponent,
+  nowInZone,
+  todayInZone,
+  useSettings,
+  utcIsoToZonedInput,
+  zonedInputToUtcIso,
+} from '../../core/settings';
 import { CreateBillPayload, RecurringBill, UpdateBillPayload } from './types';
 
 interface BillModalProps {
@@ -81,19 +89,14 @@ export const BillModal: React.FC<BillModalProps> = ({
 
   useEffect(() => {
     if (initialData) {
+      const exp = initialData.currency_exponent ?? currencyExponent(initialData.currency);
       setName(initialData.name);
-      setAmount((initialData.amount_minor / 100).toFixed(2));
+      setAmount((initialData.amount_minor / Math.pow(10, exp)).toFixed(exp));
       setCurrency(initialData.currency);
       setCategory(initialData.category);
       setFrequency(initialData.frequency);
-      
-      // Parse ISO timestamp to YYYY-MM-DDTHH:mm format for DateTimePicker
-      const rawDate = initialData.next_due_at;
-      const formatted = rawDate.includes('T')
-        ? rawDate.slice(0, 16)
-        : rawDate.replace(' ', 'T').slice(0, 16);
-      setNextDueAt(formatted);
-      
+      setNextDueAt(utcIsoToZonedInput(initialData.next_due_at, timezone));
+
       setTotalInstallments(initialData.total_installments ? String(initialData.total_installments) : '');
       setAutoPay(initialData.auto_pay);
       setNotes(initialData.notes || '');
@@ -109,11 +112,9 @@ export const BillModal: React.FC<BillModalProps> = ({
       setFrequency('monthly');
       setLeadMinutes('');
       setRemindRoomId('');
-      
-      // Default to today at 09:00
-      const now = nowInZone(timezone);
-      const pad = (n: number) => String(n).padStart(2, '0');
-      const todayStr = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T09:00`;
+
+      // Default to today at 09:00 in the user's saved zone
+      const todayStr = `${todayInZone(timezone)}T09:00`;
       setNextDueAt(todayStr);
 
       setTotalInstallments('');
@@ -134,18 +135,23 @@ export const BillModal: React.FC<BillModalProps> = ({
 
   if (!isOpen) return null;
 
+  const amountExp = currencyExponent(currency);
+  const amountStep = amountExp === 0 ? '1' : amountExp === 3 ? '0.001' : '0.01';
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const numAmount = parseFloat(amount);
     if (!name.trim() || isNaN(numAmount) || numAmount <= 0) return;
 
-    const amountMinor = Math.round(numAmount * 100);
-    // Format timestamp for backend (YYYY-MM-DD HH:MM:SS)
-    let formattedNextDue = `${new Date().toISOString().slice(0, 10)} 09:00:00`;
-    if (nextDueAt) {
-      const clean = nextDueAt.replace('T', ' ');
-      formattedNextDue = clean.length === 16 ? `${clean}:00` : clean.slice(0, 19);
-    }
+    const amountMinor = Math.round(numAmount * Math.pow(10, amountExp));
+    // Convert wall-clock picker value in the user's saved zone into UTC (YYYY-MM-DD HH:MM:SS)
+    const fallbackZoned = `${todayInZone(timezone)}T09:00`;
+    const candidateInput = nextDueAt
+      ? nextDueAt.replace(' ', 'T').slice(0, 16)
+      : fallbackZoned;
+    const utcIso =
+      zonedInputToUtcIso(candidateInput, timezone) ?? new Date().toISOString();
+    const formattedNextDue = utcIso.slice(0, 19).replace('T', ' ');
 
     if (initialData) {
       const payload: UpdateBillPayload = {
@@ -167,6 +173,7 @@ export const BillModal: React.FC<BillModalProps> = ({
         name,
         amount_minor: amountMinor,
         currency,
+        currency_exponent: amountExp,
         category,
         frequency,
         next_due_at: formattedNextDue,
@@ -269,12 +276,12 @@ export const BillModal: React.FC<BillModalProps> = ({
               </label>
               <input
                 type="number"
-                step="0.01"
-                min="0.01"
+                step={amountStep}
+                min={amountStep}
                 required
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                placeholder="0.00"
+                placeholder={(0).toFixed(amountExp)}
                 className="w-full h-9 px-3 text-xs bg-transparent border border-neutral-300 dark:border-neutral-700 rounded-md focus:outline-none focus:ring-1 focus:ring-neutral-400 dark:focus:ring-neutral-500 text-neutral-900 dark:text-neutral-100 font-mono"
               />
             </div>

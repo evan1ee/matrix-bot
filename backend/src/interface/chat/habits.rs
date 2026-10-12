@@ -40,9 +40,10 @@ impl HabitsModule {
         let mut parts = args.split_whitespace();
         let sub = parts.next().unwrap_or("").to_lowercase();
 
+        let settings = services.settings.get_or_default(owner).await;
         let today_str = chrono::Utc::now()
-            .naive_utc()
-            .date()
+            .with_timezone(&settings.tz())
+            .date_naive()
             .format("%Y-%m-%d")
             .to_string();
 

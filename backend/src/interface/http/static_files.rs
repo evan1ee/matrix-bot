@@ -19,6 +19,10 @@ pub async fn static_handler(uri: Uri) -> Response {
         raw_path
     };
 
+    if !is_safe_relative_path(path) {
+        return (StatusCode::NOT_FOUND, "404 Not Found").into_response();
+    }
+
     // 1. Try serving from local disk first if present (supports frontend dev and custom overrides)
     if let Some(disk_path) = find_disk_file(path) {
         if let Ok(bytes) = tokio::fs::read(&disk_path).await {
@@ -70,7 +74,29 @@ pub async fn static_handler(uri: Uri) -> Response {
     (StatusCode::NOT_FOUND, "404 Not Found").into_response()
 }
 
+fn is_safe_relative_path(path: &str) -> bool {
+    if path.is_empty() || path.contains('\\') || path.contains('\0') {
+        return false;
+    }
+    let mut has_normal = false;
+    for component in std::path::Path::new(path).components() {
+        match component {
+            std::path::Component::Normal(seg) => {
+                if seg.is_empty() {
+                    return false;
+                }
+                has_normal = true;
+            }
+            _ => return false,
+        }
+    }
+    has_normal
+}
+
 fn find_disk_file(path: &str) -> Option<std::path::PathBuf> {
+    if !is_safe_relative_path(path) {
+        return None;
+    }
     for base in &["web/dist", "backend/web/dist"] {
         let p = std::path::Path::new(base).join(path);
         if p.is_file() {
@@ -136,5 +162,24 @@ mod tests {
         let uri: Uri = "/assets/non_existent_file.js".parse().unwrap();
         let res = static_handler(uri).await;
         assert_eq!(res.status(), StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn test_static_handler_rejects_path_traversal() {
+        for bad in [
+            "/../../Cargo.toml",
+            "/../../../Cargo.toml",
+            "/../Cargo.toml",
+            "/assets/../../Cargo.toml",
+            "/..\\..\\Cargo.toml",
+        ] {
+            let uri: Uri = bad.parse().unwrap();
+            let res = static_handler(uri).await;
+            assert_eq!(
+                res.status(),
+                StatusCode::NOT_FOUND,
+                "traversal path {bad} must be rejected with 404"
+            );
+        }
     }
 }

@@ -25,6 +25,12 @@ pub async fn add_passkey_start(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<CeremonyStart>, ApiError> {
+    let now = chrono::Utc::now();
+    let active_restriction = user.restricted_until.filter(|&until| now < until);
+    if active_restriction.is_none() && !user.may_perform_sensitive_action(now) {
+        return Err(ApiError::forbidden("Confirm with your passkey to continue"));
+    }
+
     let handle = user.account_id.to_handle();
 
     let stored = state
@@ -56,6 +62,7 @@ pub async fn add_passkey_start(
         .stash_ceremony(Ceremony::Registration {
             account_id: user.account_id,
             display_name: user.display_name,
+            restricted_until: active_restriction,
             state: reg_state,
         })
         .await?;
@@ -160,5 +167,92 @@ pub async fn delete_passkey(
         DeleteOutcome::WouldLockOut => Err(ApiError::conflict(
             "That is your only passkey. Add another before removing this one.",
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::accounts::STATUS_ACTIVE;
+    use chrono::{Duration, Utc};
+
+    async fn test_state() -> ApiState {
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        ApiState::new(
+            crate::db::Database { pool },
+            None,
+            "https://mbm.one".to_string(),
+            reqwest::Client::new(),
+        )
+    }
+
+    #[tokio::test]
+    async fn test_add_passkey_start_rejects_stale_session_and_preserves_recovery_restriction() {
+        let state = test_state().await;
+        let account_id = state
+            .services
+            .accounts
+            .create("evan", STATUS_ACTIVE)
+            .await
+            .unwrap();
+
+        // 1. Stale unverified session is rejected with 403
+        let stale_user = AuthUser {
+            last_verified_at: Utc::now() - Duration::minutes(10),
+            restricted_until: None,
+            ..AuthUser::for_account(account_id)
+        };
+        let err = add_passkey_start(State(state.clone()), stale_user)
+            .await
+            .unwrap_err();
+        assert_eq!(err.status, axum::http::StatusCode::FORBIDDEN);
+
+        // 2. Recovery-restricted session is allowed to start passkey registration,
+        // and its restricted_until is carried into the ceremony and the resulting session.
+        let until = Utc::now() + Duration::hours(72);
+        let recovery_user = AuthUser {
+            last_verified_at: chrono::DateTime::<Utc>::UNIX_EPOCH,
+            restricted_until: Some(until),
+            ..AuthUser::for_account(account_id)
+        };
+        let started = add_passkey_start(State(state.clone()), recovery_user)
+            .await
+            .expect("recovery-restricted session may start passkey registration");
+        let Some(Ceremony::Registration {
+            restricted_until, ..
+        }) = state.take_ceremony(&started.ceremony_id).await
+        else {
+            panic!("expected registration ceremony");
+        };
+        assert_eq!(restricted_until, Some(until));
+
+        // 3. Issuing a session with that restriction keeps restricted_until and does not satisfy step-up.
+        let resp = crate::interface::http::auth::webauthn::issue_session_with_restriction(
+            &state,
+            &account_id,
+            "evan",
+            &axum::http::HeaderMap::new(),
+            restricted_until,
+        )
+        .await
+        .unwrap();
+        let set_cookie = resp
+            .headers()
+            .get(axum::http::header::SET_COOKIE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap();
+        let token =
+            crate::domain::accounts::cookie_value(set_cookie, crate::domain::accounts::COOKIE_NAME)
+                .unwrap();
+        let session = state
+            .services
+            .accounts
+            .resolve_session(token)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(session.is_restricted(Utc::now()));
+        assert!(!session.is_recently_verified(Utc::now()));
     }
 }

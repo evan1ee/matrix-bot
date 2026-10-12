@@ -51,9 +51,17 @@ impl MergeService {
         let mut moved = MergePreview::default();
         let mut discarded = 0i64;
 
+        let reconciled = repo_merge::reconcile_colliding_owned_rows(tx, from, into).await?;
+
         for &table in OWNED_TABLES {
             let updated = repo_merge::move_rows(tx, table, "owner_id", from, into).await?;
-            moved.set(table, updated);
+            let extra = match table {
+                "portfolio_cash_balances" => reconciled.cash_balances,
+                "portfolio_holdings" => reconciled.holdings,
+                "portfolio_daily_snapshots" => reconciled.snapshots,
+                _ => 0,
+            };
+            moved.set(table, updated + extra);
 
             let leftover = repo_merge::delete_leftovers(tx, table, "owner_id", from).await?;
             discarded += leftover;
@@ -978,5 +986,88 @@ mod tests {
             .unwrap();
         let entry = audits.iter().find(|e| e.id == audit_id).unwrap();
         assert_eq!(entry.actor_id, Some(into.uuid()));
+    }
+
+    #[tokio::test]
+    async fn test_merge_reconciles_colliding_holdings_cash_snapshots_and_categories() {
+        let pool = db().await;
+        let from = repo_core::create(&pool, "from_m7", STATUS_UNCLAIMED)
+            .await
+            .unwrap();
+        let into = repo_core::create(&pool, "into_m7", STATUS_ACTIVE)
+            .await
+            .unwrap();
+
+        let from_cat_id: i64 = sqlx::query_scalar!(
+            "INSERT INTO finance_categories (owner_id, name) VALUES ($1, 'Food') RETURNING id",
+            from.as_uuid()
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        let into_cat_id: i64 = sqlx::query_scalar!(
+            "INSERT INTO finance_categories (owner_id, name) VALUES ($1, 'food') RETURNING id",
+            into.as_uuid()
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        let tx_id: i64 = sqlx::query_scalar!(
+            "INSERT INTO transactions (room_id, owner_id, sender_name, direction, amount_minor, currency, category_id, occurred_at) \
+             VALUES ('web', $1, 'a', 'expense', 1200, 'USD', $2, CURRENT_TIMESTAMP) RETURNING id",
+            from.as_uuid(),
+            from_cat_id
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query!(
+            "INSERT INTO portfolio_cash_balances (owner_id, currency, balance_minor) VALUES ($1, 'USD', 3000), ($2, 'USD', 7000)",
+            from.as_uuid(),
+            into.as_uuid()
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query!(
+            "INSERT INTO portfolio_holdings (owner_id, symbol, quantity_minor, avg_cost_minor, currency) \
+             VALUES ($1, 'AAPL', 100000000, 10000, 'USD'), ($2, 'AAPL', 100000000, 20000, 'USD')",
+            from.as_uuid(),
+            into.as_uuid()
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        MergeService::merge(&pool, &from, &into).await.unwrap();
+
+        let moved_tx_cat: Option<i64> =
+            sqlx::query_scalar!("SELECT category_id FROM transactions WHERE id = $1", tx_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(moved_tx_cat, Some(into_cat_id));
+
+        let cash_balance: i64 = sqlx::query_scalar!(
+            "SELECT balance_minor FROM portfolio_cash_balances WHERE owner_id = $1 AND currency = 'USD'",
+            into.as_uuid()
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(cash_balance, 10_000);
+
+        let h = sqlx::query!(
+            "SELECT quantity_minor, avg_cost_minor FROM portfolio_holdings WHERE owner_id = $1 AND symbol = 'AAPL'",
+            into.as_uuid()
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(h.quantity_minor, 200_000_000);
+        assert_eq!(h.avg_cost_minor, 15_000);
     }
 }

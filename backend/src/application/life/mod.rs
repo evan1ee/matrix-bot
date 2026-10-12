@@ -143,7 +143,11 @@ impl LifeService {
         &self,
         owner_id: &AccountId,
     ) -> Result<Vec<LifeHorizonDay>, AppError> {
-        Ok(life_read::get_horizon_days(&self.pool, owner_id).await?)
+        let tz = crate::infrastructure::postgres::repositories::settings::get(&self.pool, owner_id)
+            .await?
+            .unwrap_or_default()
+            .tz();
+        Ok(life_read::get_horizon_days(&self.pool, owner_id, tz.name()).await?)
     }
 
     pub async fn get_stats(
@@ -160,6 +164,10 @@ impl LifeService {
         date: &str,
     ) -> Result<DayActivityResponse, AppError> {
         validate_date_str(date).map_err(|e| LifeError::InvalidDate(e.to_string()))?;
-        Ok(life_read::collect_day_activity(&self.pool, owner_id, date).await)
+        let tz = crate::infrastructure::postgres::repositories::settings::get(&self.pool, owner_id)
+            .await?
+            .unwrap_or_default()
+            .tz();
+        Ok(life_read::collect_day_activity(&self.pool, owner_id, date, tz.name()).await?)
     }
 }

@@ -157,15 +157,39 @@ pub async fn revoke_by_id_or_prefix(
     account_id: &AccountId,
     target: &str,
 ) -> Result<bool, sqlx::Error> {
-    let prefix_query = format!("{}%", target.trim_end_matches('.'));
-    let res = sqlx::query!(
-        r#"DELETE FROM mcp_tokens WHERE account_id = $1 AND (id = $2 OR prefix LIKE $3 OR token_hash = $2)"#,
-        account_id.as_uuid(),
-        target,
-        prefix_query
-    )
-    .execute(conn)
-    .await?;
+    let target = target.trim();
+    if target.is_empty() {
+        return Ok(false);
+    }
+    let cleaned = target.trim_matches('.');
+    let res = if cleaned.chars().count() >= 4 {
+        let escaped: String = cleaned
+            .chars()
+            .flat_map(|c| match c {
+                '\\' => vec!['\\', '\\'],
+                '%' => vec!['\\', '%'],
+                '_' => vec!['\\', '_'],
+                other => vec![other],
+            })
+            .collect();
+        let prefix_query = format!("{escaped}%");
+        sqlx::query!(
+            r#"DELETE FROM mcp_tokens WHERE account_id = $1 AND (id = $2 OR prefix LIKE $3 ESCAPE '\' OR token_hash = $2)"#,
+            account_id.as_uuid(),
+            target,
+            prefix_query
+        )
+        .execute(conn)
+        .await?
+    } else {
+        sqlx::query!(
+            r#"DELETE FROM mcp_tokens WHERE account_id = $1 AND (id = $2 OR token_hash = $2)"#,
+            account_id.as_uuid(),
+            target
+        )
+        .execute(conn)
+        .await?
+    };
     Ok(res.rows_affected() > 0)
 }
 
@@ -209,6 +233,11 @@ mod tests {
         touch_last_used(&pool, &token.id).await.unwrap();
         let list_after_touch = list_for_account(&pool, &acct_id).await.unwrap();
         assert!(list_after_touch[0].last_used_at.is_some());
+
+        // Revoking "." or "%" must NOT match all tokens
+        assert!(!revoke_by_id_or_prefix(&pool, &acct_id, ".").await.unwrap());
+        assert!(!revoke_by_id_or_prefix(&pool, &acct_id, "%").await.unwrap());
+        assert_eq!(list_for_account(&pool, &acct_id).await.unwrap().len(), 1);
 
         // Revoke
         let revoked = delete(&pool, &acct_id, &token.id).await.unwrap();

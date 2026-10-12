@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT substr(CAST(occurred_at AS TEXT), 1, 7) AS month_str,\n               direction,\n               CAST(SUM(amount_minor) AS BIGINT) AS total_minor\n        FROM transactions\n        WHERE owner_id = $1 AND currency = $2 AND occurred_at >= $3\n        GROUP BY month_str, direction\n        ORDER BY month_str ASC\n        ",
+  "query": "\n        SELECT to_char(occurred_at AT TIME ZONE $4, 'YYYY-MM') AS month_str,\n               direction,\n               CAST(SUM(amount_minor) AS BIGINT) AS total_minor\n        FROM transactions\n        WHERE owner_id = $1 AND currency = $2 AND occurred_at >= $3\n        GROUP BY month_str, direction\n        ORDER BY month_str ASC\n        ",
   "describe": {
     "columns": [
       {
@@ -31,7 +31,8 @@
       "Left": [
         "Uuid",
         "Text",
-        "Timestamptz"
+        "Timestamptz",
+        "Text"
       ]
     },
     "nullable": [
@@ -40,5 +41,5 @@
       null
     ]
   },
-  "hash": "4aa3f9f44263081c6c9253a9c288d2e65d7a2dd747f192ad6b1803d7acc54a34"
+  "hash": "f788be6e7cef5367707b00930badf91ce850221b741afe294fe1459fb507b2c4"
 }

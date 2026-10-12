@@ -64,31 +64,47 @@ pub fn resolve_model_dir(dir: &Path) -> PathBuf {
 /// Whether both files SenseVoice needs are on disk. The route gates on this
 /// and answers 503 until provisioning has finished.
 pub fn models_present(model_dir: &Path) -> bool {
+    let resolved = resolve_effective_model_dir(model_dir);
+    resolved.join(SENSEVOICE_MODEL_FILE).is_file()
+        && resolved.join(SENSEVOICE_TOKENS_FILE).is_file()
+}
+
+pub fn resolve_effective_model_dir(model_dir: &Path) -> PathBuf {
     let resolved = resolve_model_dir(model_dir);
     if resolved.join(SENSEVOICE_MODEL_FILE).is_file()
         && resolved.join(SENSEVOICE_TOKENS_FILE).is_file()
     {
-        return true;
+        return resolved;
     }
     if model_dir == Path::new("models/stt") || model_dir.ends_with("models/stt") {
         let legacy = resolve_model_dir(Path::new("data/voice_models"));
         if legacy.join(SENSEVOICE_MODEL_FILE).is_file()
             && legacy.join(SENSEVOICE_TOKENS_FILE).is_file()
         {
-            return true;
+            return legacy;
         }
     }
-    false
+    resolved
 }
 
 const MODEL_DOWNLOAD_URL: &str =
-    "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/main/model.int8.onnx";
+    "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/2365baeacb507f821a0c8120fcee3d484dba7a07/model.int8.onnx";
+const MODEL_SHA256: &str = "c71f0ce00bec95b07744e116345e33d8cbbe08cef896382cf907bf4b51a2cd51";
+
 const TOKENS_DOWNLOAD_URL: &str =
-    "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/main/tokens.txt";
+    "https://huggingface.co/csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17/resolve/2365baeacb507f821a0c8120fcee3d484dba7a07/tokens.txt";
+const TOKENS_SHA256: &str = "f449eb28dc567533d7fa59be34e2abca8784f771850c78a47fb731a31429a1dc";
+
+static DOWNLOAD_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 /// Ensures SenseVoiceSmall ONNX model and tokens are present in `model_dir`,
 /// downloading them automatically from Hugging Face if needed.
 pub async fn ensure_models_downloaded(model_dir: &Path) -> Result<(), VoiceError> {
+    let _guard = DOWNLOAD_LOCK.lock().await;
+    if models_present(model_dir) {
+        return Ok(());
+    }
+
     let resolved = resolve_model_dir(model_dir);
     tokio::fs::create_dir_all(&resolved).await.map_err(|e| {
         VoiceError::Io(format!(
@@ -98,18 +114,18 @@ pub async fn ensure_models_downloaded(model_dir: &Path) -> Result<(), VoiceError
     })?;
 
     let files = [
-        (SENSEVOICE_MODEL_FILE, MODEL_DOWNLOAD_URL),
-        (SENSEVOICE_TOKENS_FILE, TOKENS_DOWNLOAD_URL),
+        (SENSEVOICE_MODEL_FILE, MODEL_DOWNLOAD_URL, MODEL_SHA256),
+        (SENSEVOICE_TOKENS_FILE, TOKENS_DOWNLOAD_URL, TOKENS_SHA256),
     ];
 
-    for (name, url) in files {
+    for (name, url, sha256) in files {
         let dest = resolved.join(name);
         if !dest.exists() {
             info!(
                 "SenseVoice model asset {} missing; downloading from {}",
                 name, url
             );
-            download_model(url, &dest).await?;
+            download_model(url, &dest, sha256).await?;
             info!("SenseVoice asset {} downloaded to {:?}", name, dest);
         }
     }
@@ -117,11 +133,15 @@ pub async fn ensure_models_downloaded(model_dir: &Path) -> Result<(), VoiceError
     Ok(())
 }
 
-async fn download_model(url: &str, dest: &Path) -> Result<(), VoiceError> {
-    crate::download::download_to(url, dest)
+async fn download_model(url: &str, dest: &Path, sha256: &str) -> Result<(), VoiceError> {
+    crate::download::download_verified(url, dest, sha256)
         .await
         .map_err(|e| VoiceError::ModelDownload(e.0))
 }
+
+static RECOGNIZERS: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<(PathBuf, String), sherpa_onnx::OfflineRecognizer>>,
+> = std::sync::OnceLock::new();
 
 /// Runs speech recognition synchronously on 16kHz mono f32 samples using sherpa-onnx OfflineRecognizer.
 pub fn run_transcription_sync(
@@ -137,17 +157,7 @@ pub fn run_transcription_sync(
         });
     }
 
-    let resolved_dir = if models_present(model_dir) {
-        let r = resolve_model_dir(model_dir);
-        if r.join(SENSEVOICE_MODEL_FILE).is_file() && r.join(SENSEVOICE_TOKENS_FILE).is_file() {
-            r
-        } else {
-            resolve_model_dir(Path::new("data/voice_models"))
-        }
-    } else {
-        resolve_model_dir(model_dir)
-    };
-
+    let resolved_dir = resolve_effective_model_dir(model_dir);
     let model_path = resolved_dir.join(SENSEVOICE_MODEL_FILE);
     let tokens_path = resolved_dir.join(SENSEVOICE_TOKENS_FILE);
 
@@ -158,32 +168,39 @@ pub fn run_transcription_sync(
         )));
     }
 
-    let sense_voice = sherpa_onnx::OfflineSenseVoiceModelConfig {
-        model: Some(model_path.to_string_lossy().to_string()),
-        language: Some(language.to_string()),
-        use_itn: true,
-    };
+    let cache = RECOGNIZERS.get_or_init(|| std::sync::Mutex::new(std::collections::HashMap::new()));
+    let mut map = cache.lock().unwrap_or_else(|e| e.into_inner());
+    let key = (resolved_dir.clone(), language.to_string());
+    if !map.contains_key(&key) {
+        let sense_voice = sherpa_onnx::OfflineSenseVoiceModelConfig {
+            model: Some(model_path.to_string_lossy().to_string()),
+            language: Some(language.to_string()),
+            use_itn: true,
+        };
 
-    let model_config = sherpa_onnx::OfflineModelConfig {
-        sense_voice,
-        tokens: Some(tokens_path.to_string_lossy().to_string()),
-        num_threads: 2,
-        debug: false,
-        provider: Some("cpu".to_string()),
-        model_type: Some("sense_voice".to_string()),
-        ..Default::default()
-    };
+        let model_config = sherpa_onnx::OfflineModelConfig {
+            sense_voice,
+            tokens: Some(tokens_path.to_string_lossy().to_string()),
+            num_threads: 2,
+            debug: false,
+            provider: Some("cpu".to_string()),
+            model_type: Some("sense_voice".to_string()),
+            ..Default::default()
+        };
 
-    let recognizer_config = sherpa_onnx::OfflineRecognizerConfig {
-        model_config,
-        ..Default::default()
-    };
+        let recognizer_config = sherpa_onnx::OfflineRecognizerConfig {
+            model_config,
+            ..Default::default()
+        };
 
-    let recognizer =
-        sherpa_onnx::OfflineRecognizer::create(&recognizer_config).ok_or_else(|| {
-            VoiceError::Inference("Failed to create sherpa-onnx OfflineRecognizer".to_string())
-        })?;
+        let recognizer =
+            sherpa_onnx::OfflineRecognizer::create(&recognizer_config).ok_or_else(|| {
+                VoiceError::Inference("Failed to create sherpa-onnx OfflineRecognizer".to_string())
+            })?;
+        map.insert(key.clone(), recognizer);
+    }
 
+    let recognizer = map.get(&key).expect("just inserted");
     let stream = recognizer.create_stream();
     stream.accept_waveform(TARGET_SAMPLE_RATE as i32, samples);
     recognizer.decode(&stream);
@@ -226,8 +243,6 @@ pub async fn run_transcription(
     model_dir: PathBuf,
     language: String,
 ) -> Result<VoiceTranscriptionResult, VoiceError> {
-    ensure_models_downloaded(&model_dir).await?;
-
     tokio::task::spawn_blocking(move || run_transcription_sync(&samples, &model_dir, &language))
         .await
         .map_err(|e| VoiceError::Inference(format!("Worker thread panicked: {}", e)))?
@@ -266,6 +281,7 @@ mod tests {
 
         std::fs::write(dir.join(SENSEVOICE_TOKENS_FILE), b"x").unwrap();
         assert!(models_present(&dir));
+        assert_eq!(resolve_effective_model_dir(&dir), dir);
 
         std::fs::remove_dir_all(&dir).ok();
     }

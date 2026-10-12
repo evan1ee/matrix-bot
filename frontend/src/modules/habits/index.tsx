@@ -13,6 +13,7 @@ import {
 import { triggerAiPrompt } from '../ai';
 
 import type { FrontendModule, SystemEvent } from '../../core/types';
+import { fetchApi } from '../../core/apiClient';
 import type { CreateHabitPayload, HabitStatsSummary, HabitWithStatus, HeatmapDay } from './types';
 import { HabitHeatmap } from './HabitHeatmap';
 import { HabitRow } from './HabitRow';
@@ -32,43 +33,26 @@ export const HabitsView: React.FC = () => {
   // Queries
   const { data: habits = [], isLoading: isLoadingHabits } = useQuery<HabitWithStatus[]>({
     queryKey: ['habits'],
-    queryFn: async () => {
-      const res = await fetch('/api/v1/habits', { credentials: 'include' });
-      if (!res.ok) throw new Error('Failed to load habits');
-      return res.json();
-    },
+    queryFn: () => fetchApi<HabitWithStatus[]>('/habits'),
   });
 
   const { data: heatmap = [] } = useQuery<HeatmapDay[]>({
     queryKey: ['habits-heatmap'],
-    queryFn: async () => {
-      const res = await fetch('/api/v1/habits/heatmap', { credentials: 'include' });
-      if (!res.ok) throw new Error('Failed to load heatmap');
-      return res.json();
-    },
+    queryFn: () => fetchApi<HeatmapDay[]>('/habits/heatmap'),
   });
 
   const { data: stats } = useQuery<HabitStatsSummary>({
     queryKey: ['habits-stats'],
-    queryFn: async () => {
-      const res = await fetch('/api/v1/habits/stats', { credentials: 'include' });
-      if (!res.ok) throw new Error('Failed to load habit stats');
-      return res.json();
-    },
+    queryFn: () => fetchApi<HabitStatsSummary>('/habits/stats'),
   });
 
   // Mutations
   const toggleMutation = useMutation({
-    mutationFn: async (id: number) => {
-      const res = await fetch(`/api/v1/habits/${id}/toggle`, {
+    mutationFn: (id: number) =>
+      fetchApi(`/habits/${id}/toggle`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify({}),
-      });
-      if (!res.ok) throw new Error('Failed to toggle habit');
-      return res.json();
-    },
+      }),
     onMutate: async (id: number) => {
       await queryClient.cancelQueries({ queryKey: ['habits'] });
       await queryClient.cancelQueries({ queryKey: ['habits-stats'] });
@@ -145,20 +129,13 @@ export const HabitsView: React.FC = () => {
   });
 
   const saveMutation = useMutation({
-    mutationFn: async ({ payload, id }: { payload: CreateHabitPayload; id?: number }) => {
-      const url = id ? `/api/v1/habits/${id}` : '/api/v1/habits';
+    mutationFn: ({ payload, id }: { payload: CreateHabitPayload; id?: number }) => {
+      const path = id ? `/habits/${id}` : '/habits';
       const method = id ? 'PUT' : 'POST';
-      const res = await fetch(url, {
+      return fetchApi(path, {
         method,
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'include',
         body: JSON.stringify(payload),
       });
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data?.error || 'Failed to save habit');
-      }
-      return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['habits'] });
@@ -167,14 +144,10 @@ export const HabitsView: React.FC = () => {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: async (id: number) => {
-      const res = await fetch(`/api/v1/habits/${id}`, {
+    mutationFn: (id: number) =>
+      fetchApi(`/habits/${id}`, {
         method: 'DELETE',
-        credentials: 'include',
-      });
-      if (!res.ok) throw new Error('Failed to delete habit');
-      return res.json();
-    },
+      }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['habits'] });
       queryClient.invalidateQueries({ queryKey: ['habits-heatmap'] });

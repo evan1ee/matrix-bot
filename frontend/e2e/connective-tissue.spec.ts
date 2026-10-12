@@ -104,4 +104,34 @@ test.describe('Connective Tissue: Automated Ledger Postings', () => {
     expect(tx?.direction).toBe('income');
     expect(tx?.amount_minor).toBe(25000);
   });
+
+  test('editing a zero-decimal (JPY) recurring bill preserves integer minor units', async ({
+    app,
+    api,
+  }) => {
+    const bill = api.seedRecurringBill({
+      name: 'Tokyo Gym',
+      category: 'subscription',
+      amount_minor: 8000,
+      currency: 'JPY',
+      currency_exponent: 0,
+      frequency: 'monthly',
+      next_due_at: '2026-11-15 09:00:00',
+    });
+
+    await gotoApp(app, TAB.bills);
+    const billRow = app.locator('tr').filter({ hasText: 'Tokyo Gym' });
+    await expect(billRow).toContainText('JPY 8000');
+
+    await billRow.getByTitle('Edit Bill').click();
+    await expect(app.getByRole('heading', { name: 'Edit Recurring Bill' })).toBeVisible();
+    const amountInput = app.getByPlaceholder('0');
+    await expect(amountInput).toHaveValue('8000');
+
+    await amountInput.fill('9500');
+    await app.getByRole('button', { name: 'Save Changes' }).click();
+
+    await expect(billRow).toContainText('JPY 9500');
+    expect(bill.amount_minor).toBe(9500);
+  });
 });

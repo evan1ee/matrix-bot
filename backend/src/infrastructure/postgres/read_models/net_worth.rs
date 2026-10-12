@@ -89,29 +89,49 @@ pub async fn compute_net_worth(
         portfolio: i64,
     }
 
+    fn rescale_to_exponent(amount_minor: i64, from_exp: i64, to_exp: i64) -> i64 {
+        if from_exp == to_exp {
+            return amount_minor;
+        }
+        if to_exp > from_exp {
+            let diff = (to_exp - from_exp).clamp(0, 18) as u32;
+            amount_minor.saturating_mul(10i64.pow(diff))
+        } else {
+            let diff = (from_exp - to_exp).clamp(0, 18) as u32;
+            let divisor = 10i64.pow(diff);
+            amount_minor / divisor
+        }
+    }
+
     let mut map: HashMap<String, Acc> = HashMap::new();
 
     for r in tx_rows {
+        let canonical_exp = exponent_for(&r.currency) as i64;
+        let scaled =
+            rescale_to_exponent(r.net_cash.unwrap_or(0), r.currency_exponent, canonical_exp);
         let entry = map.entry(r.currency).or_insert(Acc {
-            exponent: r.currency_exponent,
+            exponent: canonical_exp,
             ledger: 0,
             deposits: 0,
             portfolio: 0,
         });
-        entry.ledger += r.net_cash.unwrap_or(0);
+        entry.ledger += scaled;
     }
 
     for r in cash_rows {
+        let canonical_exp = exponent_for(&r.currency) as i64;
+        let scaled = rescale_to_exponent(r.balance_minor, r.currency_exponent, canonical_exp);
         let entry = map.entry(r.currency).or_insert(Acc {
-            exponent: r.currency_exponent,
+            exponent: canonical_exp,
             ledger: 0,
             deposits: 0,
             portfolio: 0,
         });
-        entry.deposits += r.balance_minor;
+        entry.deposits += scaled;
     }
 
     for r in holding_rows {
+        let canonical_exp = exponent_for(&r.currency) as i64;
         let price = r.current_price_minor.unwrap_or(0);
         let market_val = if price > 0 && r.quantity_minor > 0 {
             let divisor = 10i128.pow(QUANTITY_EXPONENT);
@@ -119,14 +139,15 @@ pub async fn compute_net_worth(
         } else {
             0
         };
+        let scaled = rescale_to_exponent(market_val, r.currency_exponent, canonical_exp);
 
         let entry = map.entry(r.currency).or_insert(Acc {
-            exponent: r.currency_exponent,
+            exponent: canonical_exp,
             ledger: 0,
             deposits: 0,
             portfolio: 0,
         });
-        entry.portfolio += market_val;
+        entry.portfolio += scaled;
     }
 
     if map.is_empty() {

@@ -34,6 +34,14 @@ pub const CHANNEL_RETRY: Duration = Duration::from_secs(30);
 #[async_trait]
 pub trait Outbound: Send + Sync {
     fn is_connected(&self, channel: Channel) -> bool;
+    async fn authorize_delivery(
+        &self,
+        owner: &crate::domain::accounts::AccountId,
+        to: &ConversationAddress,
+    ) -> Result<(), String> {
+        let _ = (owner, to);
+        Ok(())
+    }
     async fn send(&self, message: OutgoingMessage) -> Result<SentRef, ChannelError>;
 }
 
@@ -41,6 +49,14 @@ pub trait Outbound: Send + Sync {
 impl Outbound for ChannelRegistry {
     fn is_connected(&self, channel: Channel) -> bool {
         ChannelRegistry::is_connected(self, channel)
+    }
+
+    async fn authorize_delivery(
+        &self,
+        owner: &crate::domain::accounts::AccountId,
+        to: &ConversationAddress,
+    ) -> Result<(), String> {
+        ChannelRegistry::authorize_delivery(self, owner, to).await
     }
 
     async fn send(&self, message: OutgoingMessage) -> Result<SentRef, ChannelError> {

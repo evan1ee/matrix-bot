@@ -404,8 +404,12 @@ pub async fn schedule_task(
 ) -> Result<Json<ScheduledTaskResponse>, ApiError> {
     let task_id = TaskId::new(id)
         .map_err(|e| ApiError::from(crate::application::AppError::Validation(e.to_string())))?;
+    let schedule = crate::domain::agent::CronSchedule::parse(&body.cron_expression)
+        .map_err(crate::application::AppError::from)?;
     let now = now_at_storage_precision();
-    let next_run = now + chrono::Duration::hours(1); // placeholder until cron compute
+    let next_run = schedule
+        .next_after(now)
+        .map_err(crate::application::AppError::from)?;
     let config = body.config.unwrap_or(serde_json::json!({}));
 
     let task = state

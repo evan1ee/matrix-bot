@@ -75,8 +75,13 @@ impl Holding {
 /// `i128` intermediates: a large crypto quantity times a large price can
 /// approach `i64`'s ceiling.
 pub(crate) fn scale_product(quantity_minor: i64, price_minor: i64) -> i64 {
+    if quantity_minor <= 0 || price_minor <= 0 {
+        return 0;
+    }
+    let divisor = 10i128.pow(QUANTITY_EXPONENT);
     let product = quantity_minor as i128 * price_minor as i128;
-    (product / 10i128.pow(QUANTITY_EXPONENT)) as i64
+    let rounded = ((product + divisor / 2) / divisor) as i64;
+    rounded.max(1)
 }
 
 /// Cash cost (or proceeds) of `quantity_minor` units at `price_minor` each.
@@ -267,6 +272,12 @@ mod tests {
 
         let new_avg = weighted_avg_cost_minor(qty, 15_000, qty, 20_000);
         assert_eq!(new_avg, 17_500);
+
+        // L2: 0.001 share at $9.99 (999 cents) rounds to 1 cent instead of truncating to 0
+        let frac_qty = 100_000; // 0.001 * 10^8
+        assert_eq!(cost_of(frac_qty, 999), 1);
+        // Any positive quantity * positive price costs at least 1 minor unit
+        assert_eq!(cost_of(1, 1), 1);
     }
 
     #[test]

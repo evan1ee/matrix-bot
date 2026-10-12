@@ -159,8 +159,17 @@ pub async fn transcribe(
 ) -> Result<Json<TranscriptionBody>, (StatusCode, String)> {
     let request = read_request(multipart).await?;
 
-    let samples = crate::stt::decode_audio_to_16k_mono(&request.file)
-        .map_err(|e| (status_for(&e), e.to_string()))?;
+    let file_bytes = request.file;
+    let samples =
+        tokio::task::spawn_blocking(move || crate::stt::decode_audio_to_16k_mono(&file_bytes))
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Audio decode task failed: {e}"),
+                )
+            })?
+            .map_err(|e| (status_for(&e), e.to_string()))?;
 
     if !crate::stt::models_present(&state.config.voice_model_dir) {
         return Err((

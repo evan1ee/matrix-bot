@@ -47,6 +47,150 @@ fn is_unique_violation(err: &sqlx::Error) -> bool {
     matches!(err, sqlx::Error::Database(e) if e.is_unique_violation())
 }
 
+#[derive(Debug, Default, Clone, Copy)]
+pub struct ReconciledCollisions {
+    pub cash_balances: i64,
+    pub holdings: i64,
+    pub snapshots: i64,
+}
+
+/// Reconciles owned rows that would collide on unique constraints when `from` is
+/// merged into `into`:
+/// 1. Remaps `transactions.category_id` from `from`'s `finance_categories` to
+///    `into`'s matching category (`LOWER(name)`) so moved transactions do not
+///    lose their category when `from`'s duplicate category row is deleted.
+/// 2. Sums colliding `portfolio_cash_balances` (`(owner_id, currency)`).
+/// 3. Combines colliding `portfolio_holdings` (`(owner_id, symbol)` with same
+///    `currency`) by summing quantities and computing weighted average cost.
+/// 4. Sums colliding `portfolio_daily_snapshots` (`(owner_id, snapshot_date, currency)`).
+pub async fn reconcile_colliding_owned_rows(
+    conn: &mut sqlx::PgConnection,
+    from: &AccountId,
+    into: &AccountId,
+) -> Result<ReconciledCollisions, sqlx::Error> {
+    let mut out = ReconciledCollisions::default();
+
+    // 1. Remap transactions.category_id for colliding finance_categories
+    sqlx::query(AssertSqlSafe(
+        "UPDATE transactions t \
+         SET category_id = fc_into.id \
+         FROM finance_categories fc_from \
+         JOIN finance_categories fc_into \
+           ON fc_into.owner_id = $1 AND LOWER(fc_into.name) = LOWER(fc_from.name) \
+         WHERE t.owner_id = $2 \
+           AND fc_from.owner_id = $2 \
+           AND t.category_id = fc_from.id",
+    ))
+    .bind(into.as_uuid())
+    .bind(from.as_uuid())
+    .execute(&mut *conn)
+    .await?;
+
+    // 2. Sum colliding portfolio_cash_balances
+    let cash_merged = sqlx::query(AssertSqlSafe(
+        "UPDATE portfolio_cash_balances into_cb \
+         SET balance_minor = into_cb.balance_minor + from_cb.balance_minor, \
+             updated_at = CURRENT_TIMESTAMP \
+         FROM portfolio_cash_balances from_cb \
+         WHERE into_cb.owner_id = $1 \
+           AND from_cb.owner_id = $2 \
+           AND into_cb.currency = from_cb.currency",
+    ))
+    .bind(into.as_uuid())
+    .bind(from.as_uuid())
+    .execute(&mut *conn)
+    .await?;
+    if cash_merged.rows_affected() > 0 {
+        sqlx::query(AssertSqlSafe(
+            "DELETE FROM portfolio_cash_balances from_cb \
+             USING portfolio_cash_balances into_cb \
+             WHERE from_cb.owner_id = $1 \
+               AND into_cb.owner_id = $2 \
+               AND from_cb.currency = into_cb.currency",
+        ))
+        .bind(from.as_uuid())
+        .bind(into.as_uuid())
+        .execute(&mut *conn)
+        .await?;
+        out.cash_balances = cash_merged.rows_affected() as i64;
+    }
+
+    // 3. Combine colliding portfolio_holdings (same symbol and currency)
+    let holdings_merged = sqlx::query(AssertSqlSafe(
+        "UPDATE portfolio_holdings into_h \
+         SET avg_cost_minor = CASE \
+                 WHEN (into_h.quantity_minor + from_h.quantity_minor) > 0 THEN \
+                     CAST( \
+                         (CAST(into_h.quantity_minor AS NUMERIC) * CAST(into_h.avg_cost_minor AS NUMERIC) + \
+                          CAST(from_h.quantity_minor AS NUMERIC) * CAST(from_h.avg_cost_minor AS NUMERIC)) \
+                         / CAST(into_h.quantity_minor + from_h.quantity_minor AS NUMERIC) \
+                         AS BIGINT \
+                     ) \
+                 ELSE into_h.avg_cost_minor \
+             END, \
+             quantity_minor = into_h.quantity_minor + from_h.quantity_minor, \
+             updated_at = CURRENT_TIMESTAMP \
+         FROM portfolio_holdings from_h \
+         WHERE into_h.owner_id = $1 \
+           AND from_h.owner_id = $2 \
+           AND into_h.symbol = from_h.symbol \
+           AND into_h.currency = from_h.currency",
+    ))
+    .bind(into.as_uuid())
+    .bind(from.as_uuid())
+    .execute(&mut *conn)
+    .await?;
+    if holdings_merged.rows_affected() > 0 {
+        sqlx::query(AssertSqlSafe(
+            "DELETE FROM portfolio_holdings from_h \
+             USING portfolio_holdings into_h \
+             WHERE from_h.owner_id = $1 \
+               AND into_h.owner_id = $2 \
+               AND from_h.symbol = into_h.symbol \
+               AND from_h.currency = into_h.currency",
+        ))
+        .bind(from.as_uuid())
+        .bind(into.as_uuid())
+        .execute(&mut *conn)
+        .await?;
+        out.holdings = holdings_merged.rows_affected() as i64;
+    }
+
+    // 4. Sum colliding portfolio_daily_snapshots
+    let snapshots_merged = sqlx::query(AssertSqlSafe(
+        "UPDATE portfolio_daily_snapshots into_s \
+         SET holdings_value_minor = into_s.holdings_value_minor + from_s.holdings_value_minor, \
+             cash_minor = into_s.cash_minor + from_s.cash_minor, \
+             total_net_worth_minor = into_s.total_net_worth_minor + from_s.total_net_worth_minor \
+         FROM portfolio_daily_snapshots from_s \
+         WHERE into_s.owner_id = $1 \
+           AND from_s.owner_id = $2 \
+           AND into_s.snapshot_date = from_s.snapshot_date \
+           AND into_s.currency = from_s.currency",
+    ))
+    .bind(into.as_uuid())
+    .bind(from.as_uuid())
+    .execute(&mut *conn)
+    .await?;
+    if snapshots_merged.rows_affected() > 0 {
+        sqlx::query(AssertSqlSafe(
+            "DELETE FROM portfolio_daily_snapshots from_s \
+             USING portfolio_daily_snapshots into_s \
+             WHERE from_s.owner_id = $1 \
+               AND into_s.owner_id = $2 \
+               AND from_s.snapshot_date = into_s.snapshot_date \
+               AND from_s.currency = into_s.currency",
+        ))
+        .bind(from.as_uuid())
+        .bind(into.as_uuid())
+        .execute(&mut *conn)
+        .await?;
+        out.snapshots = snapshots_merged.rows_affected() as i64;
+    }
+
+    Ok(out)
+}
+
 /// Moves every row of `table` from one owner to another, skipping rows that
 /// would collide with one the destination already has.
 ///

@@ -50,7 +50,11 @@ impl FinanceService {
         let exponent = exponent_for(&currency) as i64;
         let months = months_limit.clamp(1, 36);
 
-        let now = Utc::now();
+        let tz = crate::infrastructure::postgres::repositories::settings::get(&self.pool, owner)
+            .await?
+            .unwrap_or_default()
+            .tz();
+        let now = Utc::now().with_timezone(&tz);
         let current_year = now.year();
         let current_month = now.month();
 
@@ -71,11 +75,17 @@ impl FinanceService {
             chrono::NaiveDate::parse_from_str(&format!("{earliest_month}-01"), "%Y-%m-%d")
                 .ok()
                 .and_then(|d| d.and_hms_opt(0, 0, 0))
-                .map(|naive| DateTime::<Utc>::from_naive_utc_and_offset(naive, Utc))
+                .and_then(|naive| {
+                    use chrono::TimeZone;
+                    tz.from_local_datetime(&naive)
+                        .earliest()
+                        .map(|dt| dt.with_timezone(&Utc))
+                })
                 .unwrap_or_else(|| DateTime::<Utc>::from_timestamp(0, 0).expect("epoch is valid"));
 
         let cashflow_rows =
-            repo::monthly_cashflow_rows(&self.pool, owner, &currency, cutoff_start).await?;
+            repo::monthly_cashflow_rows(&self.pool, owner, &currency, cutoff_start, tz.name())
+                .await?;
 
         let mut monthly_cashflow: Vec<MonthlyCashflowBucket> = month_keys
             .iter()

@@ -42,6 +42,12 @@ impl WebhookModule {
                 handle_list(services, &ctx.owner_id, ctx.sender_name()).await
             }
             Some("create") | Some("add") => {
+                if !ctx.is_direct {
+                    return Some(
+                        "⚠️ Send <code>!webhook create</code> in a direct message so the secret token is not exposed to the room."
+                            .to_string(),
+                    );
+                }
                 let name = parts.get(1).copied().unwrap_or("Unnamed Webhook");
                 let room_key = ctx.room_key();
                 let target_room = parts.get(2).copied().unwrap_or(room_key.as_str());

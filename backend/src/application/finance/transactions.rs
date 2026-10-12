@@ -16,6 +16,20 @@ impl FinanceService {
         owner: &AccountId,
         input: NewTransaction<'_>,
     ) -> Result<Transaction, AppError> {
+        let mut dbtx = self.pool.begin().await?;
+        let tx = self
+            .create_transaction_in_tx(&mut dbtx, owner, input)
+            .await?;
+        dbtx.commit().await?;
+        Ok(tx)
+    }
+
+    pub async fn create_transaction_in_tx(
+        &self,
+        dbtx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        owner: &AccountId,
+        input: NewTransaction<'_>,
+    ) -> Result<Transaction, AppError> {
         if let Some(note) = input.note {
             if note.len() > MAX_NOTE_LEN {
                 return Err(FinanceError::NoteTooLong { max: MAX_NOTE_LEN }.into());
@@ -23,13 +37,11 @@ impl FinanceService {
         }
 
         let category_id = self
-            .resolve_category(owner, input.category, input.create_missing_category)
+            .resolve_category_in_tx(dbtx, owner, input.category, input.create_missing_category)
             .await?;
 
-        let mut dbtx = self.pool.begin().await?;
-        let tx = repo::create_transaction(&mut dbtx, owner, &input, category_id).await?;
-        outbox::publish(&mut dbtx, &SystemEvent::TransactionCreated(tx.clone())).await?;
-        dbtx.commit().await?;
+        let tx = repo::create_transaction(dbtx, owner, &input, category_id).await?;
+        outbox::publish(dbtx, &SystemEvent::TransactionCreated(tx.clone())).await?;
         Ok(tx)
     }
 

@@ -702,12 +702,22 @@ mod tests {
             ],
         )
         .await;
-        ApiState::new(
+        let state = ApiState::new(
             crate::db::Database { pool },
             None,
             "https://matrix.org".to_string(),
             reqwest::Client::new(),
-        )
+        );
+        state
+            .services
+            .rooms
+            .remember(
+                &crate::domain::accounts::AccountId::from_seed("acct_alice"),
+                &crate::domain::rooms::JoinedRoom::new("!room:1", Some("Room 1"), true),
+            )
+            .await
+            .unwrap();
+        state
     }
 
     fn create_with_due(
@@ -771,13 +781,13 @@ mod tests {
     }
 
     /// Web-created tasks carry the `web` sentinel, so there is no room to
-    /// deliver to unless the caller names one.
+    /// deliver to unless the caller names an authorized one.
     #[tokio::test]
     async fn test_reminder_without_a_room_is_rejected() {
         let state = due_reminder_state().await;
         let err = create_todo(
-            State(state),
-            AuthUser::named_seed("alice", "acct_alice"),
+            State(state.clone()),
+            AuthUser::named_seed("web_user", "acct_from_web"),
             Json(create_with_due(
                 Some(crate::utils::time::now_at_storage_precision() + chrono::Duration::hours(6)),
                 Some(60),
@@ -788,6 +798,24 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(err.status, StatusCode::BAD_REQUEST);
+
+        // H4: Naming an uncached/unauthorized room or cross-channel address is also rejected.
+        for untrusted in ["!other_dm:hs", "email:victim@example.com", "telegram:999"] {
+            let err = create_todo(
+                State(state.clone()),
+                AuthUser::named_seed("web_user", "acct_from_web"),
+                Json(create_with_due(
+                    Some(
+                        crate::utils::time::now_at_storage_precision() + chrono::Duration::hours(6),
+                    ),
+                    Some(60),
+                    Some(untrusted),
+                )),
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(err.status, StatusCode::BAD_REQUEST, "{untrusted}");
+        }
     }
 
     #[tokio::test]

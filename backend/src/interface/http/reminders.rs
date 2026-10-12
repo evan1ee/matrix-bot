@@ -97,6 +97,20 @@ pub struct ReminderListResponse {
     pub has_more: bool,
 }
 
+/// Maximum reminder delay (10 years in seconds) so `Duration::try_seconds` never overflows.
+const MAX_REMINDER_SECONDS: u64 = 10 * 365 * 86_400;
+
+fn parse_delay_seconds(seconds: u64) -> Result<Duration, ApiError> {
+    if seconds == 0 || seconds > MAX_REMINDER_SECONDS {
+        return Err(ApiError::bad_request(
+            "Seconds must be between 1 and 315360000 (10 years)",
+        ));
+    }
+    let secs_i64 =
+        i64::try_from(seconds).map_err(|_| ApiError::bad_request("Seconds out of range"))?;
+    Duration::try_seconds(secs_i64).ok_or_else(|| ApiError::bad_request("Seconds out of range"))
+}
+
 #[utoipa::path(
     get,
     path = "/api/v1/reminders",
@@ -112,9 +126,9 @@ pub async fn list_reminders(
     user: AuthUser,
     Query(query): Query<ReminderQuery>,
 ) -> Result<Json<ReminderListResponse>, ApiError> {
-    let page = query.page.unwrap_or(1).max(1);
+    let page = query.page.unwrap_or(1).clamp(1, 1_000_000);
     let limit = query.limit.unwrap_or(25).clamp(1, 100);
-    let offset = (page - 1) * limit;
+    let offset = (page - 1).saturating_mul(limit);
 
     let domain_items = state
         .services
@@ -142,7 +156,7 @@ pub async fn list_reminders(
         .into_iter()
         .map(Reminder::from)
         .collect::<Vec<_>>();
-    let has_more = offset + (items.len() as i64) < total;
+    let has_more = offset.saturating_add(items.len() as i64) < total;
 
     Ok(Json(ReminderListResponse {
         items,
@@ -169,12 +183,26 @@ pub async fn create_reminder(
     user: AuthUser,
     Json(payload): Json<CreateReminderRequest>,
 ) -> Result<Json<Reminder>, ApiError> {
-    let trigger_at = Utc::now() + Duration::seconds(payload.seconds as i64);
+    let delay = parse_delay_seconds(payload.seconds)?;
+    let trigger_at = Utc::now() + delay;
     let recurrence = payload
         .recurrence
         .as_deref()
         .map(crate::domain::reminders::RecurrencePattern::from_str_or_default)
         .unwrap_or(crate::domain::reminders::RecurrencePattern::None);
+
+    if let Some(raw_room) = payload.room_id.as_deref().map(str::trim) {
+        if raw_room.starts_with('!') {
+            let client_guard = state.bot_client.read().await;
+            let _ = crate::interface::channels::matrix::rooms::is_room_authorized_for_account(
+                &state.services.rooms,
+                client_guard.as_ref(),
+                &user.account_id,
+                raw_room,
+            )
+            .await;
+        }
+    }
 
     let room_id = state
         .services
@@ -232,9 +260,7 @@ pub async fn update_reminder(
     if payload.message.trim().is_empty() {
         return Err(ApiError::bad_request("Message required"));
     }
-    if payload.seconds == 0 {
-        return Err(ApiError::bad_request("Seconds must be greater than 0"));
-    }
+    let delay = parse_delay_seconds(payload.seconds)?;
     if payload.message.len() > crate::domain::reminders::MAX_MESSAGE_LEN {
         return Err(ApiError::bad_request(format!(
             "Message exceeds {} character limit",
@@ -242,7 +268,7 @@ pub async fn update_reminder(
         )));
     }
 
-    let trigger_at = Utc::now() + Duration::seconds(payload.seconds as i64);
+    let trigger_at = Utc::now() + delay;
     let recurrence = payload
         .recurrence
         .as_deref()
@@ -554,8 +580,8 @@ mod tests {
         assert_eq!(cleared, StatusCode::NO_CONTENT);
 
         let history_cleared = list_reminders(
-            State(state),
-            alice,
+            State(state.clone()),
+            alice.clone(),
             Query(ReminderQuery {
                 room_id: None,
                 page: Some(1),
@@ -566,5 +592,58 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(history_cleared.items.len(), 0);
+
+        // L5: huge page or seconds do not overflow or panic.
+        let huge_page = list_reminders(
+            State(state.clone()),
+            alice.clone(),
+            Query(ReminderQuery {
+                room_id: None,
+                page: Some(i64::MAX),
+                limit: Some(100),
+                status: Some("pending".to_string()),
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(huge_page.items.is_empty());
+
+        let huge_secs = create_reminder(
+            State(state.clone()),
+            alice.clone(),
+            Json(CreateReminderRequest {
+                room_id: None,
+                message: "Too far".to_string(),
+                seconds: u64::MAX,
+                recurrence: None,
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(huge_secs.status, StatusCode::BAD_REQUEST);
+
+        // H4: uncached Matrix room ID or cross-channel target falls back to web.
+        for untrusted in [
+            "!other_user_dm:hs",
+            "email:victim@example.com",
+            "telegram:999",
+        ] {
+            let created = create_reminder(
+                State(state.clone()),
+                alice.clone(),
+                Json(CreateReminderRequest {
+                    room_id: Some(untrusted.to_string()),
+                    message: "No hijack".to_string(),
+                    seconds: 60,
+                    recurrence: None,
+                }),
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                created.room_id, "web",
+                "target {untrusted} must fall back to web"
+            );
+        }
     }
 }

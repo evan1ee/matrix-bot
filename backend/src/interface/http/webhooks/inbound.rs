@@ -130,8 +130,21 @@ pub async fn inbound_webhook(
         )
     };
 
+    if let Some(ref t) = title {
+        if t.len() > crate::domain::webhooks::MAX_TITLE_LEN {
+            return Err(ApiError::bad_request(
+                "Webhook title exceeds 500 characters",
+            ));
+        }
+    }
+
     if raw_message.trim().is_empty() {
         return Err(ApiError::bad_request("Message content cannot be empty"));
+    }
+    if raw_message.len() > 4000 {
+        return Err(ApiError::bad_request(
+            "Message content exceeds 4000 characters",
+        ));
     }
 
     let outbox_id = queue_and_broadcast(

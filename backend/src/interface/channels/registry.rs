@@ -69,6 +69,20 @@ impl ChannelRegistry {
         adapter.send(message).await
     }
 
+    pub async fn authorize_delivery(
+        &self,
+        owner: &crate::domain::accounts::AccountId,
+        to: &ConversationAddress,
+    ) -> Result<(), String> {
+        let channel = to
+            .channel()
+            .ok_or_else(|| format!("Unsupported destination: {}", to.to_storage()))?;
+        let adapter = self
+            .get(channel)
+            .ok_or_else(|| format!("{channel} is not configured"))?;
+        adapter.authorize_delivery(owner, to).await
+    }
+
     pub async fn find_conversation_by_name(
         &self,
         channel: Channel,

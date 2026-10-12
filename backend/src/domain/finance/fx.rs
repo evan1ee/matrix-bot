@@ -58,42 +58,62 @@ fn extract_attribute<'a>(line: &'a str, attr: &str) -> Option<&'a str> {
     Some(&after_quote[..end_idx])
 }
 
-/// Calculates the cross rate between any two currencies from an EUR-base rate map.
-/// e.g. `get_rate_between("USD", "GBP", &rates)` returns how many GBP 1 USD buys.
-pub fn get_rate_between(from: &str, to: &str, rates: &HashMap<String, f64>) -> f64 {
-    let from_u = from.to_ascii_uppercase();
-    let to_u = to.to_ascii_uppercase();
+/// Looks up the cross rate between any two currencies from an EUR-base rate map.
+/// Returns `None` if either currency is unknown or has a non-positive rate.
+pub fn try_get_rate_between(from: &str, to: &str, rates: &HashMap<String, f64>) -> Option<f64> {
+    let from_u = from.trim().to_ascii_uppercase();
+    let to_u = to.trim().to_ascii_uppercase();
 
     if from_u == to_u {
-        return 1.0;
+        return Some(1.0);
     }
 
-    let from_eur = rates.get(&from_u).copied().unwrap_or(1.0);
-    let to_eur = rates.get(&to_u).copied().unwrap_or(1.0);
+    let from_eur = if from_u == "EUR" {
+        Some(1.0)
+    } else {
+        rates
+            .get(&from_u)
+            .copied()
+            .filter(|&r| r.is_finite() && r > 0.0)
+    }?;
+    let to_eur = if to_u == "EUR" {
+        Some(1.0)
+    } else {
+        rates
+            .get(&to_u)
+            .copied()
+            .filter(|&r| r.is_finite() && r > 0.0)
+    }?;
 
-    if from_eur <= 0.0 {
-        return 1.0;
-    }
+    Some(to_eur / from_eur)
+}
 
-    to_eur / from_eur
+/// Calculates the cross rate between any two currencies from an EUR-base rate map.
+/// Returns `0.0` when either currency has no known FX rate so unknown currencies
+/// are never silently valued at `1.0 EUR`.
+pub fn get_rate_between(from: &str, to: &str, rates: &HashMap<String, f64>) -> f64 {
+    try_get_rate_between(from, to, rates).unwrap_or(0.0)
 }
 
 /// Converts an amount in minor units from one currency to another using the provided rates.
 /// Correctly accounts for differing currency exponents (e.g. USD 2 decimals -> JPY 0 decimals).
+/// Returns `0` when no FX rate is known for the currency pair.
 pub fn convert_minor_units(
     amount_minor: i64,
     from_currency: &str,
     to_currency: &str,
     rates: &HashMap<String, f64>,
 ) -> i64 {
-    let from_u = from_currency.to_ascii_uppercase();
-    let to_u = to_currency.to_ascii_uppercase();
+    let from_u = from_currency.trim().to_ascii_uppercase();
+    let to_u = to_currency.trim().to_ascii_uppercase();
 
     if from_u == to_u {
         return amount_minor;
     }
 
-    let rate = get_rate_between(&from_u, &to_u, rates);
+    let Some(rate) = try_get_rate_between(&from_u, &to_u, rates) else {
+        return 0;
+    };
     let from_exp = exponent_for(&from_u);
     let to_exp = exponent_for(&to_u);
 
@@ -143,5 +163,13 @@ mod tests {
 
         // USD to JPY: 100 USD (10000 cents) = (100 / 1.10) * 165 JPY = 15000 JPY
         assert_eq!(convert_minor_units(10000, "USD", "JPY", &rates), 15000);
+    }
+
+    #[test]
+    fn unknown_currency_does_not_default_to_one_eur() {
+        let rates = baseline_rates();
+        assert_eq!(try_get_rate_between("VND", "USD", &rates), None);
+        assert_eq!(get_rate_between("VND", "USD", &rates), 0.0);
+        assert_eq!(convert_minor_units(25_000_000, "VND", "USD", &rates), 0);
     }
 }

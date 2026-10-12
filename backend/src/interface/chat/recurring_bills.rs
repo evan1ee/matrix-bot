@@ -114,7 +114,10 @@ async fn handle_list(ctx: &CommandContext, bills: &RecurringBillsService) -> Opt
     let mut html = String::from("<b>📋 Recurring Bills & Subscriptions</b><br/><ul>");
 
     for bill in &list {
-        let amount_formatted = format!("{:.2}", bill.amount_minor as f64 / 100.0);
+        let amount_formatted = crate::domain::finance::money::format_amount(
+            bill.amount_minor,
+            bill.currency_exponent.clamp(0, 8) as u32,
+        );
         let category_badge = match bill.category.as_str() {
             "subscription" => "💳 Subscription",
             "fixed_bill" => "🏠 Fixed Bill",
@@ -156,16 +159,23 @@ async fn handle_add(
 
     let name = args[0];
     let amount_str = args[1];
-    let currency = args[2].to_uppercase();
+    let currency = match crate::domain::finance::money::normalise_currency(args[2]) {
+        Ok(c) => c,
+        Err(_) => return Some("Invalid currency code.".to_string()),
+    };
+    let exponent = crate::domain::finance::money::exponent_for(&currency);
+    let amount_minor = match crate::domain::finance::money::parse_amount(amount_str, exponent) {
+        Ok(v) => v,
+        Err(_) => {
+            return Some(
+                "Invalid amount. Must be a positive number matching the currency precision."
+                    .to_string(),
+            )
+        }
+    };
     let category = args[3].to_lowercase();
     let frequency = args.get(4).copied().unwrap_or("monthly").to_lowercase();
 
-    let amount: f64 = match amount_str.parse() {
-        Ok(v) if v > 0.0 => v,
-        _ => return Some("Invalid amount. Must be a positive number.".to_string()),
-    };
-
-    let amount_minor = (amount * 100.0).round() as i64;
     let next_due_at = chrono::Utc::now().format("%Y-%m-%d 00:00:00").to_string();
 
     let input = NewRecurringBill {
@@ -175,7 +185,7 @@ async fn handle_add(
         category,
         amount_minor,
         currency: currency.clone(),
-        currency_exponent: 2,
+        currency_exponent: i64::from(exponent),
         frequency,
         due_day: None,
         next_due_at,
@@ -187,13 +197,19 @@ async fn handle_add(
     };
 
     match bills.create(&ctx.owner_id, input).await {
-        Ok((bill, _)) => Some(format!(
-            "Created recurring bill <b>#{}</b>: {} ({} {:.2})",
-            bill.id,
-            html_escape(&bill.name),
-            html_escape(&bill.currency),
-            amount
-        )),
+        Ok((bill, _)) => {
+            let formatted = crate::domain::finance::money::format_amount(
+                bill.amount_minor,
+                bill.currency_exponent.clamp(0, 8) as u32,
+            );
+            Some(format!(
+                "Created recurring bill <b>#{}</b>: {} ({} {})",
+                bill.id,
+                html_escape(&bill.name),
+                html_escape(&bill.currency),
+                formatted
+            ))
+        }
         Err(err) => Some(format!("Failed to create bill: {}", err)),
     }
 }

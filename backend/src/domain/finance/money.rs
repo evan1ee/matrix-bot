@@ -155,6 +155,28 @@ pub fn format_amount(minor: i64, exponent: u32) -> String {
     )
 }
 
+/// Converts a finite positive `f64` into a plain decimal string without forcing
+/// 2 decimal places (`{:.2}`), so zero-decimal currencies (`JPY`), three-decimal
+/// currencies (`KWD`), and fractional prices are preserved for [`parse_amount`].
+pub fn format_decimal_f64(num: f64) -> Result<String, MoneyError> {
+    if !num.is_finite() {
+        return Err(MoneyError::InvalidAmount);
+    }
+    if num <= 0.0 {
+        return Err(MoneyError::NotPositive);
+    }
+    let s = num.to_string();
+    if s.contains(['e', 'E']) {
+        let fixed = format!("{num:.8}");
+        let trimmed = fixed.trim_end_matches('0').trim_end_matches('.');
+        if trimmed.is_empty() || trimmed == "0" {
+            return Err(MoneyError::NotPositive);
+        }
+        return Ok(trimmed.to_string());
+    }
+    Ok(s)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -233,5 +255,22 @@ mod tests {
         assert!(!looks_like_currency("lunch"));
         assert!(!looks_like_currency("EU"));
         assert!(!looks_like_currency("EURO"));
+    }
+
+    #[test]
+    fn test_format_decimal_f64() {
+        assert_eq!(format_decimal_f64(1500.0).unwrap(), "1500");
+        assert_eq!(
+            parse_amount(&format_decimal_f64(1500.0).unwrap(), 0).unwrap(),
+            1500
+        );
+        assert_eq!(format_decimal_f64(1.234).unwrap(), "1.234");
+        assert_eq!(
+            parse_amount(&format_decimal_f64(1.234).unwrap(), 3).unwrap(),
+            1234
+        );
+        assert_eq!(format_decimal_f64(0.004).unwrap(), "0.004");
+        assert!(format_decimal_f64(f64::INFINITY).is_err());
+        assert!(format_decimal_f64(0.0).is_err());
     }
 }

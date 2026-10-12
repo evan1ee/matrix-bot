@@ -75,8 +75,11 @@ impl NewTodo {
                 );
             }
             let has_room = match self.remind_room_id.as_deref() {
-                Some(r) => !r.trim().is_empty(),
-                None => self.room_id != "web" && !self.room_id.trim().is_empty(),
+                Some(r) => !r.trim().is_empty() && r.trim() != crate::domain::rooms::WEB_ROOM,
+                None => {
+                    self.room_id != crate::domain::rooms::WEB_ROOM
+                        && !self.room_id.trim().is_empty()
+                }
             };
             if !has_room {
                 return Err(

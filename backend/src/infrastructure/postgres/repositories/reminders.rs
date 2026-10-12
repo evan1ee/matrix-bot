@@ -178,46 +178,60 @@ pub async fn get_due_reminders<'e>(
     now: DateTime<Utc>,
     limit: i64,
 ) -> Result<Vec<Reminder>, sqlx::Error> {
+    get_due_reminders_page(conn, now, limit, 0).await
+}
+
+pub async fn get_due_reminders_page<'e>(
+    conn: impl PgExecutor<'e>,
+    now: DateTime<Utc>,
+    limit: i64,
+    offset: i64,
+) -> Result<Vec<Reminder>, sqlx::Error> {
     let rows = sqlx::query_as!(
         ReminderRow,
-        r#"
-        SELECT
-            id, room_id, owner_id, sender_name, message, trigger_at,
-            recurrence, status, retry_count, source_kind, source_id, created_at
-        FROM reminders
-        WHERE status = 'pending' AND trigger_at <= $1 AND retry_count < $2
-        ORDER BY trigger_at ASC
-        LIMIT $3
-        "#,
+        "SELECT id, room_id, owner_id, sender_name, message, trigger_at, \
+         recurrence, status, retry_count, source_kind, source_id, created_at \
+         FROM reminders WHERE status = 'pending' AND trigger_at <= $1 AND retry_count < $2 \
+         ORDER BY trigger_at ASC, id ASC LIMIT $3 OFFSET $4",
         now,
         MAX_DELIVERY_ATTEMPTS,
-        limit
+        limit,
+        offset
     )
     .fetch_all(conn)
     .await?;
-
     Ok(rows.into_iter().map(Into::into).collect())
 }
 
 pub async fn mark_triggered<'e>(conn: impl PgExecutor<'e>, id: i64) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(
-        r#"UPDATE reminders SET status = 'triggered' WHERE id = $1"#,
+        "UPDATE reminders SET status = 'triggered' WHERE id = $1 AND status = 'pending'",
         id
     )
     .execute(conn)
     .await?;
+    Ok(result.rows_affected() > 0)
+}
 
+pub async fn mark_triggered_at<'e>(
+    conn: impl PgExecutor<'e>,
+    id: i64,
+    trigger_at: DateTime<Utc>,
+) -> Result<bool, sqlx::Error> {
+    let result = sqlx::query!(
+        "UPDATE reminders SET status = 'triggered' WHERE id = $1 AND trigger_at = $2 AND status = 'pending'",
+        id,
+        trigger_at
+    )
+    .execute(conn)
+    .await?;
     Ok(result.rows_affected() > 0)
 }
 
 pub async fn mark_failed<'e>(conn: impl PgExecutor<'e>, id: i64) -> Result<bool, sqlx::Error> {
-    let result = sqlx::query!(
-        r#"UPDATE reminders SET status = 'failed' WHERE id = $1"#,
-        id
-    )
-    .execute(conn)
-    .await?;
-
+    let result = sqlx::query!("UPDATE reminders SET status = 'failed' WHERE id = $1", id)
+        .execute(conn)
+        .await?;
     Ok(result.rows_affected() > 0)
 }
 
@@ -229,14 +243,12 @@ pub async fn mark_failed_at<'e>(
     trigger_at: DateTime<Utc>,
 ) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(
-        "UPDATE reminders SET status = 'failed' \
-         WHERE id = $1 AND trigger_at = $2 AND status = 'pending'",
+        "UPDATE reminders SET status = 'failed' WHERE id = $1 AND trigger_at = $2 AND status = 'pending'",
         id,
         trigger_at
     )
     .execute(conn)
     .await?;
-
     Ok(result.rows_affected() > 0)
 }
 
@@ -248,18 +260,13 @@ pub async fn find_by_id<'e>(
 ) -> Result<Option<Reminder>, sqlx::Error> {
     let row = sqlx::query_as!(
         ReminderRow,
-        r#"
-        SELECT
-            id, room_id, owner_id, sender_name, message, trigger_at,
-            recurrence, status, retry_count, source_kind, source_id, created_at
-        FROM reminders
-        WHERE id = $1
-        "#,
+        "SELECT id, room_id, owner_id, sender_name, message, trigger_at, \
+         recurrence, status, retry_count, source_kind, source_id, created_at \
+         FROM reminders WHERE id = $1",
         id
     )
     .fetch_optional(conn)
     .await?;
-
     Ok(row.map(Into::into))
 }
 
@@ -269,34 +276,32 @@ pub async fn record_failed_attempt<'e>(
     trigger_at: DateTime<Utc>,
     attempts: i64,
 ) -> Result<bool, sqlx::Error> {
-    // retry_count mirrors the job's attempt number. trigger_at stays put: the
-    // job row owns the backoff (R21), and the dedupe key <id>:<trigger_at>
-    // must not change mid-retry.
     let result = sqlx::query!(
-        "UPDATE reminders SET retry_count = $3 \
-         WHERE id = $1 AND trigger_at = $2 AND status = 'pending'",
+        "UPDATE reminders SET retry_count = $3 WHERE id = $1 AND trigger_at = $2 AND status = 'pending'",
         id,
         trigger_at,
         attempts
     )
     .execute(conn)
     .await?;
-
     Ok(result.rows_affected() > 0)
 }
-pub async fn reschedule<'e>(
+
+pub async fn reschedule_at<'e>(
     conn: impl PgExecutor<'e>,
     id: i64,
+    expected_trigger_at: DateTime<Utc>,
     new_trigger_at: DateTime<Utc>,
 ) -> Result<bool, sqlx::Error> {
     let result = sqlx::query!(
-        r#"UPDATE reminders SET trigger_at = $1, status = 'pending', retry_count = 0 WHERE id = $2"#,
+        "UPDATE reminders SET trigger_at = $1, status = 'pending', retry_count = 0 \
+         WHERE id = $2 AND trigger_at = $3 AND status = 'pending'",
         new_trigger_at,
-        id
+        id,
+        expected_trigger_at
     )
     .execute(conn)
     .await?;
-
     Ok(result.rows_affected() > 0)
 }
 

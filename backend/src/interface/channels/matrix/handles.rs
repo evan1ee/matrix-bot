@@ -31,4 +31,6 @@ pub struct BotHandles {
     pub sync_health: SyncHealth,
     /// This generation's client for the job handlers; empty while disconnected.
     pub matrix: MatrixHandle,
+    /// Outbound channel registry for security announcements from HTTP handlers.
+    pub outbound: Option<std::sync::Weak<crate::interface::channels::registry::ChannelRegistry>>,
 }

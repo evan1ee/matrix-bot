@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { X } from 'lucide-react';
 import type { LifeProfile, UpsertProfilePayload } from './types';
 import { DatePicker } from '../../components/DatePicker';
+import { nowInZone, todayInZone, useSettings } from '../../core/settings';
 
 interface LifeProfileModalProps {
   profile: LifeProfile | null;
@@ -16,6 +17,7 @@ export const LifeProfileModal: React.FC<LifeProfileModalProps> = ({
   onClose,
   onSave,
 }) => {
+  const { timezone } = useSettings();
   const [birthDate, setBirthDate] = useState('1995-01-01');
   const [lifespan, setLifespan] = useState(80);
   const [isSaving, setIsSaving] = useState(false);
@@ -98,7 +100,8 @@ export const LifeProfileModal: React.FC<LifeProfileModalProps> = ({
               value={birthDate}
               onChange={setBirthDate}
               required
-              max={new Date().toISOString().split('T')[0]}
+              max={todayInZone(timezone)}
+              now={nowInZone(timezone)}
               placeholder="Select date of birth"
             />
             <p className="text-xs text-neutral-400 dark:text-neutral-500 mt-1">

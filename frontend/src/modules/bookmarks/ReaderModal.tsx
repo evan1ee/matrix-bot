@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, ExternalLink, Star, Archive, ArchiveRestore } from 'lucide-react';
+import { formatDateInZone, useSettings } from '../../core/settings';
 import type { Bookmark } from './types';
 
 interface ReaderModalProps {
@@ -17,6 +18,7 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
   onToggleFavorite,
   onToggleArchive,
 }) => {
+  const { timezone } = useSettings();
   const [fontSize, setFontSize] = useState<'sm' | 'base' | 'lg'>('base');
   const [scrollProgress, setScrollProgress] = useState(0);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -210,7 +212,7 @@ export const ReaderModal: React.FC<ReaderModalProps> = ({
                 )}
                 <span>Published on {bookmark.domain}</span>
                 <span>·</span>
-                <span className="font-mono text-[11px]">{new Date(bookmark.created_at).toLocaleDateString()}</span>
+                <span className="font-mono text-[11px]">{formatDateInZone(bookmark.created_at, timezone)}</span>
               </div>
 
               {bookmark.description && (

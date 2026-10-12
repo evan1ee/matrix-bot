@@ -249,7 +249,7 @@ pub async fn issue_matrix_session(
     let session_token = state
         .services
         .accounts
-        .create_session(&account_id, user_agent.or(Some("ElementX-iOS")), None, None)
+        .create_unverified_session(&account_id, user_agent.or(Some("ElementX-iOS")), None, None)
         .await
         .map_err(|err| ApiError::internal(format!("Could not open a session: {err}")))?;
 
@@ -300,7 +300,14 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(res.headers().contains_key(header::SET_COOKIE));
+        let set_cookie = res
+            .headers()
+            .get(header::SET_COOKIE)
+            .and_then(|v| v.to_str().ok())
+            .expect("must set cookie");
+        let token =
+            crate::domain::accounts::cookie_value(set_cookie, crate::domain::accounts::COOKIE_NAME)
+                .expect("cookie must contain token");
 
         let account_id = state
             .services
@@ -308,6 +315,24 @@ mod tests {
             .find_matrix_for_test("@alice:example.org")
             .await;
         assert!(account_id.is_some());
+
+        let principal = state
+            .services
+            .accounts
+            .resolve_credential(&crate::domain::accounts::Credential::BearerSession(token))
+            .await
+            .unwrap()
+            .expect("session must resolve");
+        let user = crate::interface::http::auth::AuthUser::from(principal);
+        assert!(
+            !user.may_perform_sensitive_action(chrono::Utc::now()),
+            "Matrix access-token session must not satisfy passkey step-up"
+        );
+        assert_eq!(
+            user.last_verified_at,
+            chrono::DateTime::<chrono::Utc>::MIN_UTC,
+            "Matrix access-token session must have MIN_UTC last_verified_at"
+        );
     }
 
     #[tokio::test]

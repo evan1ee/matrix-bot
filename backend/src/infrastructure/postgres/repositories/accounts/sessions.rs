@@ -41,6 +41,51 @@ pub async fn create(
     ip: Option<&str>,
     restricted_until: Option<DateTime<Utc>>,
 ) -> Result<String, sqlx::Error> {
+    let verified_at = if restricted_until.is_some() {
+        DateTime::<Utc>::UNIX_EPOCH
+    } else {
+        Utc::now()
+    };
+    create_with_verification(
+        conn,
+        account_id,
+        user_agent,
+        ip,
+        restricted_until,
+        verified_at,
+    )
+    .await
+}
+
+/// Opens a session that has not verified a passkey (e.g. Matrix access-token
+/// exchange), stamping `last_verified_at = MIN_UTC` so it never satisfies
+/// `VerifiedUser` or `AdminSession` until a passkey is presented.
+pub async fn create_unverified(
+    conn: impl sqlx::PgExecutor<'_>,
+    account_id: &AccountId,
+    user_agent: Option<&str>,
+    ip: Option<&str>,
+    restricted_until: Option<DateTime<Utc>>,
+) -> Result<String, sqlx::Error> {
+    create_with_verification(
+        conn,
+        account_id,
+        user_agent,
+        ip,
+        restricted_until,
+        DateTime::<Utc>::UNIX_EPOCH,
+    )
+    .await
+}
+
+async fn create_with_verification(
+    conn: impl sqlx::PgExecutor<'_>,
+    account_id: &AccountId,
+    user_agent: Option<&str>,
+    ip: Option<&str>,
+    restricted_until: Option<DateTime<Utc>>,
+    verified_at: DateTime<Utc>,
+) -> Result<String, sqlx::Error> {
     let token = crate::utils::random::random_hex(32);
     let now = Utc::now();
     let hashed = hash_token(&token);
@@ -54,7 +99,7 @@ pub async fn create(
         account_id.as_uuid(),
         now,
         now,
-        now,
+        verified_at,
         restricted_until,
         user_agent,
         ip,

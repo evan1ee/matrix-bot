@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Bell, BellRing, Trash2, X, Plus, AlertCircle, TrendingUp, TrendingDown, Check } from 'lucide-react';
 import { fetchApi } from '../../core/apiClient';
+import { formatDateInZone, useSettings } from '../../core/settings';
 import { PriceAlert, AlertCondition } from './types';
 import { TickerSearchInput } from './TickerSearchInput';
 
@@ -14,8 +15,8 @@ interface AlertsModalProps {
 function formatAmount(minor: number, exponent: number): string {
   const full = (minor / 10 ** exponent).toFixed(exponent);
   return Number(full).toLocaleString(undefined, {
-    minimumFractionDigits: Math.min(exponent, 2),
-    maximumFractionDigits: Math.min(exponent, 2),
+    minimumFractionDigits: exponent,
+    maximumFractionDigits: exponent,
   });
 }
 
@@ -25,6 +26,7 @@ export const AlertsModal: React.FC<AlertsModalProps> = ({
   onClose,
 }) => {
   const queryClient = useQueryClient();
+  const { timezone } = useSettings();
 
   const [symbol, setSymbol] = useState(initialSymbol);
   const [targetPrice, setTargetPrice] = useState('');
@@ -237,8 +239,8 @@ export const AlertsModal: React.FC<AlertsModalProps> = ({
                       </div>
                       <span className="text-[10px] text-neutral-400 font-mono">
                         {a.is_triggered
-                          ? `Triggered on ${new Date(a.triggered_at || a.created_at).toLocaleDateString()}`
-                          : `Created on ${new Date(a.created_at).toLocaleDateString()}`}
+                          ? `Triggered on ${formatDateInZone(a.triggered_at || a.created_at, timezone)}`
+                          : `Created on ${formatDateInZone(a.created_at, timezone)}`}
                       </span>
                     </div>
                   </div>

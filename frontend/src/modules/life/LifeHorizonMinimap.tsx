@@ -443,8 +443,10 @@ export const LifeHorizonMinimap: React.FC<LifeHorizonMinimapProps> = ({
   };
 
   const handleSelectToday = () => {
-    const todayStr = new Date().toISOString().split('T')[0];
-    const currentYearDecade = Math.floor(new Date().getFullYear() / 10) * 10;
+    const presentDay = days.find((d) => d.status === 'present');
+    const todayStr = presentDay?.date ?? new Date().toISOString().split('T')[0];
+    const currentYear = parseInt(todayStr.slice(0, 4), 10) || new Date().getFullYear();
+    const currentYearDecade = Math.floor(currentYear / 10) * 10;
     if (selectedDecade !== currentYearDecade) {
       setSelectedDecade(currentYearDecade);
     }

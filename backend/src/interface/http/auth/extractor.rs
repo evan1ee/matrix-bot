@@ -13,6 +13,68 @@ fn is_mutating(method: &Method) -> bool {
     !matches!(method, &Method::GET | &Method::HEAD | &Method::OPTIONS)
 }
 
+async fn resolve_request_user<S>(
+    parts: &mut Parts,
+    state: &S,
+    allow_mcp_token: bool,
+) -> Result<AuthUser, ApiError>
+where
+    S: Send + Sync,
+    ApiState: FromRef<S>,
+{
+    let api_state = ApiState::from_ref(state);
+
+    let credential =
+        parse_credential(&parts.headers).ok_or_else(|| ApiError::unauthorized("Not signed in"))?;
+
+    if !allow_mcp_token && matches!(credential, crate::domain::accounts::Credential::McpToken(_)) {
+        return Err(ApiError::forbidden(
+            "MCP tokens may only be used on MCP protocol endpoints",
+        ));
+    }
+
+    // A session cookie rides along automatically, so a cross-site request
+    // would carry full authority if nothing stopped it. `SameSite=Strict`
+    // is the first defence and this is the second: a state-changing request
+    // must come from our own origin, and must say so.
+    //
+    // Non-browser clients (such as Element X iOS) presenting an explicit
+    // Authorization: Bearer token are immune to ambient credential CSRF,
+    // so the Origin requirement is enforced only for cookie-authenticated requests.
+    if credential.is_ambient() && is_mutating(&parts.method) {
+        let origin = parts
+            .headers
+            .get(header::ORIGIN)
+            .and_then(|value| value.to_str().ok());
+
+        match origin {
+            Some(value) if api_state.is_allowed_origin(value) => {}
+            Some(_) => {
+                return Err(ApiError::unauthorized(
+                    "This request did not come from this site",
+                ))
+            }
+            None => {
+                return Err(ApiError::unauthorized(
+                    "A state-changing request must carry an Origin header",
+                ))
+            }
+        }
+    }
+
+    api_state
+        .services
+        .accounts
+        .resolve_credential(&credential)
+        .await
+        .map_err(|err| {
+            tracing::error!("Could not read the session: {:?}", err);
+            ApiError::internal("Could not read the session")
+        })?
+        .map(AuthUser::from)
+        .ok_or_else(|| ApiError::unauthorized("That session has expired"))
+}
+
 #[async_trait]
 impl<S> FromRequestParts<S> for AuthUser
 where
@@ -22,51 +84,34 @@ where
     type Rejection = ApiError;
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
-        let api_state = ApiState::from_ref(state);
+        resolve_request_user(parts, state, false).await
+    }
+}
 
-        let credential = parse_credential(&parts.headers)
-            .ok_or_else(|| ApiError::unauthorized("Not signed in"))?;
+/// An authenticated caller on an MCP protocol route (`/mcp`, `/mcp/sse`,
+/// `/mcp/messages`), which additionally accepts `mb_mcp_` personal access
+/// tokens. General REST routes use [`AuthUser`] and reject MCP tokens.
+#[derive(Debug, Clone)]
+pub struct McpUser(pub AuthUser);
 
-        // A session cookie rides along automatically, so a cross-site request
-        // would carry full authority if nothing stopped it. `SameSite=Strict`
-        // is the first defence and this is the second: a state-changing request
-        // must come from our own origin, and must say so.
-        //
-        // Non-browser clients (such as Element X iOS) presenting an explicit
-        // Authorization: Bearer token are immune to ambient credential CSRF,
-        // so the Origin requirement is enforced only for cookie-authenticated requests.
-        if credential.is_ambient() && is_mutating(&parts.method) {
-            let origin = parts
-                .headers
-                .get(header::ORIGIN)
-                .and_then(|value| value.to_str().ok());
+impl std::ops::Deref for McpUser {
+    type Target = AuthUser;
 
-            match origin {
-                Some(value) if api_state.is_allowed_origin(value) => {}
-                Some(_) => {
-                    return Err(ApiError::unauthorized(
-                        "This request did not come from this site",
-                    ))
-                }
-                None => {
-                    return Err(ApiError::unauthorized(
-                        "A state-changing request must carry an Origin header",
-                    ))
-                }
-            }
-        }
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
-        api_state
-            .services
-            .accounts
-            .resolve_credential(&credential)
-            .await
-            .map_err(|err| {
-                tracing::error!("Could not read the session: {:?}", err);
-                ApiError::internal("Could not read the session")
-            })?
-            .map(AuthUser::from)
-            .ok_or_else(|| ApiError::unauthorized("That session has expired"))
+#[async_trait]
+impl<S> FromRequestParts<S> for McpUser
+where
+    S: Send + Sync,
+    ApiState: FromRef<S>,
+{
+    type Rejection = ApiError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        resolve_request_user(parts, state, true).await.map(McpUser)
     }
 }
 

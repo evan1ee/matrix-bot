@@ -24,6 +24,11 @@ pub async fn record_audit_entry_tx(
     let now = custom_timestamp.unwrap_or_else(Utc::now);
     let epoch_ms = now.timestamp_millis();
 
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(owner_id.to_string())
+        .execute(&mut *conn)
+        .await?;
+
     let prev_row = sqlx::query!(
         r#"
         SELECT entry_hash
@@ -116,9 +121,9 @@ pub async fn record_audit_entry(
     note: Option<&str>,
     custom_timestamp: Option<DateTime<Utc>>,
 ) -> Result<PortfolioAuditEntry, sqlx::Error> {
-    let mut conn = pool.acquire().await?;
-    record_audit_entry_tx(
-        &mut conn,
+    let mut tx = pool.begin().await?;
+    let entry = record_audit_entry_tx(
+        &mut tx,
         owner_id,
         action,
         symbol,
@@ -131,7 +136,9 @@ pub async fn record_audit_entry(
         note,
         custom_timestamp,
     )
-    .await
+    .await?;
+    tx.commit().await?;
+    Ok(entry)
 }
 
 pub async fn list_audit_entries(

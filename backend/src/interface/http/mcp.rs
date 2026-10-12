@@ -11,7 +11,7 @@ use std::time::Duration;
 use tracing::info;
 use uuid::Uuid;
 
-use crate::interface::http::auth::{ApiState, AuthUser};
+use crate::interface::http::auth::{ApiState, AuthUser, McpUser};
 use crate::interface::http::error::ApiError;
 use crate::interface::mcp::models::{
     self, CreateMcpTokenRequest, CreateMcpTokenResponse, McpTokenSummary,
@@ -41,7 +41,7 @@ pub fn mcp_routes() -> Router<ApiState> {
 /// `openapi::tests::UNDOCUMENTED` for the same reason.
 pub async fn mcp_sse_handler(
     State(_state): State<ApiState>,
-    user: AuthUser,
+    user: McpUser,
 ) -> Result<Sse<impl futures_util::stream::Stream<Item = Result<Event, Infallible>>>, ApiError> {
     let session_id = Uuid::new_v4().to_string();
     info!(
@@ -68,7 +68,7 @@ pub async fn mcp_sse_handler(
 /// `openapi::tests::UNDOCUMENTED`.
 pub async fn mcp_message_handler(
     State(state): State<ApiState>,
-    user: AuthUser,
+    user: McpUser,
     Query(_query): Query<McpQuery>,
     Json(req): Json<JsonRpcRequest>,
 ) -> Result<Json<Option<JsonRpcResponse>>, ApiError> {
@@ -84,7 +84,7 @@ pub async fn mcp_message_handler(
 /// Allowlisted in `openapi::tests::UNDOCUMENTED`.
 pub async fn mcp_direct_handler(
     State(state): State<ApiState>,
-    user: AuthUser,
+    user: McpUser,
     Json(req): Json<JsonRpcRequest>,
 ) -> Result<Json<Option<JsonRpcResponse>>, ApiError> {
     let service = McpProtocolService::new(&state.services, &state.db.pool, &user.account_id);

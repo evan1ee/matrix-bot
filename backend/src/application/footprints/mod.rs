@@ -203,6 +203,13 @@ impl FootprintService {
 
         let spend_minor = if let Some(ref s) = input.spend_amount {
             parse_spend_amount(s, exp)?
+        } else if exp as i64 != existing.spend_currency_exponent && existing.spend_amount_minor > 0
+        {
+            let formatted = crate::domain::finance::money::format_amount(
+                existing.spend_amount_minor,
+                existing.spend_currency_exponent as u32,
+            );
+            parse_spend_amount(&formatted, exp)?
         } else {
             existing.spend_amount_minor
         };

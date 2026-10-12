@@ -1,5 +1,6 @@
 import React from 'react';
 import { Edit2, Archive, ArchiveRestore, Trash2, FileText } from 'lucide-react';
+import { formatInZone, useSettings } from '../../core/settings';
 import type { NoteSummary } from './types';
 
 interface NoteCardProps {
@@ -17,7 +18,8 @@ export const NoteCard: React.FC<NoteCardProps> = ({
   onToggleArchive,
   onSelectTag,
 }) => {
-  const formattedDate = new Date(note.updated_at).toLocaleDateString(undefined, {
+  const { timezone } = useSettings();
+  const formattedDate = formatInZone(note.updated_at, timezone, {
     month: 'short',
     day: 'numeric',
   });

@@ -1,5 +1,4 @@
 use chrono::{DateTime, Utc};
-use tracing::error;
 
 use super::PortfolioService;
 use crate::application::AppError;
@@ -63,9 +62,8 @@ impl PortfolioService {
         .await?;
 
         outbox::publish(&mut tx, &cash_event(owner, &cash)).await?;
-        tx.commit().await?;
-
-        self.record_portfolio_cash_transaction(
+        self.record_portfolio_cash_transaction_in_tx(
+            &mut tx,
             owner,
             "deposit",
             CashMovement {
@@ -76,7 +74,8 @@ impl PortfolioService {
                 executed_at,
             },
         )
-        .await;
+        .await?;
+        tx.commit().await?;
 
         Ok(cash)
     }
@@ -95,11 +94,8 @@ impl PortfolioService {
 
         if let WithdrawOutcome::Ok(ref cash) = outcome {
             outbox::publish(&mut tx, &cash_event(owner, cash)).await?;
-        }
-        tx.commit().await?;
-
-        if let WithdrawOutcome::Ok(ref cash) = outcome {
-            self.record_portfolio_cash_transaction(
+            self.record_portfolio_cash_transaction_in_tx(
+                &mut tx,
                 owner,
                 "withdraw",
                 CashMovement {
@@ -110,18 +106,20 @@ impl PortfolioService {
                     executed_at,
                 },
             )
-            .await;
+            .await?;
         }
+        tx.commit().await?;
 
         Ok(outcome)
     }
 
-    async fn record_portfolio_cash_transaction(
+    async fn record_portfolio_cash_transaction_in_tx(
         &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
         owner: &AccountId,
         action: &str,
         movement: CashMovement<'_>,
-    ) -> Option<Transaction> {
+    ) -> Result<Option<Transaction>, AppError> {
         let CashMovement {
             amount_minor,
             currency,
@@ -132,13 +130,13 @@ impl PortfolioService {
         let (direction, note) = match action {
             "deposit" => (Direction::Expense, "Portfolio cash deposit"),
             "withdraw" => (Direction::Income, "Portfolio cash withdrawal"),
-            _ => return None,
+            _ => return Ok(None),
         };
 
         let finance = crate::application::finance::FinanceService::new(self.pool.clone());
-
-        finance
-            .create_transaction(
+        let recorded = finance
+            .create_transaction_in_tx(
+                tx,
                 owner,
                 NewTransaction {
                     direction,
@@ -155,8 +153,7 @@ impl PortfolioService {
                     create_missing_category: true,
                 },
             )
-            .await
-            .map_err(|err| error!("Failed to record portfolio cash transaction: {:?}", err))
-            .ok()
+            .await?;
+        Ok(Some(recorded))
     }
 }

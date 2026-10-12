@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT balance_minor FROM portfolio_cash_balances WHERE owner_id = $1 AND currency = 'USD'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "balance_minor",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "portfolio_cash_balances",
+            "name": "balance_minor"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "602f0dfb4bca106e9f6996b4323e186461a61d84baeb66a655ebc950ecca8f38"
+}

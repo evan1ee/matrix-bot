@@ -31,7 +31,28 @@ impl PortfolioService {
                     source: anyhow::anyhow!(e),
                 })?;
 
-        let price_minor = price_to_minor(fetched.price, holding.currency_exponent);
+        let converted_price = if fetched.currency.eq_ignore_ascii_case(&holding.currency) {
+            fetched.price
+        } else {
+            let rates = crate::infrastructure::web::fx::get_cached_rates().await;
+            let rate = crate::domain::finance::fx::try_get_rate_between(
+                &fetched.currency,
+                &holding.currency,
+                &rates,
+            )
+            .ok_or_else(|| AppError::External {
+                service: "portfolio_price_feed",
+                source: anyhow::anyhow!(
+                    "Quote for {} is in {}, cannot convert to holding currency {}",
+                    holding.symbol,
+                    fetched.currency,
+                    holding.currency
+                ),
+            })?;
+            fetched.price * rate
+        };
+
+        let price_minor = price_to_minor(converted_price, holding.currency_exponent);
 
         let mut tx = self.pool.begin().await?;
         let updated = repo::set_price(&mut tx, owner, &holding.symbol, price_minor)

@@ -54,10 +54,17 @@ pub fn validate_ai_base_url(url_str: &str, allow_private: bool) -> Result<(), &'
         .ok_or("API base URL must contain a valid host")?;
     let host_lower = host_str.to_ascii_lowercase();
 
+    let ip = match parsed.host() {
+        Some(url::Host::Ipv4(ip)) => Some(std::net::IpAddr::V4(ip)),
+        Some(url::Host::Ipv6(ip)) => Some(std::net::IpAddr::V6(ip)),
+        _ => None,
+    };
+
     if host_lower == "169.254.169.254"
         || host_lower.starts_with("169.254.")
         || host_lower.starts_with("fe80:")
         || host_lower.starts_with("[fe80:")
+        || ip.is_some_and(is_link_local_ip)
     {
         return Err("API base URL cannot target link-local metadata addresses");
     }
@@ -86,12 +93,6 @@ pub fn validate_ai_base_url(url_str: &str, allow_private: bool) -> Result<(), &'
             }
         }
 
-        let ip = match parsed.host() {
-            Some(url::Host::Ipv4(ip)) => Some(std::net::IpAddr::V4(ip)),
-            Some(url::Host::Ipv6(ip)) => Some(std::net::IpAddr::V6(ip)),
-            _ => None,
-        };
-
         if let Some(ip) = ip {
             if is_disallowed_ip(ip) {
                 return Err("API base URL cannot target private or loopback IP addresses");
@@ -99,25 +100,23 @@ pub fn validate_ai_base_url(url_str: &str, allow_private: bool) -> Result<(), &'
         } else if let Some(url::Host::Domain(domain)) = parsed.host() {
             use std::net::ToSocketAddrs;
             let port = parsed.port_or_known_default().unwrap_or(80);
-            if let Ok(addrs) = (domain, port).to_socket_addrs() {
-                for addr in addrs {
-                    let is_disallowed = match addr.ip() {
-                        std::net::IpAddr::V4(v4) => {
-                            v4.is_loopback()
-                                || v4.is_private()
-                                || v4.is_link_local()
-                                || v4.is_broadcast()
-                                || v4.octets()[0] == 0
+            match (domain, port).to_socket_addrs() {
+                Ok(addrs) => {
+                    let mut count = 0;
+                    for addr in addrs {
+                        count += 1;
+                        if is_disallowed_ip(addr.ip()) {
+                            return Err(
+                                "API base URL resolves to a private or loopback IP address",
+                            );
                         }
-                        std::net::IpAddr::V6(v6) => {
-                            v6.is_loopback()
-                                || v6.is_unspecified()
-                                || (v6.segments()[0] & 0xffc0) == 0xfe80
-                        }
-                    };
-                    if is_disallowed {
-                        return Err("API base URL resolves to a private or loopback IP address");
                     }
+                    if count == 0 {
+                        return Err("API base URL host could not be resolved");
+                    }
+                }
+                Err(_) => {
+                    return Err("API base URL host could not be resolved");
                 }
             }
         }
@@ -126,10 +125,25 @@ pub fn validate_ai_base_url(url_str: &str, allow_private: bool) -> Result<(), &'
     Ok(())
 }
 
-fn is_disallowed_ip(ip: std::net::IpAddr) -> bool {
+fn is_link_local_ip(ip: std::net::IpAddr) -> bool {
+    match ip {
+        std::net::IpAddr::V4(v4) => v4.is_link_local(),
+        std::net::IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped().or_else(|| v6.to_ipv4()) {
+                if v4.is_link_local() {
+                    return true;
+                }
+            }
+            (v6.segments()[0] & 0xffc0) == 0xfe80
+        }
+    }
+}
+
+pub fn is_disallowed_ip(ip: std::net::IpAddr) -> bool {
     match ip {
         std::net::IpAddr::V4(v4) => {
             v4.is_loopback()
+                || v4.is_unspecified()
                 || v4.is_private()
                 || v4.is_link_local()
                 || v4.is_broadcast()
@@ -138,6 +152,11 @@ fn is_disallowed_ip(ip: std::net::IpAddr) -> bool {
                 || (v4.octets()[0] == 100 && (v4.octets()[1] & 0xC0) == 64)
         }
         std::net::IpAddr::V6(v6) => {
+            if let Some(v4) = v6.to_ipv4_mapped().or_else(|| v6.to_ipv4()) {
+                if is_disallowed_ip(std::net::IpAddr::V4(v4)) {
+                    return true;
+                }
+            }
             v6.is_loopback()
                 || v6.is_unspecified()
                 || (v6.segments()[0] & 0xffc0) == 0xfe80
@@ -335,6 +354,42 @@ mod tests {
         assert_eq!(
             ssrf_localtest.validate(false).unwrap_err(),
             "API base URL cannot target internal or local domain names"
+        );
+
+        let ssrf_mapped_v6 = UpdateAiConfigInput {
+            api_base_url: Some("http://[::ffff:127.0.0.1]:8000/v1".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            ssrf_mapped_v6.validate(false).unwrap_err(),
+            "API base URL cannot target private or loopback IP addresses"
+        );
+
+        let ssrf_mapped_metadata = UpdateAiConfigInput {
+            api_base_url: Some("http://[::ffff:169.254.169.254]/latest/meta-data".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            ssrf_mapped_metadata.validate(true).unwrap_err(),
+            "API base URL cannot target link-local metadata addresses"
+        );
+
+        let ssrf_ula_v6 = UpdateAiConfigInput {
+            api_base_url: Some("http://[fd00::1]:8000/v1".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(
+            ssrf_ula_v6.validate(false).unwrap_err(),
+            "API base URL cannot target private or loopback IP addresses"
+        );
+
+        let unresolvable_dns = UpdateAiConfigInput {
+            api_base_url: Some(format!("https://{}.example.com/v1", "a".repeat(64))),
+            ..Default::default()
+        };
+        assert_eq!(
+            unresolvable_dns.validate(false).unwrap_err(),
+            "API base URL host could not be resolved"
         );
     }
 

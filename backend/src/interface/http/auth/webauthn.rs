@@ -129,6 +129,7 @@ pub async fn register_start(
         .stash_ceremony(Ceremony::Registration {
             account_id,
             display_name: display_name.to_string(),
+            restricted_until: None,
             state: reg_state,
         })
         .await?;
@@ -199,6 +200,7 @@ pub async fn enroll_start(
         .stash_ceremony(Ceremony::Registration {
             account_id,
             display_name: account.display_name,
+            restricted_until: None,
             state: reg_state,
         })
         .await?;
@@ -227,6 +229,7 @@ pub async fn register_finish(
     let Some(Ceremony::Registration {
         account_id,
         display_name,
+        restricted_until,
         state: reg_state,
     }) = state.take_ceremony(&payload.ceremony_id).await
     else {
@@ -257,7 +260,14 @@ pub async fn register_finish(
             ApiError::internal(format!("could not create the account and passkey: {err}"))
         })?;
 
-    issue_session(&state, &account_id, &display_name, &headers).await
+    issue_session_with_restriction(
+        &state,
+        &account_id,
+        &display_name,
+        &headers,
+        restricted_until,
+    )
+    .await
 }
 
 #[utoipa::path(
@@ -320,9 +330,14 @@ pub async fn login_finish(
         })?;
 
     let accounts = &state.services.accounts;
-    let account_id = match accounts.find_passkey_by_raw_id(cred_id.as_ref()).await {
-        Ok(Some(cred)) => cred.account_id,
-        _ => AccountId::from_handle(&handle),
+    let stored_cred = accounts
+        .find_passkey_by_raw_id(cred_id.as_ref())
+        .await
+        .ok()
+        .flatten();
+    let account_id = match &stored_cred {
+        Some(cred) => cred.account_id,
+        None => AccountId::from_handle(&handle),
     };
 
     let passkeys = accounts
@@ -367,7 +382,35 @@ pub async fn login_finish(
         .map_err(|err| ApiError::internal(format!("could not read the account: {err}")))?
         .ok_or_else(|| ApiError::unauthorized("Sign-in failed"))?;
 
-    issue_session(&state, &account_id, &account.display_name, &headers).await
+    let mut login_restricted_until = None;
+    if let Some(cred_created_at) = stored_cred.and_then(|c| c.created_at) {
+        let now = chrono::Utc::now();
+        if let Ok(sessions) = accounts.list_sessions(&account_id).await {
+            for s in sessions {
+                if let Some(until) = s.restricted_until.filter(|&u| now < u) {
+                    let window_start = until
+                        - chrono::Duration::hours(
+                            crate::domain::accounts::RECOVERY_RESTRICTION_HOURS,
+                        );
+                    if cred_created_at >= window_start {
+                        login_restricted_until = Some(
+                            login_restricted_until
+                                .map_or(until, |cur: chrono::DateTime<chrono::Utc>| cur.max(until)),
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    issue_session_with_restriction(
+        &state,
+        &account_id,
+        &account.display_name,
+        &headers,
+        login_restricted_until,
+    )
+    .await
 }
 
 /// What to call a freshly registered passkey when the browser sent no label.
@@ -390,17 +433,40 @@ pub(crate) async fn issue_session(
     display_name: &str,
     headers: &axum::http::HeaderMap,
 ) -> Result<axum::response::Response, ApiError> {
+    issue_session_with_restriction(state, account_id, display_name, headers, None).await
+}
+
+pub(crate) async fn issue_session_with_restriction(
+    state: &ApiState,
+    account_id: &AccountId,
+    display_name: &str,
+    headers: &axum::http::HeaderMap,
+    ceremony_restricted_until: Option<chrono::DateTime<chrono::Utc>>,
+) -> Result<axum::response::Response, ApiError> {
+    let now = chrono::Utc::now();
+    let mut restricted_until = ceremony_restricted_until.filter(|&until| now < until);
+
     let user_agent = headers
         .get(axum::http::header::USER_AGENT)
         .and_then(|v| v.to_str().ok());
 
-    // If this request already presented an existing session cookie, revoke that previous
-    // session so it does not linger as an orphaned duplicate.
+    // If this request already presented an existing session cookie, carry forward
+    // any active recovery restriction from it before revoking it so a recovery
+    // session can never shed its 72-hour restriction by registering or signing in.
     if let Some(cookies) = headers
         .get(axum::http::header::COOKIE)
         .and_then(|v| v.to_str().ok())
     {
         if let Some(old_token) = cookie_value(cookies, COOKIE_NAME) {
+            if let Ok(Some(old_session)) = state.services.accounts.resolve_session(old_token).await
+            {
+                if old_session.account_id == *account_id {
+                    if let Some(old_until) = old_session.restricted_until.filter(|&u| now < u) {
+                        restricted_until =
+                            Some(restricted_until.map_or(old_until, |cur| cur.max(old_until)));
+                    }
+                }
+            }
             let old_id_hash = hash_token(old_token);
             let _ = state.services.accounts.end_session(&old_id_hash).await;
         }
@@ -409,7 +475,7 @@ pub(crate) async fn issue_session(
     let token = state
         .services
         .accounts
-        .create_session(account_id, user_agent, None, None)
+        .create_session(account_id, user_agent, None, restricted_until)
         .await
         .map_err(|err| ApiError::internal(format!("could not open a session: {err}")))?;
 

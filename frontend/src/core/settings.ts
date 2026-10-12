@@ -263,7 +263,16 @@ export function utcIsoToZonedInput(
   timezone: string
 ): string {
   if (!iso) return '';
-  const date = new Date(iso);
+  const trimmed = iso.trim();
+  if (!trimmed) return '';
+  const normalized =
+    trimmed.includes('Z') || /[+-]\d{2}(?::?\d{2})?$/.test(trimmed)
+      ? trimmed
+      : trimmed.includes('T')
+        ? `${trimmed}Z`
+        : `${trimmed.replace(' ', 'T')}Z`;
+  const parsed = new Date(normalized);
+  const date = Number.isNaN(parsed.getTime()) ? new Date(iso) : parsed;
   if (Number.isNaN(date.getTime())) return '';
 
   const p = wallClockParts(date, timezone);
@@ -280,3 +289,47 @@ export function nowInZone(timezone: string): Date {
   const p = wallClockParts(new Date(), timezone);
   return new Date(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
 }
+
+/** Today's calendar date (`YYYY-MM-DD`) in the chosen zone. */
+export function todayInZone(timezone: string, at: Date = new Date()): string {
+  const p = wallClockParts(at, timezone);
+  return `${p.year}-${pad(p.month)}-${pad(p.day)}`;
+}
+
+const ZERO_DECIMAL_CURRENCIES = new Set([
+  'BIF',
+  'CLP',
+  'DJF',
+  'GNF',
+  'ISK',
+  'JPY',
+  'KMF',
+  'KRW',
+  'PYG',
+  'RWF',
+  'UGX',
+  'VND',
+  'VUV',
+  'XAF',
+  'XOF',
+  'XPF',
+]);
+
+const THREE_DECIMAL_CURRENCIES = new Set([
+  'BHD',
+  'IQD',
+  'JOD',
+  'KWD',
+  'LYD',
+  'OMR',
+  'TND',
+]);
+
+/** ISO 4217 minor-unit exponent, matching `domain::finance::money::exponent_for`. */
+export function currencyExponent(currency: string): number {
+  const code = (currency || '').trim().toUpperCase();
+  if (ZERO_DECIMAL_CURRENCIES.has(code)) return 0;
+  if (THREE_DECIMAL_CURRENCIES.has(code)) return 3;
+  return 2;
+}
+

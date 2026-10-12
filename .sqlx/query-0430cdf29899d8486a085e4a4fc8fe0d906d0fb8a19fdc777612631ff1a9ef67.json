@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        UPDATE recurring_bills\n        SET\n            name = COALESCE($1, name),\n            category = COALESCE($2, category),\n            amount_minor = COALESCE($3, amount_minor),\n            currency = COALESCE($4, currency),\n            frequency = COALESCE($5, frequency),\n            due_day = CASE WHEN $6 THEN $7 ELSE due_day END,\n            next_due_at = COALESCE($8, next_due_at),\n            total_installments = CASE WHEN $9 THEN $10 ELSE total_installments END,\n            paid_installments = COALESCE($11, paid_installments),\n            auto_pay = COALESCE($12, auto_pay),\n            status = COALESCE($13, status),\n            notes = CASE WHEN $14 THEN $15 ELSE notes END,\n            remind_before_minutes = CASE WHEN $16 THEN $17 ELSE remind_before_minutes END,\n            remind_room_id = CASE WHEN $18 THEN $19 ELSE remind_room_id END,\n            updated_at = (NOW()::text)\n        WHERE id = $20 AND owner_id = $21\n        RETURNING\n            id, room_id, owner_id, sender_name, name, category,\n            amount_minor, currency, currency_exponent, frequency,\n            due_day, next_due_at, total_installments, paid_installments,\n            auto_pay, status, notes, remind_before_minutes, remind_room_id,\n            created_at, updated_at\n        ",
+  "query": "\n        UPDATE recurring_bills\n        SET\n            name = COALESCE($1, name),\n            category = COALESCE($2, category),\n            amount_minor = COALESCE($3, amount_minor),\n            currency = COALESCE($4, currency),\n            currency_exponent = COALESCE($22, currency_exponent),\n            frequency = COALESCE($5, frequency),\n            due_day = CASE WHEN $6 THEN $7 ELSE due_day END,\n            next_due_at = COALESCE($8, next_due_at),\n            total_installments = CASE WHEN $9 THEN $10 ELSE total_installments END,\n            paid_installments = COALESCE($11, paid_installments),\n            auto_pay = COALESCE($12, auto_pay),\n            status = COALESCE($13, status),\n            notes = CASE WHEN $14 THEN $15 ELSE notes END,\n            remind_before_minutes = CASE WHEN $16 THEN $17 ELSE remind_before_minutes END,\n            remind_room_id = CASE WHEN $18 THEN $19 ELSE remind_room_id END,\n            updated_at = (NOW()::text)\n        WHERE id = $20 AND owner_id = $21\n        RETURNING\n            id, room_id, owner_id, sender_name, name, category,\n            amount_minor, currency, currency_exponent, frequency,\n            due_day, next_due_at, total_installments, paid_installments,\n            auto_pay, status, notes, remind_before_minutes, remind_room_id,\n            created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -257,7 +257,8 @@
         "Bool",
         "Text",
         "Int8",
-        "Uuid"
+        "Uuid",
+        "Int8"
       ]
     },
     "nullable": [
@@ -284,5 +285,5 @@
       true
     ]
   },
-  "hash": "280902e80bb6d12d25eed2c4c4a7272482dca4119ee88ed65ddeef49ed700a4f"
+  "hash": "0430cdf29899d8486a085e4a4fc8fe0d906d0fb8a19fdc777612631ff1a9ef67"
 }

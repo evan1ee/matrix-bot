@@ -87,4 +87,43 @@ impl FinanceService {
             .into())
         }
     }
+
+    pub async fn resolve_category_in_tx(
+        &self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        owner: &AccountId,
+        name: Option<&str>,
+        create_missing: bool,
+    ) -> Result<Option<i64>, AppError> {
+        let Some(name) = name else {
+            return Ok(None);
+        };
+        let trimmed = name.trim();
+        if trimmed.is_empty() || trimmed.len() > MAX_CATEGORY_LEN {
+            return Err(FinanceError::CategoryNameInvalid {
+                max: MAX_CATEGORY_LEN,
+            }
+            .into());
+        }
+
+        if let Some(cat) = repo::find_category_by_name(&mut **tx, owner, trimmed).await? {
+            return Ok(Some(cat.id));
+        }
+
+        if create_missing {
+            if let Some(cat) = repo::create_category(&mut **tx, owner, trimmed).await? {
+                outbox::publish(tx, &SystemEvent::CategoryCreated(cat.clone())).await?;
+                return Ok(Some(cat.id));
+            }
+            if let Some(cat) = repo::find_category_by_name(&mut **tx, owner, trimmed).await? {
+                return Ok(Some(cat.id));
+            }
+            Err(FinanceError::CategoryExists.into())
+        } else {
+            Err(FinanceError::UnknownCategory {
+                name: trimmed.to_string(),
+            }
+            .into())
+        }
+    }
 }
