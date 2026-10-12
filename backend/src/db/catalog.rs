@@ -63,8 +63,14 @@ pub async fn snapshot(pool: &DbPool, schema: &str) -> SchemaSnapshot {
         .await,
         functions: strings(
             pool,
+            // Functions an extension installed (pgvector, pg_trgm) belong to the
+            // extension, which lives in `public` on a real database but not in
+            // a test schema; they are not part of the schema the migrations own.
             "SELECT p.proname || ' ' || md5(p.prosrc) FROM pg_proc p \
-             JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = $1",
+             JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = $1 \
+               AND NOT EXISTS (SELECT 1 FROM pg_depend d \
+                               WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid \
+                                 AND d.deptype = 'e')",
             schema,
         )
         .await,
@@ -96,6 +102,12 @@ impl SchemaSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Tables the migrations drop on purpose, so the rehearsal must not expect
+    /// their rows to survive in place: `webhook_outbox` (history deliberately not
+    /// migrated), `matrix_links` (becomes `platform_identities`) and
+    /// `matrix_link_challenges` (the web-minted link flow is gone).
+    const RETIRED_TABLES: [&str; 3] = ["webhook_outbox", "matrix_links", "matrix_link_challenges"];
 
     /// Rehearses the migrations against a restored copy of production.
     ///
@@ -140,6 +152,26 @@ mod tests {
             .expect("migrations apply to production copy");
 
         for (t, n) in &before {
+            if RETIRED_TABLES.contains(&t.as_str()) {
+                // Dropped on purpose (0004, 0006, 0007): the table must be gone,
+                // and the rows `matrix_links` held now live in `platform_identities`.
+                let left: Option<String> = sqlx::query_scalar("SELECT to_regclass($1)::text")
+                    .bind(format!("public.{t}"))
+                    .fetch_one(&copy)
+                    .await
+                    .unwrap();
+                assert_eq!(left, None, "{t} must be dropped by the migrations");
+                if t == "matrix_links" {
+                    let moved: i64 = sqlx::query_scalar(
+                        "SELECT COUNT(*) FROM platform_identities WHERE platform = 'matrix'",
+                    )
+                    .fetch_one(&copy)
+                    .await
+                    .unwrap();
+                    assert_eq!(*n, moved, "matrix_links rows must become identities");
+                }
+                continue;
+            }
             let mut qb = sqlx::QueryBuilder::<sqlx::Postgres>::new("SELECT COUNT(*) FROM ");
             qb.push(t);
             let after: i64 = qb.build_query_scalar().fetch_one(&copy).await.unwrap();
