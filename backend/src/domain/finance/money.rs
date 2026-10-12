@@ -137,6 +137,26 @@ pub fn parse_amount(input: &str, exponent: u32) -> Result<i64, MoneyError> {
     Ok(minor)
 }
 
+/// Re-expresses `minor` units of a currency with `from` decimal places in one
+/// with `to`, for a currency change that keeps the stored value.
+///
+/// Integer arithmetic on purpose: a round trip through a decimal string would
+/// refuse `15.00` for a zero-decimal currency although nothing is lost. Dropping
+/// a non-zero digit is refused, never rounded.
+pub fn rescale_minor(minor: i64, from: u32, to: u32) -> Result<i64, MoneyError> {
+    if to >= from {
+        let factor = 10i64.checked_pow(to - from).ok_or(MoneyError::OutOfRange)?;
+        return minor.checked_mul(factor).ok_or(MoneyError::OutOfRange);
+    }
+    match 10i64.checked_pow(from - to) {
+        Some(divisor) if minor % divisor == 0 => Ok(minor / divisor),
+        // A divisor too large for i64 exceeds any stored amount, so a
+        // non-zero `minor` cannot be a multiple of it.
+        _ if minor == 0 => Ok(0),
+        _ => Err(MoneyError::TooPrecise { max_decimals: to }),
+    }
+}
+
 /// Formats minor units for display.
 pub fn format_amount(minor: i64, exponent: u32) -> String {
     let sign = if minor < 0 { "-" } else { "" };
@@ -180,6 +200,27 @@ pub fn format_decimal_f64(num: f64) -> Result<String, MoneyError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_rescale_minor_keeps_the_value_when_nothing_is_lost() {
+        assert_eq!(rescale_minor(1500, 2, 0), Ok(15));
+        assert_eq!(rescale_minor(15, 0, 2), Ok(1500));
+        assert_eq!(rescale_minor(1234, 3, 3), Ok(1234));
+        assert_eq!(rescale_minor(1500, 2, 3), Ok(15000));
+    }
+
+    #[test]
+    fn test_rescale_minor_refuses_to_drop_digits_or_overflow() {
+        assert_eq!(
+            rescale_minor(1550, 2, 0),
+            Err(MoneyError::TooPrecise { max_decimals: 0 })
+        );
+        assert_eq!(rescale_minor(i64::MAX, 0, 2), Err(MoneyError::OutOfRange));
+        assert_eq!(
+            rescale_minor(1, 20, 0),
+            Err(MoneyError::TooPrecise { max_decimals: 0 })
+        );
+    }
 
     #[test]
     fn test_exponent_for() {
