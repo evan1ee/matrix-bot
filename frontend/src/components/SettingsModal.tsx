@@ -159,7 +159,11 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     setIsTestingBriefing(true);
     try {
       await fetchApi('/briefing/trigger', { method: 'POST' });
-      setTestBriefingMsg('✅ Test briefing sent to your Matrix direct room!');
+      setTestBriefingMsg(
+        rooms.length > 0
+          ? '✅ Test briefing generated and sent to your default channel!'
+          : '✅ Test briefing generated! (No external chat channel linked — delivered in-app)'
+      );
     } catch (err: unknown) {
       setTestBriefingMsg(
         err instanceof Error ? `❌ ${err.message}` : '❌ Failed to send test briefing'

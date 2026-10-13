@@ -51,6 +51,11 @@ impl ChannelRegistry {
         self.get(channel).is_some_and(|a| a.is_connected())
     }
 
+    /// Whether no external channel adapters are configured (Web-only deployment).
+    pub fn is_empty(&self) -> bool {
+        self.adapters.is_empty()
+    }
+
     /// Whether any configured adapter is connected: the outbox dispatcher's
     /// "worth claiming" test while it cannot tell a delivery's channel in advance.
     pub fn any_connected(&self) -> bool {
@@ -198,5 +203,26 @@ mod tests {
                 .unwrap()
                 .unwrap();
         }
+    }
+
+    #[test]
+    fn an_empty_or_non_matrix_registry_is_ready_for_alerts() {
+        use crate::interface::jobs::Outbound;
+
+        // Web-only deployment (0 adapters configured) is ready for alerts.
+        let web_only = ChannelRegistry::new(Vec::new()).unwrap();
+        assert!(web_only.is_empty());
+        assert!(Outbound::is_ready_for_alerts(&web_only));
+
+        // Telegram-only deployment: ready when connected, not ready when disconnected.
+        let tg_down =
+            ChannelRegistry::new(vec![Arc::new(FakeAdapter::disconnected(Channel::Telegram))])
+                .unwrap();
+        assert!(!tg_down.is_empty());
+        assert!(!Outbound::is_ready_for_alerts(&tg_down));
+
+        let tg_up = ChannelRegistry::new(vec![Arc::new(FakeAdapter::connected(Channel::Telegram))])
+            .unwrap();
+        assert!(Outbound::is_ready_for_alerts(&tg_up));
     }
 }

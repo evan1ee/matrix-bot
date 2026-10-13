@@ -105,8 +105,31 @@ impl RoomService {
         self.identity.user_ids(account_id, Channel::Matrix).await
     }
 
+    /// Non-Matrix identities linked to the account, formatted as direct-channel
+    /// destinations (`telegram:<id>`, `email:<addr>`, `discord:<id>`) for the
+    /// room picker and target resolution.
+    pub async fn non_matrix_destinations(&self, account_id: &AccountId) -> Vec<JoinedRoom> {
+        let identities = logged_or_default(
+            self.identity.list(account_id).await,
+            "linked identities",
+            account_id,
+        );
+        identities
+            .into_iter()
+            .filter(|id| id.channel != Channel::Matrix)
+            .map(|id| {
+                let addr = format!("{}:{}", id.channel.as_str(), id.user_id);
+                let detail = id.display_name.as_deref().unwrap_or(&id.user_id);
+                let label = format!("{} ({detail})", id.channel.label());
+                JoinedRoom::new(addr, Some(&label), true)
+            })
+            .collect()
+    }
+
     /// The room an action is delivered to when it names none; see
-    /// [`domain::default_room`] for the priority order.
+    /// [`domain::default_room`] for the priority order. Falls back to the
+    /// first linked non-Matrix channel identity (`telegram:<id>`, `email:<addr>`,
+    /// `discord:<id>`) when no Matrix room is cached.
     ///
     /// Infallible by design: the result only picks where a message goes, so
     /// an input that cannot be read is logged and treated as absent, and
@@ -123,12 +146,20 @@ impl RoomService {
             "dev room setting",
             account_id,
         );
-        domain::default_room(&rooms, &mxids, dev_room_id.as_deref()).map(str::to_owned)
+        if let Some(room) = domain::default_room(&rooms, &mxids, dev_room_id.as_deref()) {
+            return Some(room.to_owned());
+        }
+        self.non_matrix_destinations(account_id)
+            .await
+            .into_iter()
+            .next()
+            .map(|r| r.room_id().to_owned())
     }
 
     /// The room an action asked for by `query` (a room id, a room name, or
     /// nothing), falling back to [`WEB_ROOM`] when no authorized Matrix room
-    /// resolves. Infallible for the same reason as [`Self::default_room`].
+    /// or linked channel destination resolves. Infallible for the same reason
+    /// as [`Self::default_room`].
     pub async fn resolve_target_room(&self, account_id: &AccountId, query: Option<&str>) -> String {
         match RoomTarget::parse(query) {
             RoomTarget::RoomId(room_id) => {
@@ -140,7 +171,17 @@ impl RoomService {
             }
             RoomTarget::Named(name) => {
                 let rooms = self.cached_rooms_or_empty(account_id).await;
-                domain::match_named(name, &rooms).to_owned()
+                let matched = domain::match_named(name, &rooms);
+                if matched != WEB_ROOM {
+                    return matched.to_owned();
+                }
+                let linked: Vec<CachedRoom> = self
+                    .non_matrix_destinations(account_id)
+                    .await
+                    .into_iter()
+                    .map(|r| CachedRoom::new(r, ""))
+                    .collect();
+                domain::match_named(name, &linked).to_owned()
             }
             RoomTarget::UserDefault => self
                 .default_room(account_id)
@@ -419,5 +460,47 @@ mod tests {
 
         assert_eq!(service.default_room(&acct).await, None);
         assert_eq!(service.resolve_target_room(&acct, None).await, WEB_ROOM);
+    }
+
+    #[tokio::test]
+    async fn default_room_falls_back_to_non_matrix_linked_identity() {
+        use crate::domain::channels::{PlatformIdentity, PlatformUserId};
+
+        let acct = AccountId::from_seed("acct_tg_only");
+        let service = service_with_account(&acct).await;
+        assert_eq!(service.default_room(&acct).await, None);
+
+        let tg_id = PlatformIdentity::new(
+            Channel::Telegram,
+            PlatformUserId::parse(Channel::Telegram, "123456").unwrap(),
+            Some("Alice".into()),
+        );
+        service.identity.bind_for_test(&acct, &tg_id).await;
+
+        assert_eq!(
+            service.default_room(&acct).await.as_deref(),
+            Some("telegram:123456")
+        );
+        assert_eq!(
+            service.resolve_target_room(&acct, None).await,
+            "telegram:123456"
+        );
+        assert_eq!(
+            service
+                .resolve_target_room(&acct, Some("telegram:123456"))
+                .await,
+            "telegram:123456"
+        );
+        assert_eq!(
+            service.resolve_target_room(&acct, Some("Telegram")).await,
+            "telegram:123456"
+        );
+        // Unowned cross-channel address still resolves to WEB_ROOM.
+        assert_eq!(
+            service
+                .resolve_target_room(&acct, Some("telegram:999"))
+                .await,
+            WEB_ROOM
+        );
     }
 }

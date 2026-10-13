@@ -140,7 +140,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 : mode === 'register'
                   ? 'Create an account'
                   : mode === 'enroll'
-                    ? 'Link Matrix Passkey'
+                    ? 'Link Passkey'
                     : 'Recover account'}
           </h2>
           <button
@@ -180,7 +180,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 <p className="truncate text-xs text-neutral-500 dark:text-neutral-400">
                   {user.linked_mxids.length > 0
                     ? user.linked_mxids.join(', ')
-                    : 'No Matrix account linked'}
+                    : 'Web account'}
                 </p>
               </div>
             </div>
@@ -198,7 +198,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         ) : mode === 'enroll' ? (
           <div className="flex flex-col gap-4">
             <p className="text-sm text-neutral-600 dark:text-neutral-400">
-              Link this device to your Matrix account using biometric authentication (Face ID, Touch ID, or Windows Hello).
+              Link this device to your account using biometric authentication (Face ID, Touch ID, or Windows Hello).
             </p>
 
             <button

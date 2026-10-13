@@ -219,7 +219,18 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
     // Built once and cloned into every reconnect generation, so `SyncHealth`
     // survives a Matrix reconnect.
     let mut handles = BotHandles::default();
+    if !config.matrix_enabled() {
+        handles.sync_health.mark_disabled();
+    }
     let modules = build_modules(&config).await;
+    let matrix = config.matrix_enabled().then(|| {
+        Arc::new(MatrixAdapter::new(
+            config.clone(),
+            services.clone(),
+            db.clone(),
+            handles.clone(),
+        ))
+    });
     let discord = config
         .discord
         .clone()
@@ -241,17 +252,12 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         })
         .transpose()?
         .map(Arc::new);
-    let mut configured = vec![Channel::Matrix];
+    let mut configured = Vec::new();
+    configured.extend(matrix.as_ref().map(|_| Channel::Matrix));
     configured.extend(discord.as_ref().map(|_| Channel::Discord));
     configured.extend(telegram.as_ref().map(|_| Channel::Telegram));
     configured.extend(email.as_ref().map(|_| Channel::Email));
     check_unique(&configured)?;
-    let matrix = Arc::new(MatrixAdapter::new(
-        config.clone(),
-        services.clone(),
-        db.clone(),
-        handles.clone(),
-    ));
     // The pipeline holds a `Weak` of the registry for out-of-band sends, so the
     // registry is built with `new_cyclic` (A5). Uniqueness was checked just
     // above, which is what makes the infallible constructor sound.
@@ -262,8 +268,11 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
             modules,
             weak.clone(),
         ));
-        matrix.attach_inbound(Arc::clone(&inbound));
-        let mut adapters = vec![matrix.clone() as Arc<dyn ChannelAdapter>];
+        let mut adapters: Vec<Arc<dyn ChannelAdapter>> = Vec::new();
+        if let Some(matrix) = &matrix {
+            matrix.attach_inbound(Arc::clone(&inbound));
+            adapters.push(matrix.clone() as Arc<dyn ChannelAdapter>);
+        }
         if let Some(discord) = &discord {
             discord.attach_inbound(Arc::clone(&inbound));
             adapters.push(discord.clone() as Arc<dyn ChannelAdapter>);
@@ -415,6 +424,11 @@ pub(crate) async fn stop_by(deadline: Instant, tasks: Vec<OwnedTask>) -> Vec<&'s
 }
 
 fn log_registration_mode(config: &Config) {
+    if config.matrix_enabled() {
+        info!(homeserver = %config.homeserver, "Matrix: enabled");
+    } else {
+        info!("Matrix: disabled (MATRIX_USERNAME/MATRIX_PASSWORD unset)");
+    }
     match &config.discord {
         Some(discord) if discord.guild_id.is_some() => {
             info!("Discord: enabled (commands registered to one guild)")

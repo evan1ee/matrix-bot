@@ -100,27 +100,52 @@ pub async fn trigger_briefing(
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    // Attempt delivery to user's direct or default Matrix room if configured and authorized.
+    // Attempt delivery to user's direct or default room/channel if configured and authorized.
     // Never call `join_room_by_id` on an unverified room.
-    let client_guard = state.bot_client.read().await;
-    if let Some(ref client) = *client_guard {
-        if let Some(target_room) = state.services.rooms.default_room(&user.account_id).await {
-            if crate::interface::channels::matrix::rooms::is_room_authorized_for_account(
-                &state.services.rooms,
-                Some(client),
-                &user.account_id,
-                &target_room,
-            )
-            .await
-            {
-                if let Ok(room_id) = <&RoomId>::try_from(target_room.as_str()) {
-                    if let Some(room) = client.get_room(room_id) {
-                        let content = RoomMessageEventContent::text_html(
-                            &payload.plain_text,
-                            &payload.html_content,
-                        );
-                        let _ = room.send(content).await;
+    if let Some(target_room) = state.services.rooms.default_room(&user.account_id).await {
+        if target_room.starts_with('!') {
+            let client_guard = state.bot_client.read().await;
+            if let Some(ref client) = *client_guard {
+                if crate::interface::channels::matrix::rooms::is_room_authorized_for_account(
+                    &state.services.rooms,
+                    Some(client),
+                    &user.account_id,
+                    &target_room,
+                )
+                .await
+                {
+                    if let Ok(room_id) = <&RoomId>::try_from(target_room.as_str()) {
+                        if let Some(room) = client.get_room(room_id) {
+                            let content = RoomMessageEventContent::text_html(
+                                &payload.plain_text,
+                                &payload.html_content,
+                            );
+                            let _ = room.send(content).await;
+                        }
                     }
+                }
+            }
+        } else if let Some(registry) = state.outbound.as_ref().and_then(|w| w.upgrade()) {
+            if let Ok(addr) =
+                crate::domain::channels::ConversationAddress::parse_storage(&target_room)
+            {
+                if registry
+                    .authorize_delivery(&user.account_id, &addr)
+                    .await
+                    .is_ok()
+                {
+                    let msg = crate::interface::channels::message::OutgoingMessage::to(
+                        crate::interface::channels::message::Target::Conversation(addr),
+                        crate::interface::channels::message::Reply {
+                            content: crate::interface::channels::message::Content {
+                                plain: payload.plain_text.clone(),
+                                html: Some(payload.html_content.clone()),
+                                ..crate::interface::channels::message::Content::default()
+                            },
+                            visibility: crate::interface::channels::message::Visibility::Normal,
+                        },
+                    );
+                    let _ = registry.send(msg).await;
                 }
             }
         }

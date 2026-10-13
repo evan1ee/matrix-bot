@@ -34,6 +34,19 @@ pub const CHANNEL_RETRY: Duration = Duration::from_secs(30);
 #[async_trait]
 pub trait Outbound: Send + Sync {
     fn is_connected(&self, channel: Channel) -> bool;
+    /// Whether this deployment is ready to evaluate alerts: true when at least
+    /// one configured channel is connected, or when no external channels are
+    /// configured at all (Web-only deployment).
+    fn is_ready_for_alerts(&self) -> bool {
+        [
+            Channel::Matrix,
+            Channel::Discord,
+            Channel::Telegram,
+            Channel::Email,
+        ]
+        .into_iter()
+        .any(|c| self.is_connected(c))
+    }
     async fn authorize_delivery(
         &self,
         owner: &crate::domain::accounts::AccountId,
@@ -49,6 +62,10 @@ pub trait Outbound: Send + Sync {
 impl Outbound for ChannelRegistry {
     fn is_connected(&self, channel: Channel) -> bool {
         ChannelRegistry::is_connected(self, channel)
+    }
+
+    fn is_ready_for_alerts(&self) -> bool {
+        self.is_empty() || self.any_connected()
     }
 
     async fn authorize_delivery(

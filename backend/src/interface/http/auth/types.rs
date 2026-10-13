@@ -319,6 +319,9 @@ impl ApiState {
         // return, so a bad pair must stop the process rather than surface as
         // failed sign-ins.
         let webauthn = build_webauthn(&config.webauthn_rp_id, &config.webauthn_origin)?;
+        if !config.matrix_enabled() {
+            handles.sync_health.mark_disabled();
+        }
 
         Ok(Self {
             db,

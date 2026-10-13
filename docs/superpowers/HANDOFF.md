@@ -122,6 +122,11 @@ Format: `Ruling: <decision> — <why> — <cost if wrong>`. New rulings go here 
 - *Ruling: All outbound HTTP clients for user-configurable or untrusted URLs (`llm/client.rs`, `web/metadata.rs`, `H2`/`H3`/`M14`) disable automatic redirect following or re-validate each redirect hop and pin validated DNS socket addresses via `reqwest::ClientBuilder::resolve_to_addrs` — prevents SSRF via open redirects, IPv4-mapped IPv6 (`::ffff:127.0.0.1`), and DNS rebinding — cost if wrong: none.*
 - *Ruling: Minor-unit currency exponents (`domain::finance::money::exponent_for`, `H7`/`H8`/`H9`/`M5`/`M19`/`H11`/`H13`/`M23`) are enforced end-to-end across recurring bills, footprints, portfolio quotes/alerts, net worth (skipping unconvertible currencies rather than assuming 1.0 EUR), LLM tool inputs, and the SPA — eliminates 100× scaling bugs on zero-decimal (`JPY`) and three-decimal (`KWD`) currencies — cost if wrong: none.*
 
+### Rulings (2026-10-13 — Optional Social Channels & Omnichannel Web Support)
+
+- *Ruling: `MATRIX_USERNAME` and `MATRIX_PASSWORD` are optional at boot (`Config::matrix_enabled()`); `SyncHealth::mark_disabled()` marks `/health/ready`'s `matrix_sync` check vacuous (`ok: true`, `last_sync_at: None`) when Matrix is unconfigured — allows the server to run with 0, 1, or any combination of social channels (`Matrix`, `Telegram`, `Discord`, `Email`, or Web-only) without altering `ReadyResponse` in `openapi.json` — cost if wrong: partial Matrix config (`MATRIX_USERNAME` without `MATRIX_PASSWORD`) still fails closed in `Config::validate()`.*
+- *Ruling: `RoomService::default_room`, `RoomService::resolve_target_room`, and `GET /api/v1/rooms` include linked non-Matrix identities (`telegram:<id>`, `email:<addr>`, `discord:<id>`), and `CheckAlertsHandler` notifies all linked identities across connected channels while Web SSE events trigger browser desktop notifications (`Notification` API) — ensures non-Matrix and Web-only accounts receive reminders, morning briefings, and price alerts seamlessly — cost if wrong: none, unowned cross-channel addresses still resolve to `web`.*
+
 ---
 
 ## 6. Verification

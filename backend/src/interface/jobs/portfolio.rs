@@ -10,7 +10,7 @@ use tracing::{debug, warn};
 use super::{message, Outbound, CHANNEL_RETRY};
 use crate::application::portfolio::TriggeredAlert;
 use crate::application::{AppError, AppServices};
-use crate::domain::channels::{Channel, PlatformIdentity};
+use crate::domain::channels::{LinkedIdentity, PlatformIdentity, PlatformUserId};
 use crate::domain::jobs::JobType;
 use crate::domain::portfolio::alerts::{AlertCondition, PriceAlert};
 use crate::interface::channels::message::Target;
@@ -77,27 +77,51 @@ impl CheckAlertsHandler {
         Self { services, outbound }
     }
 
-    /// DMs every linked Matrix identity (an alert carries no originating conversation, so there is no other channel to prefer); a failed send is logged and skipped. The
-    /// alert is already marked triggered, so nothing here may fail the job
-    /// into a retry that would double-notify.
-    pub(crate) async fn notify(&self, hit: &TriggeredAlert, mxids: Vec<String>) {
+    /// DMs every linked identity on a connected channel; a failed send is
+    /// logged and skipped. The alert is already marked triggered, so nothing
+    /// here may fail the job into a retry that would double-notify.
+    pub(crate) async fn notify_identities(
+        &self,
+        hit: &TriggeredAlert,
+        identities: Vec<LinkedIdentity>,
+    ) {
         let (plain, html) = format_alert_notification(&hit.alert, hit.price_minor);
-        for mxid in mxids {
-            let identity = match PlatformIdentity::matrix(&mxid) {
-                Ok(identity) => identity,
+        for linked in identities {
+            if !self.outbound.is_connected(linked.channel) {
+                continue;
+            }
+            let user_id = match PlatformUserId::parse(linked.channel, &linked.user_id) {
+                Ok(id) => id,
                 Err(err) => {
-                    warn!(%mxid, error = %err, "Alert DM not sent");
+                    warn!(channel = %linked.channel, user_id = %linked.user_id, error = %err, "Alert DM not sent");
                     continue;
                 }
             };
+            let identity = PlatformIdentity::new(linked.channel, user_id, linked.display_name);
             if let Err(err) = self
                 .outbound
                 .send(message(Target::Direct(identity), &plain, &html))
                 .await
             {
-                warn!(%mxid, error = %err, "Alert DM not sent");
+                warn!(channel = %linked.channel, user_id = %linked.user_id, error = %err, "Alert DM not sent");
             }
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn notify(&self, hit: &TriggeredAlert, mxids: Vec<String>) {
+        let identities = mxids
+            .into_iter()
+            .map(|mxid| {
+                LinkedIdentity::new(
+                    crate::domain::channels::Channel::Matrix,
+                    mxid,
+                    None,
+                    chrono::Utc::now(),
+                )
+            })
+            .collect();
+        self.notify_identities(hit, identities).await;
     }
 }
 
@@ -109,9 +133,9 @@ impl JobHandler for CheckAlertsHandler {
 
     async fn run(&self, _ctx: &JobContext, _payload: serde_json::Value) -> Result<(), JobError> {
         // Checked before evaluating: an alert is marked triggered before its
-        // DM (the idempotency guard), so evaluating while Matrix is down
-        // would consume alerts nobody is told about.
-        if !self.outbound.is_connected(Channel::Matrix) {
+        // DM (the idempotency guard), so evaluating while all configured
+        // channels are down would consume alerts nobody is told about.
+        if !self.outbound.is_ready_for_alerts() {
             return Err(JobError::Unavailable(CHANNEL_RETRY));
         }
         let symbols = self.services.portfolio.list_active_alert_symbols().await?;
@@ -141,19 +165,14 @@ impl CheckAlertsHandler {
         for symbol in symbols {
             for hit in trigger(symbol).await? {
                 let owner = &hit.alert.owner_id;
-                let mxids = match self
-                    .services
-                    .identity
-                    .user_ids(owner, Channel::Matrix)
-                    .await
-                {
-                    Ok(mxids) => mxids,
+                let identities = match self.services.identity.list(owner).await {
+                    Ok(ids) => ids,
                     Err(err) => {
                         warn!(%owner, error = %err, "Could not read linked identities for an alert");
                         Vec::new()
                     }
                 };
-                self.notify(&hit, mxids).await;
+                self.notify_identities(&hit, identities).await;
             }
         }
         Ok(())
@@ -199,6 +218,7 @@ mod tests {
 
     use super::*;
     use crate::domain::accounts::AccountId;
+    use crate::domain::channels::Channel;
     use crate::domain::jobs::JobId;
     use crate::domain::portfolio::alerts::AlertCondition;
     use crate::interface::channels::adapter::ChannelError;
@@ -317,6 +337,46 @@ mod tests {
         let to: Vec<&str> = dms.iter().map(|d| d.0.as_str()).collect();
         assert_eq!(to, ["@a:test", "@b:test"]);
         assert!(dms[0].1.contains("Price Alert: AAPL"));
+    }
+
+    #[tokio::test]
+    async fn a_triggered_alert_is_sent_to_non_matrix_linked_identities() {
+        let (s, o) = services(&["acct_pf_h_tg_dm"]).await;
+        let tg = PlatformIdentity::new(
+            Channel::Telegram,
+            PlatformUserId::parse(Channel::Telegram, "555666").unwrap(),
+            Some("Trader".into()),
+        );
+        let email = PlatformIdentity::new(
+            Channel::Email,
+            PlatformUserId::parse(Channel::Email, "trader@example.com").unwrap(),
+            None,
+        );
+        s.identity.bind_for_test(&o[0], &tg).await;
+        s.identity.bind_for_test(&o[0], &email).await;
+
+        let fake = FakeOutbound::connected();
+        let handler = CheckAlertsHandler::new(s, fake.clone());
+        let owner = o[0];
+
+        let out = handler
+            .check_symbols(vec!["AAPL".into()], move |_| {
+                let mut hit = alert("above", 20_000);
+                hit.owner_id = owner;
+                async move {
+                    Ok(vec![TriggeredAlert {
+                        alert: hit,
+                        price_minor: 21_000,
+                    }])
+                }
+            })
+            .await;
+
+        assert!(out.is_ok(), "{out:?}");
+        let dms = fake.dms();
+        let mut to: Vec<&str> = dms.iter().map(|d| d.0.as_str()).collect();
+        to.sort_unstable();
+        assert_eq!(to, ["555666", "trader@example.com"]);
     }
 
     /// The DMs for symbol A are out before symbol B is even evaluated, so a
