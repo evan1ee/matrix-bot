@@ -516,6 +516,21 @@ pub async fn delivery_backoff_for(
     Ok(rows.into_iter().map(|r| r.secs).collect())
 }
 
+/// Test-only: makes every pending delivery of one account due at once, so a
+/// test can prove "due again" without sleeping through a real delay.
+#[cfg(test)]
+pub async fn make_due_for(ex: impl PgExecutor<'_>, account: &AccountId) -> sqlx::Result<u64> {
+    let r = sqlx::query!(
+        "UPDATE outbox_deliveries d SET available_at = NOW()
+         FROM outbox_events e
+         WHERE e.id = d.event_id AND e.account_id = $1 AND d.status = 'pending'",
+        account.as_uuid()
+    )
+    .execute(ex)
+    .await?;
+    Ok(r.rows_affected())
+}
+
 /// Test-only: the destination keys of one account's deliveries, oldest first.
 #[cfg(test)]
 pub async fn delivery_destinations_for(

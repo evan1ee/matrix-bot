@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE outbox_deliveries d SET available_at = NOW()\n         FROM outbox_events e\n         WHERE e.id = d.event_id AND e.account_id = $1 AND d.status = 'pending'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4e42d4a18010c725b8d5e73b96a599776fda478f0f4bf63a6ec1a82ca62ffea8"
+}
