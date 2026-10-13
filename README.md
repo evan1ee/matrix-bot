@@ -9,7 +9,7 @@ Every feature is reachable through several surfaces (chat commands, the web UI, 
 ## 🌟 Features
 
 - 🤖 **Core**: greetings (`!hello`), latency ping (`!ping`), module-driven help (`!help`).
-- 💬 **Channels**: Matrix (end-to-end encrypted) plus optional Discord, Telegram and Email adapters behind one inbound pipeline; one account links identities from all of them. Setup is under *Enabling Discord / Telegram / Email* below.
+- 💬 **Channels**: Matrix (end-to-end encrypted), Discord, Telegram and Email adapters (all optional — run with any combination or web-only) behind one inbound pipeline; one account links identities from all of them. Setup is under *Enabling Discord / Telegram / Email* below.
 - 📋 **To-dos**: priorities, due dates, lead-time reminders, personal and room-wide views, editing, pagination, and quoted-message capture (replying `!todo add` uses the quoted text).
 - ⏰ **Reminders**: one-off and recurring (daily, weekly, monthly, yearly), persisted across restarts with downtime catch-up and exponential retry backoff.
 - 💰 **Finance**: expense and income ledger with custom categories and monthly summaries. Amounts are integer minor units throughout, with no floating point.
@@ -127,7 +127,7 @@ Endpoints are mounted under `/api/v1`. Authentication is an HttpOnly session coo
 | Notes, knowledge | `/notes`, `/knowledge/search` | Note CRUD, tags, Markdown export/import, hybrid search |
 | Agent | `/agent/*` | Runs, approvals and scheduled tasks |
 | Media | `/storage/:key`, `/ocr/scan`, `/voice/transcribe` | Stored binaries (session or signed URL), receipt OCR, speech-to-text |
-| Settings, rooms | `/settings`, `/rooms` | Preferences and Matrix room picker |
+| Settings, rooms | `/settings`, `/rooms` | Preferences and destination picker (Matrix rooms and configured linked channels) |
 | Admin | `/admin/*` | 20 hot-reloadable runtime settings, AES-256-GCM provider secrets, connectivity probes, audit log (`AdminSession` for reads, `AdminUser` 5-min step-up for writes/tests) |
 | Live events | `/events` | SSE stream scoped to the authenticated owner |
 
@@ -154,7 +154,7 @@ cp .env.example .env
 ```
 
 ```env
-# Matrix Bot Credentials
+# Matrix Bot Credentials (Optional — leave username and password unset to run without Matrix)
 MATRIX_HOMESERVER=https://matrix.org
 MATRIX_USERNAME=your_bot_username
 MATRIX_PASSWORD=your_bot_password
