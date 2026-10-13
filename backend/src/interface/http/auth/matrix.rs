@@ -330,9 +330,10 @@ mod tests {
         );
         assert_eq!(
             user.last_verified_at,
-            chrono::DateTime::<chrono::Utc>::MIN_UTC,
-            "Matrix access-token session must have MIN_UTC last_verified_at"
+            chrono::DateTime::<chrono::Utc>::UNIX_EPOCH,
+            "Matrix access-token session must be stamped as never verified"
         );
+        assert!(user.never_presented_passkey());
     }
 
     #[tokio::test]

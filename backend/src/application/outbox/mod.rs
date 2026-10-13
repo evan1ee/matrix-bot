@@ -255,31 +255,35 @@ mod tests {
     #[tokio::test]
     async fn defer_reschedules_delivery_without_incrementing_attempts() {
         let (svc, pool) = service_with_alert("acct_defer").await;
+        let owner = AccountId::from_seed("acct_defer");
         let claimed = svc.claim_due(10, Duration::from_secs(60)).await.unwrap();
         assert_eq!(claimed.len(), 1);
         let orig_attempts = claimed[0].attempts;
 
-        svc.defer(&claimed[0], Duration::from_millis(50))
-            .await
-            .unwrap();
+        // An hour, so a slow machine cannot reach the assertions after it is due.
+        let delay = Duration::from_secs(3600);
+        svc.defer(&claimed[0], delay).await.unwrap();
 
-        // Immediately claiming again (with 0 delay) should yield nothing if it was deferred into the future
         let immediate = svc.claim_due(10, Duration::from_secs(60)).await.unwrap();
         assert!(
             immediate.is_empty(),
             "delivery was deferred into the future"
         );
+        let backoff = repo::delivery_backoff_for(&pool, &owner).await.unwrap();
+        assert!(backoff[0] >= delay.as_secs_f64(), "backoff was {backoff:?}");
+        // The claim's attempt is given back while the delivery waits.
+        let probe = repo::delivery_probe_for(&pool, &owner).await.unwrap();
+        assert_eq!(
+            probe,
+            vec![("pending".to_string(), orig_attempts - 1, true)]
+        );
 
-        // Wait for defer delay to elapse
-        tokio::time::sleep(Duration::from_millis(60)).await;
+        repo::make_due_for(&pool, &owner).await.unwrap();
 
         let reclaimed = svc.claim_due(10, Duration::from_secs(60)).await.unwrap();
         assert_eq!(reclaimed.len(), 1);
-        // Note: claim_due increments attempts upon claiming. But defer decremented it back to orig_attempts - 1,
-        // so re-claiming brings it back to orig_attempts.
+        // claim_due increments attempts, so re-claiming brings it back to orig_attempts.
         assert_eq!(reclaimed[0].attempts, orig_attempts);
-
-        let owner = AccountId::from_seed("acct_defer");
         let probe = repo::delivery_probe_for(&pool, &owner).await.unwrap();
         assert_eq!(probe, vec![("pending".to_string(), orig_attempts, true)]);
     }

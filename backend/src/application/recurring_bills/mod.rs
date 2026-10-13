@@ -8,7 +8,7 @@ use crate::application::reminders::ReminderService;
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
 use crate::domain::events::SystemEvent;
-use crate::domain::finance::money::{exponent_for, format_amount, parse_amount};
+use crate::domain::finance::money::{exponent_for, format_amount, rescale_minor};
 use crate::domain::finance::{Direction, NewTransaction, Transaction, TransactionSource};
 use crate::domain::recurring_bills::{
     advance_due_date_with_due_day, reminder_room, wanted_trigger, NewRecurringBill, RecurringBill,
@@ -91,15 +91,14 @@ impl RecurringBillsService {
             if let Some(ref new_curr) = patch.currency {
                 let new_exp = exponent_for(new_curr);
                 if new_exp as i64 != existing.currency_exponent {
-                    let formatted = format_amount(
-                        existing.amount_minor,
-                        existing.currency_exponent.clamp(0, 8) as u32,
-                    );
-                    let rescaled = parse_amount(&formatted, new_exp).map_err(|e| {
-                        AppError::Validation(format!(
-                            "Stored bill amount {formatted} is not valid for currency {new_curr}: {e}"
-                        ))
-                    })?;
+                    let old_exp = existing.currency_exponent.clamp(0, 8) as u32;
+                    let rescaled = rescale_minor(existing.amount_minor, old_exp, new_exp)
+                        .map_err(|e| {
+                            let formatted = format_amount(existing.amount_minor, old_exp);
+                            AppError::Validation(format!(
+                                "Stored bill amount {formatted} is not valid for currency {new_curr}: {e}"
+                            ))
+                        })?;
                     patch.amount_minor = Some(rescaled);
                 }
             }
