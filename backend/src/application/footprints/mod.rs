@@ -295,3 +295,168 @@ fn parse_spend_amount(input: &str, exp: u32) -> Result<i64, AppError> {
         Err(e) => Err(AppError::Validation(e.to_string())),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::{migrate::run_migrations_unlocked, pool::seed_accounts, pool::test_pool};
+    use crate::infrastructure::postgres::repositories::outbox::event_types_for;
+
+    #[tokio::test]
+    async fn footprint_service_validates_inputs_handles_currencies_and_publishes_events() {
+        let pool = test_pool().await;
+        run_migrations_unlocked(&pool).await;
+        seed_accounts(&pool, &["fp_svc_alice", "fp_svc_bob"]).await;
+        let alice = AccountId::from_seed("fp_svc_alice");
+        let bob = AccountId::from_seed("fp_svc_bob");
+
+        let settings = SettingsService::new(pool.clone());
+        let svc = FootprintService::new(pool.clone(), settings);
+
+        // Validation: empty title, oversized title, oversized note, negative spend
+        let base_input = CreateFootprintInput {
+            title: "Kyoto".to_string(),
+            latitude: 35.0116,
+            longitude: 135.7681,
+            country: Some("Japan".to_string()),
+            city: Some("Kyoto".to_string()),
+            address: None,
+            arrival_date: "2026-05-01".to_string(),
+            departure_date: Some("2026-05-04".to_string()),
+            spend_amount: Some("0".to_string()),
+            spend_currency: Some("JPY".to_string()),
+            rating: Some(6), // clamps to 5
+            category: None,
+            note: Some("Shrines".to_string()),
+        };
+
+        assert!(matches!(
+            svc.create(
+                &alice,
+                CreateFootprintInput {
+                    title: "   ".to_string(),
+                    ..base_input.clone()
+                }
+            )
+            .await,
+            Err(AppError::Validation(_))
+        ));
+
+        assert!(matches!(
+            svc.create(
+                &alice,
+                CreateFootprintInput {
+                    title: "x".repeat(MAX_TITLE_LEN + 1),
+                    ..base_input.clone()
+                }
+            )
+            .await,
+            Err(AppError::Validation(_))
+        ));
+
+        assert!(matches!(
+            svc.create(
+                &alice,
+                CreateFootprintInput {
+                    note: Some("n".repeat(MAX_NOTE_LEN + 1)),
+                    ..base_input.clone()
+                }
+            )
+            .await,
+            Err(AppError::Validation(_))
+        ));
+
+        assert!(matches!(
+            svc.create(
+                &alice,
+                CreateFootprintInput {
+                    spend_amount: Some("-10".to_string()),
+                    ..base_input.clone()
+                }
+            )
+            .await,
+            Err(AppError::Validation(_))
+        ));
+
+        // Create with $0 spend in JPY (exponent 0)
+        let fp = svc.create(&alice, base_input).await.expect("create fp");
+        assert_eq!(fp.title, "Kyoto");
+        assert_eq!(fp.stay_duration_days, 3);
+        assert_eq!(fp.spend_amount_minor, 0);
+        assert_eq!(fp.spend_currency, "JPY");
+        assert_eq!(fp.spend_currency_exponent, 0);
+        assert_eq!(fp.rating, 5);
+        assert_eq!(fp.category, "travel");
+
+        // Update spend to 1500 JPY, then switch currency to USD without supplying new spend_amount
+        // so exponent conversion (0 -> 2) rescales 1500 -> 150000 minor units.
+        let fp = svc
+            .update(
+                &alice,
+                fp.id,
+                UpdateFootprintInput {
+                    spend_amount: Some("1500".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("update spend");
+        assert_eq!(fp.spend_amount_minor, 1500);
+        assert_eq!(fp.spend_currency_exponent, 0);
+
+        let fp = svc
+            .update(
+                &alice,
+                fp.id,
+                UpdateFootprintInput {
+                    title: Some("Kyoto Station".to_string()),
+                    spend_currency: Some("USD".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .expect("update currency exponent");
+        assert_eq!(fp.title, "Kyoto Station");
+        assert_eq!(fp.spend_currency, "USD");
+        assert_eq!(fp.spend_currency_exponent, 2);
+        assert_eq!(fp.spend_amount_minor, 150_000);
+
+        // List & Summary stats
+        let list = svc
+            .list(&alice, Some("Japan"), Some("travel"), Some("Station"))
+            .await
+            .expect("list");
+        assert_eq!(list.len(), 1);
+
+        let stats = svc.summary_stats(&alice).await.expect("summary_stats");
+        assert_eq!(stats.total_places, 1);
+        assert_eq!(stats.total_countries, 1);
+        assert_eq!(stats.total_days_traveled, 3);
+        assert_eq!(stats.spend_by_currency.len(), 1);
+        assert_eq!(stats.spend_by_currency[0].currency, "USD");
+        assert_eq!(stats.spend_by_currency[0].total_spend_minor, 150_000);
+
+        // Owner isolation: Bob cannot read, update, or delete Alice's footprint
+        assert!(matches!(
+            svc.get(&bob, fp.id).await,
+            Err(AppError::NotFound(_))
+        ));
+        assert!(matches!(
+            svc.delete(&bob, fp.id).await,
+            Err(AppError::NotFound(_))
+        ));
+
+        // Delete & verify outbox events
+        svc.delete(&alice, fp.id).await.expect("delete fp");
+        let events = event_types_for(&pool, &alice).await.expect("events");
+        assert_eq!(
+            events,
+            vec![
+                "FootprintCreated",
+                "FootprintUpdated",
+                "FootprintUpdated",
+                "FootprintDeleted"
+            ]
+        );
+    }
+}

@@ -171,3 +171,142 @@ impl LifeService {
         Ok(life_read::collect_day_activity(&self.pool, owner_id, date, tz.name()).await?)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::{migrate::run_migrations_unlocked, pool::seed_accounts, pool::test_pool};
+    use crate::infrastructure::postgres::repositories::outbox::event_types_for;
+
+    #[tokio::test]
+    async fn life_service_validates_inputs_manages_logs_and_publishes_outbox_events() {
+        let pool = test_pool().await;
+        run_migrations_unlocked(&pool).await;
+        seed_accounts(&pool, &["life_svc_alice", "life_svc_bob"]).await;
+        let alice = AccountId::from_seed("life_svc_alice");
+        let bob = AccountId::from_seed("life_svc_bob");
+
+        let svc = LifeService::new(pool.clone());
+
+        // Validation errors on profile & day log
+        assert!(matches!(
+            svc.upsert_profile(&alice, "not-a-date", 80).await,
+            Err(AppError::Validation(_))
+        ));
+        assert!(matches!(
+            svc.upsert_profile(&alice, "1995-05-15", 0).await,
+            Err(AppError::Validation(_))
+        ));
+
+        // Upsert profile & read back
+        let profile = svc
+            .upsert_profile(&alice, "1995-05-15", 85)
+            .await
+            .expect("upsert profile");
+        assert_eq!(profile.birth_date, "1995-05-15");
+        assert_eq!(profile.expected_lifespan_years, 85);
+        assert_eq!(
+            svc.get_profile(&alice)
+                .await
+                .expect("get profile")
+                .expect("some")
+                .expected_lifespan_years,
+            85
+        );
+        assert!(svc.get_profile(&bob).await.expect("bob profile").is_none());
+
+        // Invalid mood is rejected
+        assert!(matches!(
+            svc.upsert_day_log(
+                &alice,
+                "2026-10-12",
+                DayLogInput {
+                    mood: "unknown_mood",
+                    weather: None,
+                    activities: None,
+                    note: None,
+                    time_allocation: None,
+                }
+            )
+            .await,
+            Err(AppError::Validation(_))
+        ));
+
+        // Upsert day log with valid mood ("great" normalizes to canonical "amazing")
+        let log = svc
+            .upsert_day_log(
+                &alice,
+                "2026-10-12",
+                DayLogInput {
+                    mood: "great",
+                    weather: Some("sunny"),
+                    activities: Some("coding,running"),
+                    note: Some("Shipped feature"),
+                    time_allocation: None,
+                },
+            )
+            .await
+            .expect("upsert day log");
+        assert_eq!(log.mood, "amazing");
+        assert_eq!(log.weather.as_deref(), Some("sunny"));
+
+        // Update time allocation
+        let alloc_json = r#"["sleep","sleep","deep_work","deep_work"]"#;
+        let updated = svc
+            .update_time_allocation(&alice, "2026-10-12", alloc_json)
+            .await
+            .expect("update time allocation");
+        assert_eq!(updated.time_allocation.as_deref(), Some(alloc_json));
+        assert_eq!(updated.mood, "amazing");
+
+        // Get day log, year view, stats, horizon, and day activity
+        let fetched = svc
+            .get_day_log(&alice, "2026-10-12")
+            .await
+            .expect("get_day_log")
+            .expect("exists");
+        assert_eq!(fetched.id, log.id);
+
+        let year_view = svc.get_year_view(&alice, 2026).await.expect("year_view");
+        assert_eq!(year_view.total_logged_days, 1);
+
+        let stats = svc
+            .get_stats(&alice, "2026-10-12")
+            .await
+            .expect("get_stats");
+        assert_eq!(stats.total_logged_days, 1);
+        assert_eq!(stats.dominant_mood.as_deref(), Some("amazing"));
+        assert!(stats.age_days > 10_000);
+
+        let horizon = svc.get_horizon_days(&alice).await.expect("horizon");
+        assert_eq!(horizon.len(), 1);
+        assert_eq!(horizon[0].date, "2026-10-12");
+
+        let activity = svc
+            .collect_day_activity(&alice, "2026-10-12")
+            .await
+            .expect("collect_day_activity");
+        assert_eq!(activity.date, "2026-10-12");
+
+        // Delete day log & verify outbox events
+        assert!(!svc
+            .delete_day_log(&bob, "2026-10-12")
+            .await
+            .expect("bob delete"));
+        assert!(svc
+            .delete_day_log(&alice, "2026-10-12")
+            .await
+            .expect("alice delete"));
+
+        let events = event_types_for(&pool, &alice).await.expect("events");
+        assert_eq!(
+            events,
+            vec![
+                "LifeProfileUpdated",
+                "LifeDayLogged",
+                "LifeDayLogged",
+                "LifeDayCleared"
+            ]
+        );
+    }
+}

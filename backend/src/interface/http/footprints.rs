@@ -426,3 +426,197 @@ pub async fn geocode_proxy(
         ))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Database;
+    use axum::http::StatusCode;
+
+    async fn setup_state() -> (ApiState, crate::domain::accounts::AccountId) {
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let owner = crate::application::AppServices::new(&pool)
+            .identity
+            .provision_matrix_for_test("@fp_http:mbm.one")
+            .await;
+        let state = ApiState::new(
+            Database { pool },
+            None,
+            "https://matrix.org".to_string(),
+            reqwest::Client::new(),
+        );
+        (state, owner)
+    }
+
+    #[tokio::test]
+    async fn footprints_http_crud_and_stats_flow() {
+        let (state, owner) = setup_state().await;
+        let user = AuthUser::for_account(owner);
+
+        // 1. Create
+        let created = create_footprint(
+            user.clone(),
+            State(state.clone()),
+            Json(CreateFootprintRequest {
+                title: "Shibuya Crossing".to_string(),
+                latitude: 35.6595,
+                longitude: 139.7004,
+                country: Some("Japan".to_string()),
+                city: Some("Tokyo".to_string()),
+                address: None,
+                arrival_date: "2026-06-01".to_string(),
+                departure_date: Some("2026-06-03".to_string()),
+                spend_amount: Some("5000".to_string()),
+                spend_currency: Some("JPY".to_string()),
+                rating: Some(5),
+                category: Some("sightseeing".to_string()),
+                note: Some("Busy intersection".to_string()),
+            }),
+        )
+        .await
+        .expect("create_footprint")
+        .0;
+        assert_eq!(created.title, "Shibuya Crossing");
+        assert_eq!(created.stay_duration_days, 2);
+        assert_eq!(created.spend_amount_minor, 5000);
+
+        // 2. Get
+        let fetched = get_footprint(user.clone(), State(state.clone()), Path(created.id))
+            .await
+            .expect("get_footprint")
+            .0;
+        assert_eq!(fetched.id, created.id);
+
+        // 3. Update
+        let updated = update_footprint(
+            user.clone(),
+            State(state.clone()),
+            Path(created.id),
+            Json(UpdateFootprintRequest {
+                title: Some("Shibuya Scramble".to_string()),
+                latitude: None,
+                longitude: None,
+                country: None,
+                city: None,
+                address: None,
+                arrival_date: None,
+                departure_date: None,
+                spend_amount: Some("6000".to_string()),
+                spend_currency: None,
+                rating: Some(4),
+                category: None,
+                note: None,
+            }),
+        )
+        .await
+        .expect("update_footprint")
+        .0;
+        assert_eq!(updated.title, "Shibuya Scramble");
+        assert_eq!(updated.spend_amount_minor, 6000);
+        assert_eq!(updated.rating, 4);
+
+        // 4. List
+        let list = list_footprints(
+            user.clone(),
+            State(state.clone()),
+            Query(ListFootprintsQuery {
+                country: Some("Japan".to_string()),
+                category: None,
+                search: Some("Scramble".to_string()),
+            }),
+        )
+        .await
+        .expect("list_footprints")
+        .0;
+        assert_eq!(list.len(), 1);
+
+        // 5. Summary stats
+        let stats = get_summary_stats(user.clone(), State(state.clone()))
+            .await
+            .expect("get_summary_stats")
+            .0;
+        assert_eq!(stats.total_places, 1);
+        assert_eq!(stats.total_countries, 1);
+        assert_eq!(stats.total_days_traveled, 2);
+        assert_eq!(stats.spend_by_currency[0].total_spend_minor, 6000);
+
+        // 6. Delete
+        let deleted = delete_footprint(user.clone(), State(state.clone()), Path(created.id))
+            .await
+            .expect("delete_footprint")
+            .0;
+        assert_eq!(deleted["success"], true);
+
+        let err = get_footprint(user, State(state), Path(created.id))
+            .await
+            .expect_err("deleted footprint must return 404");
+        assert_eq!(err.status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn geocode_proxy_validates_inputs_without_network() {
+        let (state, owner) = setup_state().await;
+        let user = AuthUser::for_account(owner);
+
+        // Missing query and lat/lon -> 400
+        let err = geocode_proxy(
+            user.clone(),
+            State(state.clone()),
+            Query(GeocodeQuery {
+                query: None,
+                lat: None,
+                lon: None,
+            }),
+        )
+        .await
+        .expect_err("missing params");
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+
+        // Out-of-bounds coordinates -> 400
+        let user2 = AuthUser::for_account(crate::domain::accounts::AccountId::from_seed("geo_2"));
+        let err = geocode_proxy(
+            user2,
+            State(state.clone()),
+            Query(GeocodeQuery {
+                query: None,
+                lat: Some(95.0),
+                lon: Some(0.0),
+            }),
+        )
+        .await
+        .expect_err("invalid latitude");
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+
+        // Empty query returns empty JSON array without contacting external Nominatim
+        let user3 = AuthUser::for_account(crate::domain::accounts::AccountId::from_seed("geo_3"));
+        let empty = geocode_proxy(
+            user3,
+            State(state.clone()),
+            Query(GeocodeQuery {
+                query: Some("   ".to_string()),
+                lat: None,
+                lon: None,
+            }),
+        )
+        .await
+        .expect("blank query")
+        .0;
+        assert_eq!(empty, serde_json::json!([]));
+
+        // Oversized query (>200 chars) -> 400
+        let user4 = AuthUser::for_account(crate::domain::accounts::AccountId::from_seed("geo_4"));
+        let err = geocode_proxy(
+            user4,
+            State(state),
+            Query(GeocodeQuery {
+                query: Some("q".repeat(201)),
+                lat: None,
+                lon: None,
+            }),
+        )
+        .await
+        .expect_err("oversized query");
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    }
+}

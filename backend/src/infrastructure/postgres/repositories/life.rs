@@ -350,3 +350,86 @@ pub async fn get_stats(
         today_date: today_date_str.to_string(),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::{migrate::run_migrations_unlocked, pool::seed_accounts, pool::test_pool};
+
+    #[tokio::test]
+    async fn life_repository_roundtrip_and_stats_computation() {
+        let pool = test_pool().await;
+        run_migrations_unlocked(&pool).await;
+        seed_accounts(&pool, &["life_repo_alice", "life_repo_bob"]).await;
+        let alice = AccountId::from_seed("life_repo_alice");
+        let bob = AccountId::from_seed("life_repo_bob");
+
+        // Profile upsert & update on conflict
+        let p1 = upsert_profile(&pool, &alice, "1990-01-01", 80)
+            .await
+            .expect("insert profile");
+        assert_eq!(p1.expected_lifespan_years, 80);
+
+        let p2 = upsert_profile(&pool, &alice, "1990-01-01", 90)
+            .await
+            .expect("update profile");
+        assert_eq!(p2.expected_lifespan_years, 90);
+
+        // Day log upsert & time allocation preservation on conflict
+        let alloc_15m = serde_json::to_string(&vec![
+            Some("sleep"),
+            Some("sleep"),
+            Some("sleep"),
+            Some("sleep"),
+            Some("deep_work"),
+            Some("deep_work"),
+        ])
+        .unwrap();
+
+        update_time_allocation(&pool, &alice, "2026-03-10", &alloc_15m)
+            .await
+            .expect("set time allocation first");
+
+        // Upserting mood with time_allocation: None preserves existing time_allocation via COALESCE
+        let d1 = upsert_day_log(
+            &pool,
+            &alice,
+            "2026-03-10",
+            DayLogInput {
+                mood: "good",
+                weather: Some("cloudy"),
+                activities: Some("reading"),
+                note: Some("Calm day"),
+                time_allocation: None,
+            },
+        )
+        .await
+        .expect("upsert day log");
+        assert_eq!(d1.time_allocation.as_deref(), Some(alloc_15m.as_str()));
+
+        // Stats computation: 4 blocks of sleep (4 * 0.25h = 1.0h) and 2 blocks of deep_work (2 * 0.25h = 0.5h)
+        let stats = get_stats(&pool, &alice, "2026-03-10").await.expect("stats");
+        assert_eq!(stats.total_logged_days, 1);
+        assert_eq!(stats.dominant_mood.as_deref(), Some("good"));
+        assert!((stats.average_sleep_hours - 1.0).abs() < f64::EPSILON);
+        assert!((stats.total_deep_work_hours - 0.5).abs() < f64::EPSILON);
+
+        // Owner isolation: Bob has empty stats and year view
+        let bob_stats = get_stats(&pool, &bob, "2026-03-10")
+            .await
+            .expect("bob stats");
+        assert_eq!(bob_stats.total_logged_days, 0);
+        assert!(bob_stats.profile.is_none());
+
+        let year = get_year_view(&pool, &alice, 2026).await.expect("year view");
+        assert_eq!(year.logs.len(), 1);
+
+        assert!(delete_day_log(&pool, &alice, "2026-03-10")
+            .await
+            .expect("delete"));
+        assert!(get_day_log(&pool, &alice, "2026-03-10")
+            .await
+            .expect("get after delete")
+            .is_none());
+    }
+}

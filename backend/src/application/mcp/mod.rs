@@ -76,3 +76,89 @@ impl McpService {
         Ok(deleted)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::{migrate::run_migrations_unlocked, pool::seed_accounts, pool::test_pool};
+
+    #[tokio::test]
+    async fn mcp_service_validates_and_manages_tokens_with_owner_isolation() {
+        let pool = test_pool().await;
+        run_migrations_unlocked(&pool).await;
+        seed_accounts(&pool, &["mcp_svc_alice", "mcp_svc_bob"]).await;
+        let alice = AccountId::from_seed("mcp_svc_alice");
+        let bob = AccountId::from_seed("mcp_svc_bob");
+
+        let svc = McpService::new(pool);
+
+        // Empty or whitespace-only name is rejected
+        let err = svc
+            .create_token(&alice, "   ", None)
+            .await
+            .expect_err("blank token name must fail validation");
+        assert!(matches!(err, AppError::Validation(_)));
+
+        // Mint valid token with expiry
+        let (raw, token) = svc
+            .create_token(&alice, "  Cursor IDE  ", Some(30))
+            .await
+            .expect("create token");
+        assert_eq!(token.name, "Cursor IDE");
+        assert_eq!(token.account_id, alice);
+        assert!(token.expires_at.is_some());
+
+        // Resolve token
+        let resolved = svc
+            .resolve_token(&raw)
+            .await
+            .expect("resolve call")
+            .expect("token should resolve");
+        assert_eq!(resolved.id, token.id);
+
+        // Touch last used
+        svc.touch_last_used(&token.id)
+            .await
+            .expect("touch last used");
+        let list = svc.list_tokens(&alice).await.expect("list alice tokens");
+        assert_eq!(list.len(), 1);
+        assert!(list[0].last_used_at.is_some());
+
+        // Owner isolation: Bob cannot see or delete Alice's token
+        assert!(svc.list_tokens(&bob).await.expect("list bob").is_empty());
+        assert!(!svc
+            .delete_token(&bob, &token.id)
+            .await
+            .expect("bob delete attempt"));
+        assert!(!svc
+            .revoke_by_id_or_prefix(&bob, &token.prefix[..10])
+            .await
+            .expect("bob revoke prefix attempt"));
+
+        // Alice revokes by prefix
+        assert!(svc
+            .revoke_by_id_or_prefix(&alice, &raw[..10])
+            .await
+            .expect("alice revoke by prefix"));
+        assert!(svc
+            .resolve_token(&raw)
+            .await
+            .expect("resolve after revoke")
+            .is_none());
+
+        // Mint second token and delete by ID
+        let (_, token2) = svc
+            .create_token(&alice, "Claude Desktop", None)
+            .await
+            .expect("create second token");
+        assert!(svc
+            .delete_token(&alice, &token2.id)
+            .await
+            .expect("delete by id"));
+        assert!(svc
+            .list_tokens(&alice)
+            .await
+            .expect("list empty")
+            .is_empty());
+    }
+}
