@@ -67,6 +67,8 @@ pub fn format_alert_notification(alert: &PriceAlert, current_price_minor: i64) -
     (plain, html)
 }
 
+use std::collections::HashSet;
+
 pub struct CheckAlertsHandler {
     services: AppServices,
     outbound: Arc<dyn Outbound>,
@@ -75,6 +77,53 @@ pub struct CheckAlertsHandler {
 impl CheckAlertsHandler {
     pub fn new(services: AppServices, outbound: Arc<dyn Outbound>) -> Self {
         Self { services, outbound }
+    }
+
+    /// Whether `owner` can receive an alert right now: either they have at
+    /// least one linked identity on a connected channel, or they have no
+    /// linked identities on any channel configured on this deployment (web-only).
+    pub(crate) async fn is_owner_ready(
+        &self,
+        owner: &crate::domain::accounts::AccountId,
+    ) -> Result<bool, AppError> {
+        let identities = self.services.identity.list(owner).await?;
+        let configured: Vec<_> = identities
+            .into_iter()
+            .filter(|id| self.outbound.is_configured(id.channel))
+            .collect();
+        Ok(configured.is_empty()
+            || configured
+                .iter()
+                .any(|id| self.outbound.is_connected(id.channel)))
+    }
+
+    /// Partitions the owners of active alerts on `symbol` into those ready to
+    /// be evaluated now and whether any owner had to be deferred because all
+    /// of their configured channel identities are currently disconnected.
+    pub(crate) async fn ready_owners_for_symbol(
+        &self,
+        symbol: &str,
+    ) -> Result<(HashSet<crate::domain::accounts::AccountId>, bool), AppError> {
+        let alerts = self
+            .services
+            .portfolio
+            .list_active_alerts_for_symbol(symbol)
+            .await?;
+        let mut ready = HashSet::new();
+        let mut deferred = HashSet::new();
+        for alert in alerts {
+            let owner = alert.owner_id;
+            if ready.contains(&owner) || deferred.contains(&owner) {
+                continue;
+            }
+            if self.is_owner_ready(&owner).await? {
+                ready.insert(owner);
+            } else {
+                deferred.insert(owner);
+            }
+        }
+        let any_deferred = !deferred.is_empty();
+        Ok((ready, any_deferred))
     }
 
     /// DMs every linked identity on a connected channel; a failed send is
@@ -87,7 +136,9 @@ impl CheckAlertsHandler {
     ) {
         let (plain, html) = format_alert_notification(&hit.alert, hit.price_minor);
         for linked in identities {
-            if !self.outbound.is_connected(linked.channel) {
+            if !self.outbound.is_configured(linked.channel)
+                || !self.outbound.is_connected(linked.channel)
+            {
                 continue;
             }
             let user_id = match PlatformUserId::parse(linked.channel, &linked.user_id) {
@@ -140,19 +191,68 @@ impl JobHandler for CheckAlertsHandler {
         }
         let symbols = self.services.portfolio.list_active_alert_symbols().await?;
         let portfolio = self.services.portfolio.clone();
-        self.check_symbols(symbols, |symbol| {
+        self.evaluate_symbols(symbols, |symbol, ready_owners| {
             let portfolio = portfolio.clone();
-            async move { portfolio.trigger_symbol_alerts(&symbol).await }
+            async move {
+                portfolio
+                    .trigger_symbol_alerts_for_owners(&symbol, &ready_owners)
+                    .await
+            }
         })
         .await
     }
 }
 
 impl CheckAlertsHandler {
+    /// Evaluates one symbol at a time for owners whose channels are ready,
+    /// sends its DMs before the next symbol's price is fetched, and defers
+    /// if any active alert's owner is waiting on a disconnected channel.
+    pub(crate) async fn evaluate_symbols<F, Fut>(
+        &self,
+        symbols: Vec<String>,
+        mut trigger_ready: F,
+    ) -> Result<(), JobError>
+    where
+        F: FnMut(String, HashSet<crate::domain::accounts::AccountId>) -> Fut,
+        Fut: Future<Output = Result<Vec<TriggeredAlert>, AppError>>,
+    {
+        if !self.outbound.is_ready_for_alerts() {
+            return Err(JobError::Unavailable(CHANNEL_RETRY));
+        }
+        let mut any_deferred = false;
+        for symbol in symbols {
+            let (ready_owners, symbol_deferred) = self.ready_owners_for_symbol(&symbol).await?;
+            any_deferred |= symbol_deferred;
+            if ready_owners.is_empty() {
+                continue;
+            }
+            for hit in trigger_ready(symbol, ready_owners).await? {
+                self.notify_hit(&hit).await;
+            }
+        }
+        if any_deferred {
+            return Err(JobError::Unavailable(CHANNEL_RETRY));
+        }
+        Ok(())
+    }
+
+    async fn notify_hit(&self, hit: &TriggeredAlert) {
+        let owner = &hit.alert.owner_id;
+        let identities = match self.services.identity.list(owner).await {
+            Ok(ids) => ids,
+            Err(err) => {
+                warn!(%owner, error = %err, "Could not read linked identities for an alert");
+                Vec::new()
+            }
+        };
+        self.notify_identities(hit, identities).await;
+    }
+
     /// Evaluates one symbol at a time and sends its DMs before the next
     /// symbol's price is fetched: a timeout or shutdown mid-check (with a
     /// single attempt) then loses at most the symbol in flight, not alerts
     /// already marked for earlier ones.
+    #[cfg(test)]
     pub(crate) async fn check_symbols<F, Fut>(
         &self,
         symbols: Vec<String>,
@@ -164,15 +264,7 @@ impl CheckAlertsHandler {
     {
         for symbol in symbols {
             for hit in trigger(symbol).await? {
-                let owner = &hit.alert.owner_id;
-                let identities = match self.services.identity.list(owner).await {
-                    Ok(ids) => ids,
-                    Err(err) => {
-                        warn!(%owner, error = %err, "Could not read linked identities for an alert");
-                        Vec::new()
-                    }
-                };
-                self.notify_identities(&hit, identities).await;
+                self.notify_hit(&hit).await;
             }
         }
         Ok(())
@@ -461,5 +553,149 @@ mod tests {
         let out = handler.run(&ctx(None), serde_json::json!({})).await;
 
         assert!(matches!(out, Err(JobError::Permanent(_))), "{out:?}");
+    }
+
+    #[tokio::test]
+    async fn matrix_only_owner_waits_when_matrix_is_down_and_telegram_is_up() {
+        let (s, o) = services(&["acct_pf_mx_only", "acct_pf_tg_ready"]).await;
+        let mx_owner = o[0];
+        let tg_owner = o[1];
+
+        let mx_id = PlatformIdentity::matrix("@mx_only:test").unwrap();
+        let tg_id = PlatformIdentity::new(
+            Channel::Telegram,
+            PlatformUserId::parse(Channel::Telegram, "888999").unwrap(),
+            Some("TgUser".into()),
+        );
+        s.identity.bind_for_test(&mx_owner, &mx_id).await;
+        s.identity.bind_for_test(&tg_owner, &tg_id).await;
+
+        let mx_alert = s
+            .portfolio
+            .create_alert(&mx_owner, "AAPL", 20_000, "USD", 2, AlertCondition::Above)
+            .await
+            .unwrap();
+        let tg_alert = s
+            .portfolio
+            .create_alert(&tg_owner, "AAPL", 20_000, "USD", 2, AlertCondition::Above)
+            .await
+            .unwrap();
+
+        let fake = FakeOutbound::with_states([(Channel::Matrix, false), (Channel::Telegram, true)]);
+        let handler = CheckAlertsHandler::new(s.clone(), fake.clone());
+        let portfolio = s.portfolio.clone();
+
+        let out = handler
+            .evaluate_symbols(vec!["AAPL".into()], move |symbol, ready_owners| {
+                let portfolio = portfolio.clone();
+                async move {
+                    let mut hits = Vec::new();
+                    portfolio
+                        .trigger_alerts_for_quote_for_owners(
+                            &symbol,
+                            "USD",
+                            210.0,
+                            Some(&ready_owners),
+                            &mut hits,
+                        )
+                        .await?;
+                    Ok(hits)
+                }
+            })
+            .await;
+
+        // The job defers because the Matrix-only owner's channel is down.
+        assert!(
+            matches!(out, Err(JobError::Unavailable(d)) if d == CHANNEL_RETRY),
+            "{out:?}"
+        );
+        // The Telegram owner's alert was evaluated, marked triggered, and DM'd.
+        let dms = fake.dms();
+        assert_eq!(dms.len(), 1);
+        assert_eq!(dms[0].0, "888999");
+        assert!(
+            s.portfolio
+                .find_alert(&tg_owner, tg_alert.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .is_triggered,
+            "Telegram owner's alert must be marked triggered"
+        );
+        // The Matrix-only owner's alert must NOT be marked triggered while Matrix is down.
+        assert!(
+            !s.portfolio
+                .find_alert(&mx_owner, mx_alert.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .is_triggered,
+            "Matrix-only owner's alert must remain active until Matrix reconnects"
+        );
+    }
+
+    #[tokio::test]
+    async fn telegram_linked_owner_on_deployment_without_telegram_falls_back_to_web() {
+        let (s, o) = services(&["acct_pf_unconf_tg"]).await;
+        let owner = o[0];
+
+        let tg_id = PlatformIdentity::new(
+            Channel::Telegram,
+            PlatformUserId::parse(Channel::Telegram, "777888").unwrap(),
+            Some("OldTg".into()),
+        );
+        s.identity.bind_for_test(&owner, &tg_id).await;
+
+        let created = s
+            .portfolio
+            .create_alert(&owner, "AAPL", 20_000, "USD", 2, AlertCondition::Above)
+            .await
+            .unwrap();
+
+        // Deployment has only Matrix configured (Telegram is disabled).
+        let fake = FakeOutbound::with_configured([Channel::Matrix]);
+        let handler = CheckAlertsHandler::new(s.clone(), fake.clone());
+        let portfolio = s.portfolio.clone();
+
+        let out = handler
+            .evaluate_symbols(vec!["AAPL".into()], move |symbol, ready_owners| {
+                let portfolio = portfolio.clone();
+                async move {
+                    let mut hits = Vec::new();
+                    portfolio
+                        .trigger_alerts_for_quote_for_owners(
+                            &symbol,
+                            "USD",
+                            210.0,
+                            Some(&ready_owners),
+                            &mut hits,
+                        )
+                        .await?;
+                    Ok(hits)
+                }
+            })
+            .await;
+
+        assert!(out.is_ok(), "{out:?}");
+        assert!(fake.dms().is_empty());
+        assert!(
+            s.portfolio
+                .find_alert(&owner, created.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .is_triggered,
+            "Alert for owner with only unconfigured channel identity falls back to web and triggers"
+        );
+        assert!(
+            crate::infrastructure::postgres::repositories::outbox::event_types_for(
+                s.portfolio.pool(),
+                &owner
+            )
+            .await
+            .unwrap()
+            .contains(&"PortfolioAlertTriggered".to_string()),
+            "PortfolioAlertTriggered published to outbox for web delivery"
+        );
     }
 }

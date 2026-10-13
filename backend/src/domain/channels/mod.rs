@@ -46,6 +46,9 @@ pub enum Channel {
 }
 
 impl Channel {
+    /// Every platform variant; keep exhaustive when adding a channel.
+    pub const ALL: [Self; 4] = [Self::Matrix, Self::Discord, Self::Telegram, Self::Email];
+
     /// The name shown to people ("Telegram"), as opposed to the storage key.
     pub fn label(&self) -> &'static str {
         match self {

@@ -3430,6 +3430,23 @@ export class FakeApi {
       });
     }
 
+    // --- morning briefing ---
+    if (path === '/briefing/trigger' && method === 'POST') {
+      return json(route, 200, {
+        owner_id: 'acct_00000000000000000000000000000001',
+        html_content: '<h3>☀️ 早安简报</h3>',
+        plain_text: '☀️ 早安简报',
+        summary: {
+          pending_tasks_count: this.todos.filter((t) => !t.completed).length,
+          habits_completed_count: 0,
+          habits_total_count: this.habits.length,
+          upcoming_bills_count: this.recurringBills.length,
+          holdings_count: this.holdings.length,
+        },
+        tickers: [],
+      });
+    }
+
     // --- agent runs & approvals ---
     if (path === '/agent/runs' && method === 'GET') {
       return json(route, 200, this.agentRuns);

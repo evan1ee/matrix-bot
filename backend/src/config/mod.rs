@@ -236,10 +236,7 @@ impl Config {
             .trim()
             .to_string();
 
-        let password = env::var("MATRIX_PASSWORD")
-            .unwrap_or_default()
-            .trim()
-            .to_string();
+        let password = env::var("MATRIX_PASSWORD").unwrap_or_default();
 
         let recovery_key = env::var("MATRIX_RECOVERY_KEY").ok();
 
@@ -455,7 +452,26 @@ impl Config {
 
     /// Whether the Matrix adapter is configured (`MATRIX_USERNAME` and `MATRIX_PASSWORD` set).
     pub fn matrix_enabled(&self) -> bool {
-        !self.username.is_empty() && !self.password.is_empty()
+        !self.username.trim().is_empty() && !self.password.trim().is_empty()
+    }
+
+    /// The external channels configured on this deployment.
+    pub fn configured_channels(&self) -> Vec<crate::domain::channels::Channel> {
+        use crate::domain::channels::Channel;
+        let mut channels = Vec::new();
+        if self.matrix_enabled() {
+            channels.push(Channel::Matrix);
+        }
+        if self.discord.is_some() {
+            channels.push(Channel::Discord);
+        }
+        if self.telegram.is_some() {
+            channels.push(Channel::Telegram);
+        }
+        if self.email.is_some() {
+            channels.push(Channel::Email);
+        }
+        channels
     }
 }
 
@@ -902,5 +918,18 @@ mod tests {
             "error must name the variable: {err}"
         );
         assert!(validate_database_url("").is_err());
+    }
+
+    #[test]
+    fn test_matrix_password_with_whitespace_is_preserved_while_blank_is_rejected() {
+        let mut cfg = valid_config();
+        cfg.password = "  s3cret with spaces  ".to_string();
+        assert!(cfg.matrix_enabled());
+        assert!(cfg.validate().is_ok());
+        assert_eq!(cfg.password, "  s3cret with spaces  ");
+
+        cfg.password = "   ".to_string();
+        assert!(!cfg.matrix_enabled());
+        assert!(cfg.validate().is_err());
     }
 }

@@ -215,7 +215,8 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         .with_link_config(config.web_url.clone(), config.link_signup_allowlist.clone())
         .with_storage(storage)
         .with_embedder(config.embedding_provider())
-        .with_embedding_model(&config.embedding_model);
+        .with_embedding_model(&config.embedding_model)
+        .with_configured_channels(config.configured_channels());
     // Built once and cloned into every reconnect generation, so `SyncHealth`
     // survives a Matrix reconnect.
     let mut handles = BotHandles::default();
@@ -252,11 +253,7 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         })
         .transpose()?
         .map(Arc::new);
-    let mut configured = Vec::new();
-    configured.extend(matrix.as_ref().map(|_| Channel::Matrix));
-    configured.extend(discord.as_ref().map(|_| Channel::Discord));
-    configured.extend(telegram.as_ref().map(|_| Channel::Telegram));
-    configured.extend(email.as_ref().map(|_| Channel::Email));
+    let configured = config.configured_channels();
     check_unique(&configured)?;
     // The pipeline holds a `Weak` of the registry for out-of-band sends, so the
     // registry is built with `new_cyclic` (A5). Uniqueness was checked just

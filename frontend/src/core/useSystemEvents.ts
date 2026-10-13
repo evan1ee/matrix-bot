@@ -12,11 +12,16 @@ import {
 import { showToast } from './toast';
 
 
-function notifyBrowser(title: string, body: string, moduleId?: string) {
+function notifyBrowser(
+  title: string,
+  body: string,
+  tag: string,
+  moduleId?: string
+) {
   if (typeof window === 'undefined' || !('Notification' in window)) return;
   if (Notification.permission === 'granted') {
     try {
-      const n = new Notification(title, { body });
+      const n = new Notification(title, { body, tag });
       if (moduleId) {
         n.onclick = () => {
           window.focus();
@@ -29,8 +34,6 @@ function notifyBrowser(title: string, body: string, moduleId?: string) {
     } catch {
       // Ignore environments where Notification constructor is restricted
     }
-  } else if (Notification.permission === 'default') {
-    void Notification.requestPermission();
   }
 }
 
@@ -122,7 +125,12 @@ export function useSystemEvents(signedIn: boolean) {
                   },
                 },
               });
-              notifyBrowser('Agent Approval Required', desc, 'agent');
+              notifyBrowser(
+                'Agent Approval Required',
+                desc,
+                `agent-approval-${String(payload?.run_id ?? toolName)}`,
+                'agent'
+              );
             } else if (sysEvent.type === 'AgentRunCompleted') {
               const status = payload?.status as string;
               showToast({
@@ -154,7 +162,12 @@ export function useSystemEvents(signedIn: boolean) {
                   },
                 },
               });
-              notifyBrowser('Reminder Alert', desc, 'reminder');
+              notifyBrowser(
+                'Reminder Alert',
+                desc,
+                `reminder-${String(payload?.id ?? desc)}`,
+                'reminder'
+              );
             }
           } else if (sysEvent.type === 'MorningBriefingSent') {
             const payload = sysEvent.payload as Record<string, unknown> | undefined;
@@ -165,7 +178,7 @@ export function useSystemEvents(signedIn: boolean) {
               description: desc,
               type: 'info',
             });
-            notifyBrowser('Morning Briefing', desc);
+            notifyBrowser('Morning Briefing', desc, `briefing-${desc}`);
           } else if (sysEvent.type.startsWith('Transaction') || sysEvent.type.startsWith('Category')) {
             queryClient.invalidateQueries({ queryKey: ['transactions'] });
             queryClient.invalidateQueries({ queryKey: ['categories'] });
@@ -192,7 +205,12 @@ export function useSystemEvents(signedIn: boolean) {
                   },
                 },
               });
-              notifyBrowser('Price Alert Triggered', desc, 'portfolio');
+              notifyBrowser(
+                'Price Alert Triggered',
+                desc,
+                `portfolio-alert-${String(payload?.id ?? symbol)}`,
+                'portfolio'
+              );
             }
           } else if (sysEvent.type.startsWith('RecurringBill')) {
             queryClient.invalidateQueries({ queryKey: ['recurring-bills'] });

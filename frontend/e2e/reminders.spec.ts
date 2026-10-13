@@ -128,3 +128,19 @@ test('formats raw acct_ sender IDs gracefully with user display name', async ({ 
   await expect(app.getByText('by acct_796cac95ea66412e8d758526fab863cd')).toHaveCount(0);
   await expect(app.getByText('by tester')).toBeVisible();
 });
+
+test('creates a web (in-app) reminder when no external chat rooms are linked', async ({
+  app,
+  api,
+}) => {
+  api.rooms = [];
+  await gotoApp(app, TAB.reminder);
+
+  await expect(app.getByRole('button', { name: 'Web (in-app)' })).toBeVisible();
+  await app.getByPlaceholder('Reminder message...').fill('Stretch in-app');
+  await app.getByRole('button', { name: 'Set Reminder' }).click();
+
+  await expect(app.getByText('Stretch in-app')).toBeVisible();
+  expect(api.reminders).toHaveLength(1);
+  expect(api.reminders[0].room_id).toBe('web');
+});

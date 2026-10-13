@@ -138,9 +138,12 @@ impl ReminderFireHandler {
             reminder.recurrence.as_str(),
         );
         let plain = strip_html(&html);
-        // A room that is no address (or the web UI) has nothing to deliver to;
-        // the reminder counts as delivered, as it always did.
-        let Some((address, channel)) = deliverable(&reminder.room_id) else {
+        // A room that is no address, the web UI, or an unconfigured channel has
+        // nothing to deliver to externally; the reminder falls back to web (SSE
+        // outbox event) and counts as delivered.
+        let Some((address, channel)) = deliverable(&reminder.room_id)
+            .filter(|(_, channel)| self.outbound.is_configured(*channel))
+        else {
             self.services
                 .reminders
                 .complete_delivery(&reminder, Utc::now())
@@ -629,5 +632,36 @@ mod tests {
         assert!(matches!(out, Err(JobError::Permanent(_))), "{out:?}");
         assert!(fake.room_sends().is_empty());
         assert_eq!(current(&f).await.status, ReminderStatus::Failed);
+    }
+
+    #[tokio::test]
+    async fn a_reminder_for_an_unconfigured_channel_falls_back_to_web() {
+        let f = fixture_in(
+            "acct_fire_unconf_tg",
+            RecurrencePattern::None,
+            None,
+            "telegram:42",
+        )
+        .await;
+        let fake = FakeOutbound::with_configured([crate::domain::channels::Channel::Matrix]);
+        let handler = ReminderFireHandler::new(f.services.clone(), fake.clone());
+
+        let out = handler
+            .run(
+                &ctx(&f.owner, 1),
+                payload(&f.reminder, f.reminder.trigger_at),
+            )
+            .await;
+
+        assert!(out.is_ok(), "{out:?}");
+        assert!(fake.messages().is_empty());
+        assert_eq!(current(&f).await.status, ReminderStatus::Triggered);
+        assert!(
+            repositories::outbox::event_types_for(&f.pool, &f.owner)
+                .await
+                .unwrap()
+                .contains(&"ReminderTriggered".to_string()),
+            "ReminderTriggered written to the outbox when falling back to web"
+        );
     }
 }

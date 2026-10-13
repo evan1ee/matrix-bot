@@ -78,17 +78,29 @@ pub async fn list_rooms(
     user: AuthUser,
 ) -> Result<Json<Vec<JoinedRoomInfo>>, ApiError> {
     let rooms = &state.services.rooms;
-    let non_matrix = rooms.non_matrix_destinations(&user.account_id).await;
+    let mut non_matrix = rooms.non_matrix_destinations(&user.account_id).await;
+    if let Some(registry) = state.outbound.as_ref().and_then(|w| w.upgrade()) {
+        non_matrix.retain(|dest| {
+            crate::domain::channels::ConversationAddress::parse_storage(dest.room_id())
+                .ok()
+                .and_then(|addr| addr.channel())
+                .is_some_and(|ch| registry.get(ch).is_some())
+        });
+    }
 
     // The cache answers instantly; discovery walks every joined room on the
     // homeserver. A failed read degrades to discovery rather than an error.
-    let cached = rooms
-        .cached_rooms(&user.account_id)
-        .await
-        .unwrap_or_else(|err| {
-            warn!(account_id = %user.account_id, error = %err, "Room cache unreadable");
-            Vec::new()
-        });
+    let cached = if rooms.is_channel_configured(crate::domain::channels::Channel::Matrix) {
+        rooms
+            .cached_rooms(&user.account_id)
+            .await
+            .unwrap_or_else(|err| {
+                warn!(account_id = %user.account_id, error = %err, "Room cache unreadable");
+                Vec::new()
+            })
+    } else {
+        Vec::new()
+    };
     if !cached.is_empty() {
         return Ok(with_non_matrix(to_dtos(&cached).0, &non_matrix));
     }
@@ -218,5 +230,24 @@ mod tests {
         assert_eq!(res.0[0].room_id, "telegram:777888");
         assert_eq!(res.0[0].name, "Telegram (Bob)");
         assert!(res.0[0].is_direct);
+    }
+
+    #[tokio::test]
+    async fn test_list_rooms_omits_unconfigured_channel_destinations() {
+        use crate::domain::channels::{Channel, PlatformIdentity, PlatformUserId};
+
+        let mut state = state_with_account("acct_tg_picker_disabled").await;
+        state.services = state.services.with_configured_channels([Channel::Matrix]);
+        let acct = crate::domain::accounts::AccountId::from_seed("acct_tg_picker_disabled");
+        let tg = PlatformIdentity::new(
+            Channel::Telegram,
+            PlatformUserId::parse(Channel::Telegram, "777888").unwrap(),
+            Some("Bob".into()),
+        );
+        state.services.identity.bind_for_test(&acct, &tg).await;
+        let user = AuthUser::for_seed("acct_tg_picker_disabled");
+
+        let res = list_rooms(State(state), user).await.unwrap();
+        assert!(res.0.is_empty());
     }
 }

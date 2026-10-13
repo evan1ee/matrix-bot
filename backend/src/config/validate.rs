@@ -7,7 +7,7 @@ use crate::domain::channels::Channel;
 
 impl Config {
     pub fn validate(&self) -> Result<()> {
-        if self.username.is_empty() != self.password.is_empty() {
+        if self.username.trim().is_empty() != self.password.trim().is_empty() {
             anyhow::bail!(
                 "MATRIX_USERNAME and MATRIX_PASSWORD must both be set to enable Matrix, or both left unset to disable it"
             );

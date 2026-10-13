@@ -20,6 +20,22 @@ export const NotificationPanel: React.FC = () => {
   const updateSettings = useUpdateSettings();
 
   const [savedSuccess, setSavedSuccess] = useState(false);
+  const [browserPermission, setBrowserPermission] = useState<string>(() => {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
+      return 'unsupported';
+    }
+    return Notification.permission;
+  });
+
+  const handleRequestBrowserPermission = async () => {
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    try {
+      const result = await Notification.requestPermission();
+      setBrowserPermission(result);
+    } catch {
+      // Ignore environments where requestPermission is restricted
+    }
+  };
 
   // Preferred notification channel routing (saved locally in browser or syncs with settings)
   const [briefingTarget, setBriefingTarget] = useState<string>(() => {
@@ -58,6 +74,44 @@ export const NotificationPanel: React.FC = () => {
 
   return (
     <div className="space-y-6 text-xs font-sans text-neutral-900 dark:text-neutral-100">
+      {/* Browser Notifications Permission */}
+      <section className="space-y-3">
+        <div className="p-3.5 rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50/50 dark:bg-neutral-950/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-2.5">
+            <div className="p-1.5 rounded-md bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 shrink-0 mt-0.5">
+              <Bell size={14} className="text-neutral-700 dark:text-neutral-300" />
+            </div>
+            <div>
+              <h4 className="font-semibold text-xs">Browser Notifications</h4>
+              <p className="text-neutral-500 dark:text-neutral-400 text-[11px]">
+                Show desktop alerts for reminders, morning briefings, price alerts, and agent approvals.
+              </p>
+            </div>
+          </div>
+          {browserPermission === 'granted' ? (
+            <span className="inline-flex items-center px-2 py-1 rounded text-[10px] font-medium bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-300 shrink-0">
+              Enabled
+            </span>
+          ) : browserPermission === 'denied' ? (
+            <span className="inline-flex items-center px-2 py-1 rounded text-[10px] font-medium bg-rose-100 dark:bg-rose-950/60 text-rose-800 dark:text-rose-300 shrink-0">
+              Blocked in browser
+            </span>
+          ) : browserPermission === 'default' ? (
+            <button
+              type="button"
+              onClick={() => void handleRequestBrowserPermission()}
+              className="px-3 py-1.5 rounded-md bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 text-xs font-medium hover:bg-neutral-800 dark:hover:bg-neutral-200 transition-colors duration-150 shrink-0 cursor-pointer"
+            >
+              Enable Browser Notifications
+            </button>
+          ) : (
+            <span className="inline-flex items-center px-2 py-1 rounded text-[10px] font-medium bg-neutral-100 dark:bg-neutral-800 text-neutral-500 shrink-0">
+              Unsupported
+            </span>
+          )}
+        </div>
+      </section>
+
       {/* Connected Channels Summary */}
       <section className="space-y-3">
         <div>

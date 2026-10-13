@@ -113,6 +113,29 @@ impl PortfolioService {
         &self,
         symbol: &str,
     ) -> Result<Vec<TriggeredAlert>, AppError> {
+        self.trigger_symbol_alerts_filtered(symbol, None).await
+    }
+
+    /// Like [`Self::trigger_symbol_alerts`], but evaluates and marks only
+    /// alerts belonging to `ready_owners`. Alerts for owners whose configured
+    /// channels are all disconnected remain active for the next check.
+    pub async fn trigger_symbol_alerts_for_owners(
+        &self,
+        symbol: &str,
+        ready_owners: &std::collections::HashSet<AccountId>,
+    ) -> Result<Vec<TriggeredAlert>, AppError> {
+        if ready_owners.is_empty() {
+            return Ok(Vec::new());
+        }
+        self.trigger_symbol_alerts_filtered(symbol, Some(ready_owners))
+            .await
+    }
+
+    async fn trigger_symbol_alerts_filtered(
+        &self,
+        symbol: &str,
+        ready_owners: Option<&std::collections::HashSet<AccountId>>,
+    ) -> Result<Vec<TriggeredAlert>, AppError> {
         if self.list_active_alerts_for_symbol(symbol).await?.is_empty() {
             return Ok(Vec::new());
         }
@@ -125,7 +148,13 @@ impl PortfolioService {
         };
         let mut triggered = Vec::new();
         match self
-            .trigger_alerts_for_quote(symbol, &quote.currency, quote.price, &mut triggered)
+            .trigger_alerts_for_quote_for_owners(
+                symbol,
+                &quote.currency,
+                quote.price,
+                ready_owners,
+                &mut triggered,
+            )
             .await
         {
             Err(err) if triggered.is_empty() => Err(err),
@@ -146,19 +175,23 @@ impl PortfolioService {
         price: f64,
         triggered: &mut Vec<TriggeredAlert>,
     ) -> Result<(), AppError> {
-        self.trigger_alerts_for_quote(symbol, "", price, triggered)
+        self.trigger_alerts_for_quote_for_owners(symbol, "", price, None, triggered)
             .await
     }
 
-    pub(crate) async fn trigger_alerts_for_quote(
+    pub(crate) async fn trigger_alerts_for_quote_for_owners(
         &self,
         symbol: &str,
         quote_currency: &str,
         price: f64,
+        ready_owners: Option<&std::collections::HashSet<AccountId>>,
         triggered: &mut Vec<TriggeredAlert>,
     ) -> Result<(), AppError> {
         let mut cached_rates = None;
         for alert in self.list_active_alerts_for_symbol(symbol).await? {
+            if ready_owners.is_some_and(|owners| !owners.contains(&alert.owner_id)) {
+                continue;
+            }
             let alert_price = if quote_currency.is_empty()
                 || quote_currency.eq_ignore_ascii_case(&alert.currency)
             {

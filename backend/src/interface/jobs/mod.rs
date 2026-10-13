@@ -33,19 +33,17 @@ pub const CHANNEL_RETRY: Duration = Duration::from_secs(30);
 /// `ChannelRegistry` is the production implementation.
 #[async_trait]
 pub trait Outbound: Send + Sync {
+    /// Whether `channel` is configured on this deployment.
+    fn is_configured(&self, channel: Channel) -> bool {
+        let _ = channel;
+        true
+    }
     fn is_connected(&self, channel: Channel) -> bool;
     /// Whether this deployment is ready to evaluate alerts: true when at least
     /// one configured channel is connected, or when no external channels are
     /// configured at all (Web-only deployment).
     fn is_ready_for_alerts(&self) -> bool {
-        [
-            Channel::Matrix,
-            Channel::Discord,
-            Channel::Telegram,
-            Channel::Email,
-        ]
-        .into_iter()
-        .any(|c| self.is_connected(c))
+        Channel::ALL.into_iter().any(|c| self.is_connected(c))
     }
     async fn authorize_delivery(
         &self,
@@ -60,6 +58,10 @@ pub trait Outbound: Send + Sync {
 
 #[async_trait]
 impl Outbound for ChannelRegistry {
+    fn is_configured(&self, channel: Channel) -> bool {
+        self.get(channel).is_some()
+    }
+
     fn is_connected(&self, channel: Channel) -> bool {
         ChannelRegistry::is_connected(self, channel)
     }
@@ -158,7 +160,7 @@ pub(crate) fn message(target: Target, plain: &str, html: &str) -> OutgoingMessag
 
 /// What a failed send means for a job.
 pub(crate) enum SendFailure {
-    /// The channel is down or not configured here: wait for it.
+    /// The channel is down: wait for it.
     Defer,
     /// May succeed on retry.
     Retry(String),
@@ -169,10 +171,14 @@ pub(crate) enum SendFailure {
 impl From<ChannelError> for SendFailure {
     fn from(err: ChannelError) -> Self {
         match err {
-            ChannelError::NotConnected(_) | ChannelError::NotConfigured(Some(_)) => Self::Defer,
+            ChannelError::NotConnected(_) => Self::Defer,
             ChannelError::Transient(reason) => Self::Retry(reason),
             ChannelError::Rejected(reason) => Self::Permanent(reason),
-            // Callers filter Web out first; were one to slip through, no retry helps.
+            // Callers filter Web and unconfigured channels out first; were one
+            // to slip through, no retry helps.
+            ChannelError::NotConfigured(Some(ch)) => {
+                Self::Permanent(format!("{ch} is not configured"))
+            }
             ChannelError::NotConfigured(None) => {
                 Self::Permanent("the web UI has no delivery".to_owned())
             }
