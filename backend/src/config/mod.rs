@@ -232,10 +232,11 @@ impl Config {
             env::var("MATRIX_HOMESERVER").unwrap_or_else(|_| "https://matrix.org".to_string());
 
         let username = env::var("MATRIX_USERNAME")
-            .context("MATRIX_USERNAME environment variable is required")?;
+            .unwrap_or_default()
+            .trim()
+            .to_string();
 
-        let password = env::var("MATRIX_PASSWORD")
-            .context("MATRIX_PASSWORD environment variable is required")?;
+        let password = env::var("MATRIX_PASSWORD").unwrap_or_default();
 
         let recovery_key = env::var("MATRIX_RECOVERY_KEY").ok();
 
@@ -448,6 +449,30 @@ impl Config {
             ),
         )
     }
+
+    /// Whether the Matrix adapter is configured (`MATRIX_USERNAME` and `MATRIX_PASSWORD` set).
+    pub fn matrix_enabled(&self) -> bool {
+        !self.username.trim().is_empty() && !self.password.trim().is_empty()
+    }
+
+    /// The external channels configured on this deployment.
+    pub fn configured_channels(&self) -> Vec<crate::domain::channels::Channel> {
+        use crate::domain::channels::Channel;
+        let mut channels = Vec::new();
+        if self.matrix_enabled() {
+            channels.push(Channel::Matrix);
+        }
+        if self.discord.is_some() {
+            channels.push(Channel::Discord);
+        }
+        if self.telegram.is_some() {
+            channels.push(Channel::Telegram);
+        }
+        if self.email.is_some() {
+            channels.push(Channel::Email);
+        }
+        channels
+    }
 }
 
 #[cfg(test)]
@@ -617,6 +642,7 @@ mod tests {
     #[test]
     fn test_config_validation() {
         let valid_cfg = valid_config();
+        assert!(valid_cfg.matrix_enabled());
         assert!(valid_cfg.validate().is_ok());
 
         let invalid_cfg = Config {
@@ -624,6 +650,29 @@ mod tests {
             ..valid_cfg.clone()
         };
         assert!(invalid_cfg.validate().is_err());
+
+        // Matrix disabled (both username and password empty) is valid even without a homeserver.
+        let matrix_disabled = Config {
+            username: "".to_string(),
+            password: "".to_string(),
+            homeserver: "".to_string(),
+            ..valid_cfg.clone()
+        };
+        assert!(!matrix_disabled.matrix_enabled());
+        assert!(matrix_disabled.validate().is_ok());
+
+        // Half-configured Matrix credentials must be rejected.
+        let missing_password = Config {
+            password: "".to_string(),
+            ..valid_cfg.clone()
+        };
+        assert!(missing_password.validate().is_err());
+
+        let missing_username = Config {
+            username: "".to_string(),
+            ..valid_cfg
+        };
+        assert!(missing_username.validate().is_err());
     }
 
     /// The RP ID is a hostname. A URL or a port here mints credentials that no
@@ -869,5 +918,18 @@ mod tests {
             "error must name the variable: {err}"
         );
         assert!(validate_database_url("").is_err());
+    }
+
+    #[test]
+    fn test_matrix_password_with_whitespace_is_preserved_while_blank_is_rejected() {
+        let mut cfg = valid_config();
+        cfg.password = "  s3cret with spaces  ".to_string();
+        assert!(cfg.matrix_enabled());
+        assert!(cfg.validate().is_ok());
+        assert_eq!(cfg.password, "  s3cret with spaces  ");
+
+        cfg.password = "   ".to_string();
+        assert!(!cfg.matrix_enabled());
+        assert!(cfg.validate().is_err());
     }
 }

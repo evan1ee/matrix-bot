@@ -12,6 +12,31 @@ import {
 import { showToast } from './toast';
 
 
+function notifyBrowser(
+  title: string,
+  body: string,
+  tag: string,
+  moduleId?: string
+) {
+  if (typeof window === 'undefined' || !('Notification' in window)) return;
+  if (Notification.permission === 'granted') {
+    try {
+      const n = new Notification(title, { body, tag });
+      if (moduleId) {
+        n.onclick = () => {
+          window.focus();
+          window.dispatchEvent(
+            new CustomEvent('app:navigate', { detail: { moduleId } })
+          );
+          n.close();
+        };
+      }
+    } catch {
+      // Ignore environments where Notification constructor is restricted
+    }
+  }
+}
+
 export function useSystemEvents(signedIn: boolean) {
   const queryClient = useQueryClient();
   const [events, setEvents] = useState<SystemEvent[]>([]);
@@ -86,9 +111,10 @@ export function useSystemEvents(signedIn: boolean) {
 
             if (sysEvent.type === 'AgentApprovalRequired') {
               const toolName = (payload?.tool_name as string) || 'sensitive action';
+              const desc = `Agent requested permission to execute: ${toolName}`;
               showToast({
                 title: 'Agent Approval Required',
-                description: `Agent requested permission to execute: ${toolName}`,
+                description: desc,
                 type: 'warning',
                 action: {
                   label: 'Review',
@@ -99,6 +125,12 @@ export function useSystemEvents(signedIn: boolean) {
                   },
                 },
               });
+              notifyBrowser(
+                'Agent Approval Required',
+                desc,
+                `agent-approval-${String(payload?.run_id ?? toolName)}`,
+                'agent'
+              );
             } else if (sysEvent.type === 'AgentRunCompleted') {
               const status = payload?.status as string;
               showToast({
@@ -113,9 +145,13 @@ export function useSystemEvents(signedIn: boolean) {
             queryClient.invalidateQueries({ queryKey: ['reminders'] });
             if (sysEvent.type === 'ReminderTriggered') {
               const payload = sysEvent.payload as Record<string, unknown> | undefined;
+              const desc =
+                (payload?.title as string) ||
+                (payload?.message as string) ||
+                'A scheduled reminder was triggered.';
               showToast({
                 title: 'Reminder Alert',
-                description: (payload?.title as string) || (payload?.message as string) || 'A scheduled reminder was triggered.',
+                description: desc,
                 type: 'info',
                 action: {
                   label: 'View',
@@ -126,7 +162,23 @@ export function useSystemEvents(signedIn: boolean) {
                   },
                 },
               });
+              notifyBrowser(
+                'Reminder Alert',
+                desc,
+                `reminder-${String(payload?.id ?? desc)}`,
+                'reminder'
+              );
             }
+          } else if (sysEvent.type === 'MorningBriefingSent') {
+            const payload = sysEvent.payload as Record<string, unknown> | undefined;
+            const desc =
+              (payload?.summary as string) || 'Your daily morning briefing is ready.';
+            showToast({
+              title: 'Morning Briefing',
+              description: desc,
+              type: 'info',
+            });
+            notifyBrowser('Morning Briefing', desc, `briefing-${desc}`);
           } else if (sysEvent.type.startsWith('Transaction') || sysEvent.type.startsWith('Category')) {
             queryClient.invalidateQueries({ queryKey: ['transactions'] });
             queryClient.invalidateQueries({ queryKey: ['categories'] });
@@ -136,6 +188,30 @@ export function useSystemEvents(signedIn: boolean) {
             queryClient.invalidateQueries({ queryKey: ['portfolio-summary'] });
             queryClient.invalidateQueries({ queryKey: ['portfolio-cash'] });
             queryClient.invalidateQueries({ queryKey: ['portfolio-alerts'] });
+            if (sysEvent.type === 'PortfolioAlertTriggered') {
+              const payload = sysEvent.payload as Record<string, unknown> | undefined;
+              const symbol = (payload?.symbol as string) || 'Holding';
+              const desc = `Price alert triggered for ${symbol}.`;
+              showToast({
+                title: 'Price Alert Triggered',
+                description: desc,
+                type: 'info',
+                action: {
+                  label: 'View',
+                  onClick: () => {
+                    window.dispatchEvent(
+                      new CustomEvent('app:navigate', { detail: { moduleId: 'portfolio' } })
+                    );
+                  },
+                },
+              });
+              notifyBrowser(
+                'Price Alert Triggered',
+                desc,
+                `portfolio-alert-${String(payload?.id ?? symbol)}`,
+                'portfolio'
+              );
+            }
           } else if (sysEvent.type.startsWith('RecurringBill')) {
             queryClient.invalidateQueries({ queryKey: ['recurring-bills'] });
           } else if (sysEvent.type.startsWith('Webhook')) {

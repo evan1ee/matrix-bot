@@ -52,6 +52,18 @@ fn picker_dtos(rooms: &PickerRooms) -> Json<Vec<JoinedRoomInfo>> {
     }
 }
 
+fn with_non_matrix(
+    mut dtos: Vec<JoinedRoomInfo>,
+    non_matrix: &[JoinedRoom],
+) -> Json<Vec<JoinedRoomInfo>> {
+    for dest in non_matrix {
+        if !dtos.iter().any(|d| d.room_id == dest.room_id()) {
+            dtos.push(JoinedRoomInfo::from(dest));
+        }
+    }
+    Json(dtos)
+}
+
 #[utoipa::path(
     get,
     path = "/api/v1/rooms",
@@ -66,26 +78,39 @@ pub async fn list_rooms(
     user: AuthUser,
 ) -> Result<Json<Vec<JoinedRoomInfo>>, ApiError> {
     let rooms = &state.services.rooms;
+    let mut non_matrix = rooms.non_matrix_destinations(&user.account_id).await;
+    if let Some(registry) = state.outbound.as_ref().and_then(|w| w.upgrade()) {
+        non_matrix.retain(|dest| {
+            crate::domain::channels::ConversationAddress::parse_storage(dest.room_id())
+                .ok()
+                .and_then(|addr| addr.channel())
+                .is_some_and(|ch| registry.get(ch).is_some())
+        });
+    }
 
     // The cache answers instantly; discovery walks every joined room on the
     // homeserver. A failed read degrades to discovery rather than an error.
-    let cached = rooms
-        .cached_rooms(&user.account_id)
-        .await
-        .unwrap_or_else(|err| {
-            warn!(account_id = %user.account_id, error = %err, "Room cache unreadable");
-            Vec::new()
-        });
+    let cached = if rooms.is_channel_configured(crate::domain::channels::Channel::Matrix) {
+        rooms
+            .cached_rooms(&user.account_id)
+            .await
+            .unwrap_or_else(|err| {
+                warn!(account_id = %user.account_id, error = %err, "Room cache unreadable");
+                Vec::new()
+            })
+    } else {
+        Vec::new()
+    };
     if !cached.is_empty() {
-        return Ok(to_dtos(&cached));
+        return Ok(with_non_matrix(to_dtos(&cached).0, &non_matrix));
     }
 
     let Some(client) = state.bot_client.read().await.clone() else {
-        return Ok(Json(Vec::new()));
+        return Ok(with_non_matrix(Vec::new(), &non_matrix));
     };
     let discovered = discover_rooms_for_account(rooms, &client, &user.account_id).await;
     let adopted = rooms.adopt_discovery(&user.account_id, discovered).await;
-    Ok(picker_dtos(&adopted))
+    Ok(with_non_matrix(picker_dtos(&adopted).0, &non_matrix))
 }
 
 #[utoipa::path(
@@ -184,5 +209,45 @@ mod tests {
         let dto = JoinedRoomInfo::from(&JoinedRoom::new("!r:x", Some("R"), true));
         assert_eq!(dto.updated_at, None);
         assert!(dto.is_direct);
+    }
+
+    #[tokio::test]
+    async fn test_list_rooms_includes_non_matrix_linked_destinations() {
+        use crate::domain::channels::{Channel, PlatformIdentity, PlatformUserId};
+
+        let state = state_with_account("acct_tg_picker").await;
+        let acct = crate::domain::accounts::AccountId::from_seed("acct_tg_picker");
+        let tg = PlatformIdentity::new(
+            Channel::Telegram,
+            PlatformUserId::parse(Channel::Telegram, "777888").unwrap(),
+            Some("Bob".into()),
+        );
+        state.services.identity.bind_for_test(&acct, &tg).await;
+        let user = AuthUser::for_seed("acct_tg_picker");
+
+        let res = list_rooms(State(state), user).await.unwrap();
+        assert_eq!(res.0.len(), 1);
+        assert_eq!(res.0[0].room_id, "telegram:777888");
+        assert_eq!(res.0[0].name, "Telegram (Bob)");
+        assert!(res.0[0].is_direct);
+    }
+
+    #[tokio::test]
+    async fn test_list_rooms_omits_unconfigured_channel_destinations() {
+        use crate::domain::channels::{Channel, PlatformIdentity, PlatformUserId};
+
+        let mut state = state_with_account("acct_tg_picker_disabled").await;
+        state.services = state.services.with_configured_channels([Channel::Matrix]);
+        let acct = crate::domain::accounts::AccountId::from_seed("acct_tg_picker_disabled");
+        let tg = PlatformIdentity::new(
+            Channel::Telegram,
+            PlatformUserId::parse(Channel::Telegram, "777888").unwrap(),
+            Some("Bob".into()),
+        );
+        state.services.identity.bind_for_test(&acct, &tg).await;
+        let user = AuthUser::for_seed("acct_tg_picker_disabled");
+
+        let res = list_rooms(State(state), user).await.unwrap();
+        assert!(res.0.is_empty());
     }
 }

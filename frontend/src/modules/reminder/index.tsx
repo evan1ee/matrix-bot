@@ -35,7 +35,7 @@ export const ReminderMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus 
   const [amPm, setAmPm] = useState<'AM' | 'PM'>('AM');
 
   const [recurrence, setRecurrence] = useState('none');
-  const [roomId, setRoomId] = useState('');
+  const [roomId, setRoomId] = useState('web');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [now, setNow] = useState<number>(Date.now());
 
@@ -64,6 +64,8 @@ export const ReminderMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus 
     if (roomsData && roomsData.length > 0 && (!roomId || roomId === 'web' || roomId === 'web_chat')) {
       const defaultRoom = roomsData.find((r) => r.is_direct)?.room_id || roomsData[0].room_id;
       setRoomId(defaultRoom);
+    } else if (roomsData && roomsData.length === 0 && !roomId) {
+      setRoomId('web');
     }
   }, [roomsData]);
 

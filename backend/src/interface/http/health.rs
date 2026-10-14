@@ -195,6 +195,21 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_ready_is_200_when_matrix_is_disabled() {
+        let state = state().await;
+        state.sync_health.mark_disabled();
+        let app = router(state);
+
+        let (status, body) = get_status_and_body(app, "/health/ready").await;
+
+        assert_eq!(status, StatusCode::OK);
+        assert_eq!(body["status"], "ready");
+        assert_eq!(body["checks"]["matrix_sync"]["ok"], true);
+        assert!(body["checks"]["matrix_sync"]["last_sync_at"].is_null());
+        assert_eq!(body["checks"]["database"]["ok"], true);
+    }
+
+    #[tokio::test]
     async fn test_ready_is_503_when_database_is_closed() {
         let state = state().await;
         state.sync_health.record_sync(Utc::now());

@@ -4,3 +4,6 @@ pub mod cash;
 pub mod history;
 pub mod holdings;
 pub mod trades;
+
+#[cfg(test)]
+mod tests;

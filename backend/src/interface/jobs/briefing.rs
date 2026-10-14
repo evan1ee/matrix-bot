@@ -11,8 +11,9 @@ use super::{deliverable, message, parse_payload, Outbound, SendFailure, CHANNEL_
 use crate::application::briefing::BriefingPayload;
 use crate::application::AppServices;
 use crate::domain::accounts::AccountId;
-use crate::domain::channels::ConversationAddress;
+use crate::domain::channels::{Channel, ConversationAddress};
 use crate::domain::jobs::{BriefingSendPayload, JobType};
+use crate::interface::channels::adapter::ChannelError;
 use crate::interface::channels::message::Target;
 use crate::jobs::{JobContext, JobError, JobHandler};
 
@@ -24,6 +25,59 @@ pub struct BriefingSendHandler {
 impl BriefingSendHandler {
     pub fn new(services: AppServices, outbound: Arc<dyn Outbound>) -> Self {
         Self { services, outbound }
+    }
+
+    /// Resolves the account's default room and its deliverable channel target,
+    /// filtering out channels that are not configured on this deployment so an
+    /// identity from a disabled channel falls back to web.
+    pub async fn default_target(
+        &self,
+        owner: &AccountId,
+    ) -> (Option<String>, Option<(ConversationAddress, Channel)>) {
+        let room = self.services.rooms.default_room(owner).await;
+        let target = room
+            .as_deref()
+            .and_then(deliverable)
+            .filter(|(_, channel)| self.outbound.is_configured(*channel));
+        (room, target)
+    }
+
+    /// Authorizes and sends `briefing` to `address`.
+    pub async fn send_to(
+        &self,
+        owner: &AccountId,
+        address: ConversationAddress,
+        briefing: &BriefingPayload,
+    ) -> Result<(), ChannelError> {
+        self.outbound
+            .authorize_delivery(owner, &address)
+            .await
+            .map_err(ChannelError::Rejected)?;
+        self.outbound
+            .send(message(
+                Target::Conversation(address),
+                &briefing.plain_text,
+                &briefing.html_content,
+            ))
+            .await
+            .map(|_| ())
+    }
+
+    /// Sends `briefing` to the account's default channel on demand. Returns
+    /// `Ok(false)` when no external channel is configured for the account
+    /// (web-only delivery), `Ok(true)` when delivered to the default channel,
+    /// or `Err` when delivery to a configured default channel fails.
+    pub async fn deliver_on_demand(
+        &self,
+        owner: &AccountId,
+        briefing: &BriefingPayload,
+    ) -> Result<bool, ChannelError> {
+        let (_, target) = self.default_target(owner).await;
+        let Some((address, _)) = target else {
+            return Ok(false);
+        };
+        self.send_to(owner, address, briefing).await?;
+        Ok(true)
     }
 }
 
@@ -71,8 +125,7 @@ impl JobHandler for BriefingSendHandler {
         }
         // Per channel, so the room's platform being down defers the job before
         // the (costly) generation, as the global Matrix check did.
-        let room = self.services.rooms.default_room(&owner).await;
-        let target = room.as_deref().and_then(deliverable);
+        let (room, target) = self.default_target(&owner).await;
         if let Some((_, channel)) = &target {
             if !self.outbound.is_connected(*channel) {
                 return Err(JobError::Unavailable(CHANNEL_RETRY));
@@ -125,16 +178,8 @@ impl BriefingSendHandler {
         let Some(address) = address else {
             return Ok(true);
         };
-        let sent = self
-            .outbound
-            .send(message(
-                Target::Conversation(address),
-                &briefing.plain_text,
-                &briefing.html_content,
-            ))
-            .await;
-        match sent {
-            Ok(_) => Ok(true),
+        match self.send_to(owner, address, briefing).await {
+            Ok(()) => Ok(true),
             Err(err) => match SendFailure::from(err) {
                 SendFailure::Defer => Err(JobError::Unavailable(CHANNEL_RETRY)),
                 SendFailure::Retry(reason) | SendFailure::Permanent(reason) => {
@@ -425,5 +470,47 @@ mod tests {
             "{out:?}"
         );
         assert_eq!(last_date(&f).await, None);
+    }
+
+    #[tokio::test]
+    async fn an_unconfigured_default_channel_falls_back_to_web_and_records_the_day() {
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let owner = AccountId::from_seed("acct_brief_unconf_tg");
+        crate::db::pool::seed_account(&pool, &owner).await;
+        let services = AppServices::new(&pool);
+        services
+            .settings
+            .modify(&owner, |s| {
+                s.briefing_enabled = true;
+                s.briefing_time = format!("{:02}:{:02}", Utc::now().hour(), 0);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        let tg = crate::domain::channels::PlatformIdentity::new(
+            Channel::Telegram,
+            crate::domain::channels::PlatformUserId::parse(Channel::Telegram, "4242").unwrap(),
+            Some("Alice".into()),
+        );
+        services.identity.bind_for_test(&owner, &tg).await;
+        let f = Fixture {
+            pool,
+            services,
+            owner,
+        };
+        let fake = FakeOutbound::with_configured([Channel::Matrix]);
+        let handler = BriefingSendHandler::new(f.services.clone(), fake.clone());
+        let now = today(&f).await;
+
+        let out = handler.run(&ctx(Some(f.owner)), payload(now)).await;
+
+        assert!(out.is_ok(), "{out:?}");
+        assert!(fake.messages().is_empty());
+        assert_eq!(last_date(&f).await, Some(ymd(now)));
+        assert_eq!(
+            sent_events(&f).await,
+            ["0 tasks, 0 habits, 0 bills, 0 holdings"]
+        );
     }
 }

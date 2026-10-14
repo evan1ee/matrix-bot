@@ -265,4 +265,14 @@ impl AppServices {
         self.app_config = app_config;
         self
     }
+
+    /// Restricts room and destination resolution to the channels configured on
+    /// this deployment.
+    pub fn with_configured_channels(
+        mut self,
+        channels: impl IntoIterator<Item = crate::domain::channels::Channel>,
+    ) -> Self {
+        self.rooms = self.rooms.with_configured_channels(channels);
+        self
+    }
 }

@@ -7,14 +7,13 @@ use crate::domain::channels::Channel;
 
 impl Config {
     pub fn validate(&self) -> Result<()> {
-        if self.homeserver.is_empty() {
-            anyhow::bail!("MATRIX_HOMESERVER cannot be empty");
+        if self.username.trim().is_empty() != self.password.trim().is_empty() {
+            anyhow::bail!(
+                "MATRIX_USERNAME and MATRIX_PASSWORD must both be set to enable Matrix, or both left unset to disable it"
+            );
         }
-        if self.username.is_empty() {
-            anyhow::bail!("MATRIX_USERNAME cannot be empty");
-        }
-        if self.password.is_empty() {
-            anyhow::bail!("MATRIX_PASSWORD cannot be empty");
+        if self.matrix_enabled() && self.homeserver.trim().is_empty() {
+            anyhow::bail!("MATRIX_HOMESERVER cannot be empty when Matrix is enabled");
         }
 
         if !(1..=MAX_JOB_WORKERS).contains(&self.job_workers) {

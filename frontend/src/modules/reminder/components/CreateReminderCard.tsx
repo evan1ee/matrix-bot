@@ -149,13 +149,12 @@ export const CreateReminderCard: React.FC<CreateReminderCardProps> = ({
           />
 
           <CustomSelect
-            value={roomId}
+            value={roomId || 'web'}
             onChange={(val) => setRoomId(val)}
-            options={
-              roomsData && roomsData.length > 0
-                ? roomsData.map((r) => ({ value: r.room_id, label: r.name }))
-                : [{ value: '', label: 'Loading rooms...' }]
-            }
+            options={[
+              ...(roomsData ?? []).map((r) => ({ value: r.room_id, label: r.name })),
+              { value: 'web', label: 'Web (in-app)' },
+            ]}
           />
 
           <button

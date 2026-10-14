@@ -221,7 +221,7 @@ test('registers a passkey using an enrollment token (?enroll=...) from Matrix ch
   // Modal automatically opens with enrollment prompt
   const dialog = anonApp.getByRole('dialog');
   await expect(dialog).toBeVisible();
-  await expect(dialog.getByText(/Link Matrix Passkey/i)).toBeVisible();
+  await expect(dialog.getByText(/Link Passkey/i)).toBeVisible();
 
   await dialog.getByRole('button', { name: /Activate passkey for this device/i }).click();
 

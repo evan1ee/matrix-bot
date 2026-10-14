@@ -1,10 +1,11 @@
 use axum::{extract::State, Json};
-use matrix_sdk::ruma::{events::room::message::RoomMessageEventContent, RoomId};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
 use crate::interface::http::auth::{ApiState, AuthUser};
 use crate::interface::http::error::ApiError;
+use crate::interface::jobs::briefing::BriefingSendHandler;
+use crate::interface::jobs::deliverable;
 
 /// Market performance snapshot for a single holding across 1D, 1W, and 1M timeframes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, ToSchema)]
@@ -100,30 +101,32 @@ pub async fn trigger_briefing(
         .await
         .map_err(|e| ApiError::internal(e.to_string()))?;
 
-    // Attempt delivery to user's direct or default Matrix room if configured and authorized.
-    // Never call `join_room_by_id` on an unverified room.
-    let client_guard = state.bot_client.read().await;
-    if let Some(ref client) = *client_guard {
-        if let Some(target_room) = state.services.rooms.default_room(&user.account_id).await {
-            if crate::interface::channels::matrix::rooms::is_room_authorized_for_account(
-                &state.services.rooms,
-                Some(client),
-                &user.account_id,
-                &target_room,
-            )
+    // Delegate external channel delivery to BriefingSendHandler so scheduled
+    // and on-demand briefings share one delivery path, and surface send
+    // failures rather than returning 200 when nothing was delivered.
+    if state
+        .services
+        .rooms
+        .default_room(&user.account_id)
+        .await
+        .as_deref()
+        .and_then(deliverable)
+        .is_some_and(|(_, ch)| state.services.rooms.is_channel_configured(ch))
+    {
+        let registry = state
+            .outbound
+            .as_ref()
+            .and_then(|w| w.upgrade())
+            .ok_or_else(|| {
+                ApiError::service_unavailable("Outbound channel registry is not available")
+            })?;
+        let handler = BriefingSendHandler::new(state.services.clone(), registry);
+        handler
+            .deliver_on_demand(&user.account_id, &payload)
             .await
-            {
-                if let Ok(room_id) = <&RoomId>::try_from(target_room.as_str()) {
-                    if let Some(room) = client.get_room(room_id) {
-                        let content = RoomMessageEventContent::text_html(
-                            &payload.plain_text,
-                            &payload.html_content,
-                        );
-                        let _ = room.send(content).await;
-                    }
-                }
-            }
-        }
+            .map_err(|err| {
+                ApiError::service_unavailable(format!("Briefing delivery failed: {err}"))
+            })?;
     }
 
     if let Err(err) = state
@@ -140,7 +143,12 @@ pub async fn trigger_briefing(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
+    use crate::domain::channels::{Channel, PlatformIdentity, PlatformUserId};
+    use crate::interface::channels::fake::FakeAdapter;
+    use crate::interface::channels::registry::ChannelRegistry;
 
     async fn state() -> ApiState {
         let pool = crate::db::pool::test_pool().await;
@@ -166,5 +174,41 @@ mod tests {
         );
         assert!(res.html_content.contains("早安简报"));
         assert!(res.plain_text.contains("早安简报"));
+    }
+
+    #[tokio::test]
+    async fn test_trigger_briefing_delivers_to_default_channel_and_surfaces_failures() {
+        let mut state = state().await;
+        let user = AuthUser::named_seed("@alice:example.org", "acct_alice");
+        let tg = PlatformIdentity::new(
+            Channel::Telegram,
+            PlatformUserId::parse(Channel::Telegram, "777").unwrap(),
+            Some("Alice".into()),
+        );
+        state
+            .services
+            .identity
+            .bind_for_test(&user.account_id, &tg)
+            .await;
+
+        // When the configured channel is disconnected, trigger_briefing must fail
+        // rather than quietly returning 200 OK.
+        let down = Arc::new(FakeAdapter::disconnected(Channel::Telegram));
+        let reg_down = Arc::new(ChannelRegistry::new(vec![down]).unwrap());
+        state.outbound = Some(Arc::downgrade(&reg_down));
+
+        let err = trigger_briefing(State(state.clone()), user.clone())
+            .await
+            .unwrap_err();
+        assert_eq!(err.status, axum::http::StatusCode::SERVICE_UNAVAILABLE);
+
+        // When connected, trigger_briefing delivers through BriefingSendHandler and returns 200.
+        let up = Arc::new(FakeAdapter::connected(Channel::Telegram));
+        let reg_up = Arc::new(ChannelRegistry::new(vec![up.clone()]).unwrap());
+        state.outbound = Some(Arc::downgrade(&reg_up));
+
+        let res = trigger_briefing(State(state), user).await.unwrap();
+        assert!(res.html_content.contains("早安简报"));
+        assert_eq!(up.sent().len(), 1);
     }
 }

@@ -91,13 +91,13 @@ export const RoomsPanel: React.FC = () => {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-2">
         <div>
           <h4 className="text-sm font-semibold text-neutral-900 dark:text-neutral-100 flex items-center gap-2">
-            <span>Matrix Rooms</span>
+            <span>Rooms &amp; Channels</span>
             <span className="text-[11px] font-mono px-2 py-0.5 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400">
               {rooms.length}
             </span>
           </h4>
           <p className="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5">
-            Rooms containing both the bot and your linked Matrix account. Cached in database for instant loading.
+            Rooms and direct channels shared between the bot and your linked accounts.
           </p>
           {lastUpdated && (
             <p className="text-[10px] font-mono text-neutral-400 dark:text-neutral-500 mt-0.5">
@@ -135,7 +135,7 @@ export const RoomsPanel: React.FC = () => {
             type="text"
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            placeholder="Search rooms by name or ID..."
+            placeholder="Search rooms or channels by name or ID..."
             className="w-full pl-9 pr-3 py-1.5 rounded bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 text-xs text-neutral-900 dark:text-neutral-100 placeholder-neutral-400 dark:placeholder-neutral-600 focus:outline-none focus:border-neutral-500 font-sans"
           />
         </div>
@@ -146,16 +146,16 @@ export const RoomsPanel: React.FC = () => {
         {isLoading ? (
           <div className="py-8 flex items-center justify-center gap-2 text-xs font-mono text-neutral-500">
             <Loader2 className="w-4 h-4 animate-spin" />
-            <span>Loading cached rooms...</span>
+            <span>Loading destinations...</span>
           </div>
         ) : filteredRooms.length === 0 ? (
           <div className="py-8 px-4 text-center space-y-2">
             <p className="text-xs font-mono text-neutral-500">
-              {filter ? 'No rooms match your filter.' : 'No rooms synced in database.'}
+              {filter ? 'No destinations match your filter.' : 'No rooms or channels linked yet.'}
             </p>
             {!filter && (
               <p className="text-[11px] text-neutral-400">
-                Click &quot;Sync from Matrix&quot; above to discover rooms shared between the bot and your linked Matrix account.
+                Link a Telegram, Discord, Email, or Matrix account, or click &quot;Sync from Matrix&quot; above if using Matrix.
               </p>
             )}
           </div>

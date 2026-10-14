@@ -10,7 +10,7 @@ use tracing::{debug, warn};
 use super::{message, Outbound, CHANNEL_RETRY};
 use crate::application::portfolio::TriggeredAlert;
 use crate::application::{AppError, AppServices};
-use crate::domain::channels::{Channel, PlatformIdentity};
+use crate::domain::channels::{LinkedIdentity, PlatformIdentity, PlatformUserId};
 use crate::domain::jobs::JobType;
 use crate::domain::portfolio::alerts::{AlertCondition, PriceAlert};
 use crate::interface::channels::message::Target;
@@ -67,6 +67,8 @@ pub fn format_alert_notification(alert: &PriceAlert, current_price_minor: i64) -
     (plain, html)
 }
 
+use std::collections::HashSet;
+
 pub struct CheckAlertsHandler {
     services: AppServices,
     outbound: Arc<dyn Outbound>,
@@ -77,27 +79,100 @@ impl CheckAlertsHandler {
         Self { services, outbound }
     }
 
-    /// DMs every linked Matrix identity (an alert carries no originating conversation, so there is no other channel to prefer); a failed send is logged and skipped. The
-    /// alert is already marked triggered, so nothing here may fail the job
-    /// into a retry that would double-notify.
-    pub(crate) async fn notify(&self, hit: &TriggeredAlert, mxids: Vec<String>) {
+    /// Whether `owner` can receive an alert right now: either they have at
+    /// least one linked identity on a connected channel, or they have no
+    /// linked identities on any channel configured on this deployment (web-only).
+    pub(crate) async fn is_owner_ready(
+        &self,
+        owner: &crate::domain::accounts::AccountId,
+    ) -> Result<bool, AppError> {
+        let identities = self.services.identity.list(owner).await?;
+        let configured: Vec<_> = identities
+            .into_iter()
+            .filter(|id| self.outbound.is_configured(id.channel))
+            .collect();
+        Ok(configured.is_empty()
+            || configured
+                .iter()
+                .any(|id| self.outbound.is_connected(id.channel)))
+    }
+
+    /// Partitions the owners of active alerts on `symbol` into those ready to
+    /// be evaluated now and whether any owner had to be deferred because all
+    /// of their configured channel identities are currently disconnected.
+    pub(crate) async fn ready_owners_for_symbol(
+        &self,
+        symbol: &str,
+    ) -> Result<(HashSet<crate::domain::accounts::AccountId>, bool), AppError> {
+        let alerts = self
+            .services
+            .portfolio
+            .list_active_alerts_for_symbol(symbol)
+            .await?;
+        let mut ready = HashSet::new();
+        let mut deferred = HashSet::new();
+        for alert in alerts {
+            let owner = alert.owner_id;
+            if ready.contains(&owner) || deferred.contains(&owner) {
+                continue;
+            }
+            if self.is_owner_ready(&owner).await? {
+                ready.insert(owner);
+            } else {
+                deferred.insert(owner);
+            }
+        }
+        let any_deferred = !deferred.is_empty();
+        Ok((ready, any_deferred))
+    }
+
+    /// DMs every linked identity on a connected channel; a failed send is
+    /// logged and skipped. The alert is already marked triggered, so nothing
+    /// here may fail the job into a retry that would double-notify.
+    pub(crate) async fn notify_identities(
+        &self,
+        hit: &TriggeredAlert,
+        identities: Vec<LinkedIdentity>,
+    ) {
         let (plain, html) = format_alert_notification(&hit.alert, hit.price_minor);
-        for mxid in mxids {
-            let identity = match PlatformIdentity::matrix(&mxid) {
-                Ok(identity) => identity,
+        for linked in identities {
+            if !self.outbound.is_configured(linked.channel)
+                || !self.outbound.is_connected(linked.channel)
+            {
+                continue;
+            }
+            let user_id = match PlatformUserId::parse(linked.channel, &linked.user_id) {
+                Ok(id) => id,
                 Err(err) => {
-                    warn!(%mxid, error = %err, "Alert DM not sent");
+                    warn!(channel = %linked.channel, user_id = %linked.user_id, error = %err, "Alert DM not sent");
                     continue;
                 }
             };
+            let identity = PlatformIdentity::new(linked.channel, user_id, linked.display_name);
             if let Err(err) = self
                 .outbound
                 .send(message(Target::Direct(identity), &plain, &html))
                 .await
             {
-                warn!(%mxid, error = %err, "Alert DM not sent");
+                warn!(channel = %linked.channel, user_id = %linked.user_id, error = %err, "Alert DM not sent");
             }
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn notify(&self, hit: &TriggeredAlert, mxids: Vec<String>) {
+        let identities = mxids
+            .into_iter()
+            .map(|mxid| {
+                LinkedIdentity::new(
+                    crate::domain::channels::Channel::Matrix,
+                    mxid,
+                    None,
+                    chrono::Utc::now(),
+                )
+            })
+            .collect();
+        self.notify_identities(hit, identities).await;
     }
 }
 
@@ -109,26 +184,75 @@ impl JobHandler for CheckAlertsHandler {
 
     async fn run(&self, _ctx: &JobContext, _payload: serde_json::Value) -> Result<(), JobError> {
         // Checked before evaluating: an alert is marked triggered before its
-        // DM (the idempotency guard), so evaluating while Matrix is down
-        // would consume alerts nobody is told about.
-        if !self.outbound.is_connected(Channel::Matrix) {
+        // DM (the idempotency guard), so evaluating while all configured
+        // channels are down would consume alerts nobody is told about.
+        if !self.outbound.is_ready_for_alerts() {
             return Err(JobError::Unavailable(CHANNEL_RETRY));
         }
         let symbols = self.services.portfolio.list_active_alert_symbols().await?;
         let portfolio = self.services.portfolio.clone();
-        self.check_symbols(symbols, |symbol| {
+        self.evaluate_symbols(symbols, |symbol, ready_owners| {
             let portfolio = portfolio.clone();
-            async move { portfolio.trigger_symbol_alerts(&symbol).await }
+            async move {
+                portfolio
+                    .trigger_symbol_alerts_for_owners(&symbol, &ready_owners)
+                    .await
+            }
         })
         .await
     }
 }
 
 impl CheckAlertsHandler {
+    /// Evaluates one symbol at a time for owners whose channels are ready,
+    /// sends its DMs before the next symbol's price is fetched, and defers
+    /// if any active alert's owner is waiting on a disconnected channel.
+    pub(crate) async fn evaluate_symbols<F, Fut>(
+        &self,
+        symbols: Vec<String>,
+        mut trigger_ready: F,
+    ) -> Result<(), JobError>
+    where
+        F: FnMut(String, HashSet<crate::domain::accounts::AccountId>) -> Fut,
+        Fut: Future<Output = Result<Vec<TriggeredAlert>, AppError>>,
+    {
+        if !self.outbound.is_ready_for_alerts() {
+            return Err(JobError::Unavailable(CHANNEL_RETRY));
+        }
+        let mut any_deferred = false;
+        for symbol in symbols {
+            let (ready_owners, symbol_deferred) = self.ready_owners_for_symbol(&symbol).await?;
+            any_deferred |= symbol_deferred;
+            if ready_owners.is_empty() {
+                continue;
+            }
+            for hit in trigger_ready(symbol, ready_owners).await? {
+                self.notify_hit(&hit).await;
+            }
+        }
+        if any_deferred {
+            return Err(JobError::Unavailable(CHANNEL_RETRY));
+        }
+        Ok(())
+    }
+
+    async fn notify_hit(&self, hit: &TriggeredAlert) {
+        let owner = &hit.alert.owner_id;
+        let identities = match self.services.identity.list(owner).await {
+            Ok(ids) => ids,
+            Err(err) => {
+                warn!(%owner, error = %err, "Could not read linked identities for an alert");
+                Vec::new()
+            }
+        };
+        self.notify_identities(hit, identities).await;
+    }
+
     /// Evaluates one symbol at a time and sends its DMs before the next
     /// symbol's price is fetched: a timeout or shutdown mid-check (with a
     /// single attempt) then loses at most the symbol in flight, not alerts
     /// already marked for earlier ones.
+    #[cfg(test)]
     pub(crate) async fn check_symbols<F, Fut>(
         &self,
         symbols: Vec<String>,
@@ -140,20 +264,7 @@ impl CheckAlertsHandler {
     {
         for symbol in symbols {
             for hit in trigger(symbol).await? {
-                let owner = &hit.alert.owner_id;
-                let mxids = match self
-                    .services
-                    .identity
-                    .user_ids(owner, Channel::Matrix)
-                    .await
-                {
-                    Ok(mxids) => mxids,
-                    Err(err) => {
-                        warn!(%owner, error = %err, "Could not read linked identities for an alert");
-                        Vec::new()
-                    }
-                };
-                self.notify(&hit, mxids).await;
+                self.notify_hit(&hit).await;
             }
         }
         Ok(())
@@ -199,6 +310,7 @@ mod tests {
 
     use super::*;
     use crate::domain::accounts::AccountId;
+    use crate::domain::channels::Channel;
     use crate::domain::jobs::JobId;
     use crate::domain::portfolio::alerts::AlertCondition;
     use crate::interface::channels::adapter::ChannelError;
@@ -319,6 +431,46 @@ mod tests {
         assert!(dms[0].1.contains("Price Alert: AAPL"));
     }
 
+    #[tokio::test]
+    async fn a_triggered_alert_is_sent_to_non_matrix_linked_identities() {
+        let (s, o) = services(&["acct_pf_h_tg_dm"]).await;
+        let tg = PlatformIdentity::new(
+            Channel::Telegram,
+            PlatformUserId::parse(Channel::Telegram, "555666").unwrap(),
+            Some("Trader".into()),
+        );
+        let email = PlatformIdentity::new(
+            Channel::Email,
+            PlatformUserId::parse(Channel::Email, "trader@example.com").unwrap(),
+            None,
+        );
+        s.identity.bind_for_test(&o[0], &tg).await;
+        s.identity.bind_for_test(&o[0], &email).await;
+
+        let fake = FakeOutbound::connected();
+        let handler = CheckAlertsHandler::new(s, fake.clone());
+        let owner = o[0];
+
+        let out = handler
+            .check_symbols(vec!["AAPL".into()], move |_| {
+                let mut hit = alert("above", 20_000);
+                hit.owner_id = owner;
+                async move {
+                    Ok(vec![TriggeredAlert {
+                        alert: hit,
+                        price_minor: 21_000,
+                    }])
+                }
+            })
+            .await;
+
+        assert!(out.is_ok(), "{out:?}");
+        let dms = fake.dms();
+        let mut to: Vec<&str> = dms.iter().map(|d| d.0.as_str()).collect();
+        to.sort_unstable();
+        assert_eq!(to, ["555666", "trader@example.com"]);
+    }
+
     /// The DMs for symbol A are out before symbol B is even evaluated, so a
     /// timeout or shutdown during B cannot lose A's already-marked alerts.
     #[tokio::test]
@@ -401,5 +553,149 @@ mod tests {
         let out = handler.run(&ctx(None), serde_json::json!({})).await;
 
         assert!(matches!(out, Err(JobError::Permanent(_))), "{out:?}");
+    }
+
+    #[tokio::test]
+    async fn matrix_only_owner_waits_when_matrix_is_down_and_telegram_is_up() {
+        let (s, o) = services(&["acct_pf_mx_only", "acct_pf_tg_ready"]).await;
+        let mx_owner = o[0];
+        let tg_owner = o[1];
+
+        let mx_id = PlatformIdentity::matrix("@mx_only:test").unwrap();
+        let tg_id = PlatformIdentity::new(
+            Channel::Telegram,
+            PlatformUserId::parse(Channel::Telegram, "888999").unwrap(),
+            Some("TgUser".into()),
+        );
+        s.identity.bind_for_test(&mx_owner, &mx_id).await;
+        s.identity.bind_for_test(&tg_owner, &tg_id).await;
+
+        let mx_alert = s
+            .portfolio
+            .create_alert(&mx_owner, "AAPL", 20_000, "USD", 2, AlertCondition::Above)
+            .await
+            .unwrap();
+        let tg_alert = s
+            .portfolio
+            .create_alert(&tg_owner, "AAPL", 20_000, "USD", 2, AlertCondition::Above)
+            .await
+            .unwrap();
+
+        let fake = FakeOutbound::with_states([(Channel::Matrix, false), (Channel::Telegram, true)]);
+        let handler = CheckAlertsHandler::new(s.clone(), fake.clone());
+        let portfolio = s.portfolio.clone();
+
+        let out = handler
+            .evaluate_symbols(vec!["AAPL".into()], move |symbol, ready_owners| {
+                let portfolio = portfolio.clone();
+                async move {
+                    let mut hits = Vec::new();
+                    portfolio
+                        .trigger_alerts_for_quote_for_owners(
+                            &symbol,
+                            "USD",
+                            210.0,
+                            Some(&ready_owners),
+                            &mut hits,
+                        )
+                        .await?;
+                    Ok(hits)
+                }
+            })
+            .await;
+
+        // The job defers because the Matrix-only owner's channel is down.
+        assert!(
+            matches!(out, Err(JobError::Unavailable(d)) if d == CHANNEL_RETRY),
+            "{out:?}"
+        );
+        // The Telegram owner's alert was evaluated, marked triggered, and DM'd.
+        let dms = fake.dms();
+        assert_eq!(dms.len(), 1);
+        assert_eq!(dms[0].0, "888999");
+        assert!(
+            s.portfolio
+                .find_alert(&tg_owner, tg_alert.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .is_triggered,
+            "Telegram owner's alert must be marked triggered"
+        );
+        // The Matrix-only owner's alert must NOT be marked triggered while Matrix is down.
+        assert!(
+            !s.portfolio
+                .find_alert(&mx_owner, mx_alert.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .is_triggered,
+            "Matrix-only owner's alert must remain active until Matrix reconnects"
+        );
+    }
+
+    #[tokio::test]
+    async fn telegram_linked_owner_on_deployment_without_telegram_falls_back_to_web() {
+        let (s, o) = services(&["acct_pf_unconf_tg"]).await;
+        let owner = o[0];
+
+        let tg_id = PlatformIdentity::new(
+            Channel::Telegram,
+            PlatformUserId::parse(Channel::Telegram, "777888").unwrap(),
+            Some("OldTg".into()),
+        );
+        s.identity.bind_for_test(&owner, &tg_id).await;
+
+        let created = s
+            .portfolio
+            .create_alert(&owner, "AAPL", 20_000, "USD", 2, AlertCondition::Above)
+            .await
+            .unwrap();
+
+        // Deployment has only Matrix configured (Telegram is disabled).
+        let fake = FakeOutbound::with_configured([Channel::Matrix]);
+        let handler = CheckAlertsHandler::new(s.clone(), fake.clone());
+        let portfolio = s.portfolio.clone();
+
+        let out = handler
+            .evaluate_symbols(vec!["AAPL".into()], move |symbol, ready_owners| {
+                let portfolio = portfolio.clone();
+                async move {
+                    let mut hits = Vec::new();
+                    portfolio
+                        .trigger_alerts_for_quote_for_owners(
+                            &symbol,
+                            "USD",
+                            210.0,
+                            Some(&ready_owners),
+                            &mut hits,
+                        )
+                        .await?;
+                    Ok(hits)
+                }
+            })
+            .await;
+
+        assert!(out.is_ok(), "{out:?}");
+        assert!(fake.dms().is_empty());
+        assert!(
+            s.portfolio
+                .find_alert(&owner, created.id)
+                .await
+                .unwrap()
+                .unwrap()
+                .is_triggered,
+            "Alert for owner with only unconfigured channel identity falls back to web and triggers"
+        );
+        assert!(
+            crate::infrastructure::postgres::repositories::outbox::event_types_for(
+                s.portfolio.pool(),
+                &owner
+            )
+            .await
+            .unwrap()
+            .contains(&"PortfolioAlertTriggered".to_string()),
+            "PortfolioAlertTriggered published to outbox for web delivery"
+        );
     }
 }

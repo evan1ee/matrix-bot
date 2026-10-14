@@ -119,12 +119,12 @@ impl<'a> RoomTarget<'a> {
     }
 }
 
-/// Resolves a loosely named room against the cache: an exact name (ignoring
-/// case) or room id first, then a name containing `query`.
+/// Resolves a loosely named room or destination against `rooms`: an exact name
+/// (ignoring case) or room id first, then a name containing `query`.
 ///
-/// Falls back to [`WEB_ROOM`] when nothing matches so an unmatched name or
-/// cross-channel address (`email:…`, `telegram:…`) is never stored as a
-/// deliverable target.
+/// Falls back to [`WEB_ROOM`] when nothing in `rooms` matches so an unknown
+/// name or unlinked cross-channel address (`email:…`, `telegram:…`) is never
+/// stored as a deliverable target.
 pub fn match_named<'a>(query: &'a str, rooms: &'a [CachedRoom]) -> &'a str {
     let wanted = query.to_lowercase();
     let exact = rooms

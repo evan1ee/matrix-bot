@@ -17,30 +17,44 @@ use std::sync::Arc;
 /// for this process (that would be 1970), so it is safe to reserve.
 const NEVER: i64 = 0;
 
+/// Sentinel meaning the Matrix adapter is disabled for this deployment, so
+/// `/health/ready` treats Matrix sync as vacuous (`ok: true`, `last_sync_at: None`).
+const DISABLED: i64 = -1;
+
 /// When the Matrix sync loop last completed a sync. Written by the sync loop,
 /// read by `/health/ready`. Cheap to clone; lock-free.
 #[derive(Clone, Default, Debug)]
 pub struct SyncHealth(Arc<AtomicI64>);
 
 impl SyncHealth {
+    /// Marks Matrix sync as disabled for this deployment.
+    pub fn mark_disabled(&self) {
+        self.0.store(DISABLED, Ordering::Relaxed);
+    }
+
     /// Records that a sync completed at `at`.
     pub fn record_sync(&self, at: DateTime<Utc>) {
         self.0.store(at.timestamp_millis(), Ordering::Relaxed);
     }
 
-    /// The last recorded sync time, or `None` if a sync has never completed.
+    /// The last recorded sync time, or `None` if a sync has never completed
+    /// (or Matrix is disabled).
     pub fn last_sync(&self) -> Option<DateTime<Utc>> {
         let millis = self.0.load(Ordering::Relaxed);
-        if millis == NEVER {
+        if millis <= NEVER {
             return None;
         }
         DateTime::from_timestamp_millis(millis)
     }
 
-    /// Pure: whether the last sync is within `max_age` of `now`.
+    /// Pure: whether the last sync is within `max_age` of `now`, or `true` when
+    /// Matrix is disabled.
     ///
-    /// `false` when a sync has never completed.
+    /// `false` when Matrix is enabled and a sync has never completed.
     pub fn is_fresh(&self, now: DateTime<Utc>, max_age: Duration) -> bool {
+        if self.0.load(Ordering::Relaxed) == DISABLED {
+            return true;
+        }
         match self.last_sync() {
             Some(last) => now.signed_duration_since(last) <= max_age,
             None => false,
@@ -58,6 +72,15 @@ mod tests {
 
         assert_eq!(health.last_sync(), None);
         assert!(!health.is_fresh(Utc::now(), Duration::seconds(120)));
+    }
+
+    #[test]
+    fn disabled_has_no_last_sync_and_is_always_fresh() {
+        let health = SyncHealth::default();
+        health.mark_disabled();
+
+        assert_eq!(health.last_sync(), None);
+        assert!(health.is_fresh(Utc::now(), Duration::seconds(120)));
     }
 
     #[test]

@@ -157,6 +157,13 @@ impl IdentityService {
             .await
             .unwrap()
     }
+
+    #[cfg(test)]
+    pub async fn bind_for_test(&self, account: &AccountId, identity: &PlatformIdentity) {
+        identities::bind(&self.pool, account, identity)
+            .await
+            .unwrap();
+    }
 }
 
 #[cfg(test)]

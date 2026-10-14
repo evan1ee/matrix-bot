@@ -76,3 +76,33 @@ test('an unknown event type is ignored, and later events still arrive', async ({
   await expect(todoRow(app, 'After the unknown one')).toBeVisible({ timeout: 20_000 });
   expect(errors).toEqual([]);
 });
+
+test('in-app toast notifications appear for ReminderTriggered, MorningBriefingSent, and PortfolioAlertTriggered', async ({
+  app,
+  api,
+}) => {
+  await gotoApp(app, TAB.todo);
+
+  api.pushEvent('ReminderTriggered', {
+    id: 77,
+    room_id: 'web',
+    owner_id: 'acct_00000000000000000000000000000001',
+    message: 'Take a walk outside',
+  });
+  api.pushEvent('MorningBriefingSent', {
+    owner_id: 'acct_00000000000000000000000000000001',
+    summary: '2 tasks, 1 habit, 0 bills, 1 holding',
+  });
+  api.pushEvent('PortfolioAlertTriggered', {
+    id: 12,
+    owner_id: 'acct_00000000000000000000000000000001',
+    symbol: 'NVDA',
+  });
+
+  await expect(app.getByText('Reminder Alert', { exact: true })).toBeVisible({ timeout: 20_000 });
+  await expect(app.getByText('Take a walk outside')).toBeVisible();
+  await expect(app.getByText('Morning Briefing', { exact: true })).toBeVisible();
+  await expect(app.getByText('2 tasks, 1 habit, 0 bills, 1 holding')).toBeVisible();
+  await expect(app.getByText('Price Alert Triggered', { exact: true })).toBeVisible();
+  await expect(app.getByText('Price alert triggered for NVDA.')).toBeVisible();
+});
