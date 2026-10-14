@@ -18,7 +18,7 @@ jobs:
   build-release:
     name: Build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.allow_failure || false }}
+    continue-on-error: ${{ matrix.allow_failure || (github.server_url != 'https://github.com' && matrix.os != 'ubuntu-latest') }}
     strategy:
       fail-fast: false
       matrix:
@@ -108,10 +108,23 @@ jobs:
 
       - name: Publish to GitHub Release
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/') || inputs.tag != ''
+        if: (startsWith(github.ref, 'refs/tags/') || inputs.tag != '') && github.server_url == 'https://github.com'
         with:
           tag_name: ${{ inputs.tag != '' && inputs.tag || github.ref_name }}
           files: |
             ${{ matrix.artifact_name }}.${{ matrix.archive_format }}
             ${{ matrix.artifact_name }}.${{ matrix.archive_format }}.sha256
           generate_release_notes: true
+
+      - name: Publish to Gitea Release
+        uses: akkuman/gitea-release-action@v1
+        if: (startsWith(github.ref, 'refs/tags/') || inputs.tag != '') && github.server_url != 'https://github.com'
+        env:
+          NODE_TLS_REJECT_UNAUTHORIZED: '0'
+        with:
+          server_url: ${{ github.server_url }}
+          tag_name: ${{ inputs.tag != '' && inputs.tag || github.ref_name }}
+          name: ${{ inputs.tag != '' && inputs.tag || github.ref_name }}
+          files: |
+            ${{ matrix.artifact_name }}.${{ matrix.archive_format }}
+            ${{ matrix.artifact_name }}.${{ matrix.archive_format }}.sha256
