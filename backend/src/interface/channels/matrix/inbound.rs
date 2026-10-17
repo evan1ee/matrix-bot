@@ -239,10 +239,14 @@ async fn show_reply(
         if let Some(ref owner) = reply.owner_id {
             let room_key = room.room_id().as_str();
             if let Some(ref eid) = sent_eid {
-                services.llm.record_authentic_reply(room_key, eid.as_str(), owner);
+                services
+                    .llm
+                    .record_authentic_reply(room_key, eid.as_str(), owner);
             }
             if let Some(ref eid) = ph_eid {
-                services.llm.record_authentic_reply(room_key, eid.as_str(), owner);
+                services
+                    .llm
+                    .record_authentic_reply(room_key, eid.as_str(), owner);
             }
         }
     }

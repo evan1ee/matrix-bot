@@ -32,22 +32,12 @@ impl LlmService {
     }
 
     /// Records an authentic assistant reply event ID to prevent quote taint.
-    pub fn record_authentic_reply(
-        &self,
-        room_key: &str,
-        event_id: &str,
-        owner_id: &AccountId,
-    ) {
+    pub fn record_authentic_reply(&self, room_key: &str, event_id: &str, owner_id: &AccountId) {
         self.authentic_replies.record(room_key, event_id, *owner_id);
     }
 
     /// Checks if a quoted event ID corresponds to an authentic assistant reply.
-    pub fn is_authentic_reply(
-        &self,
-        room_key: &str,
-        event_id: &str,
-        owner_id: &AccountId,
-    ) -> bool {
+    pub fn is_authentic_reply(&self, room_key: &str, event_id: &str, owner_id: &AccountId) -> bool {
         self.authentic_replies
             .is_authentic(room_key, event_id, owner_id)
     }
@@ -281,4 +271,3 @@ mod tests {
         assert!(!service.is_authentic_reply("!r:x", "$ev2", &owner));
     }
 }
-

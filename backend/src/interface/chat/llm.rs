@@ -499,20 +499,14 @@ mod tests {
         // Record the authentic bot prompt event
         let event_id = "$bot_prompt_event_123:server";
         let room_id = "!room:test";
-        services.llm.record_authentic_reply(room_id, event_id, &owner);
+        services
+            .llm
+            .record_authentic_reply(room_id, event_id, &owner);
 
         let mut prompt_quote = quote("@bot:test", "Delete todo #1? Please confirm.");
         prompt_quote.event_id = Some(event_id.to_string());
 
-        ask(
-            &services,
-            &pool,
-            &url,
-            &owner,
-            "yes",
-            Some(&prompt_quote),
-        )
-        .await;
+        ask(&services, &pool, &url, &owner, "yes", Some(&prompt_quote)).await;
 
         assert!(services
             .todos

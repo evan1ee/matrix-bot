@@ -240,4 +240,3 @@ mod tests {
         assert_eq!(r_priv.owner_id, None);
     }
 }
-

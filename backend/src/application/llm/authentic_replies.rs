@@ -128,7 +128,8 @@ mod tests {
         assert!(!tracker.is_authentic("!room2:server", "$event1", &owner)); // wrong room
         assert!(!tracker.is_authentic("!room1:server", "$event2", &owner)); // wrong event
         let other_owner = AccountId::generate();
-        assert!(!tracker.is_authentic("!room1:server", "$event1", &other_owner)); // wrong owner
+        assert!(!tracker.is_authentic("!room1:server", "$event1", &other_owner));
+        // wrong owner
     }
 
     #[test]

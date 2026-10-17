@@ -69,8 +69,8 @@ Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in sequence:
 
 - Tech-debt register: [reviews/2026-10-10-tech-debt-audit.md](reviews/2026-10-10-tech-debt-audit.md). Phases 0 and 1 are done (except TD-05 beyond the admin module). Phase 2 next: TD-10 (reqwest 0.12, own branch), TD-13.
 
-1. **Quote-Based AI Confirmation Without Taint:**
-   - Every quoted message currently taints the AI turn (including quotes of the bot's own messages, since webhook alerts and notices also come from the bot account). Users confirming a sensitive action in clients that auto-quote replies must send an unquoted message. To allow quote-based confirmation safely, track authentic AI reply event IDs (in-memory bounded set or an `ai_reply_messages` table).
+1. **Quote-Based AI Confirmation Without Taint (Fixed):**
+   - Implemented authentic AI reply tracking via in-memory bounded cache (`AiReplyTracker`) in `LlmService`. Sent AI response message IDs are recorded by channel adapters (Matrix `show_reply` capturing both placeholder and replacement event IDs, and Telegram worker). Inbound quotes are verified against `(room_key, event_id, owner_id)`. Quoting genuine AI confirmation prompts avoids turn taint and allows held action execution without infinite confirmation loops, while webhook alerts, foreign messages, and cross-room/cross-owner quotes strictly remain tainted.
 
 2. **Deep Procedural Pipelines for Built-in Agent Tasks (`backend/src/domain/agent/task.rs`):**
    - Expand specialized procedural workflows for the 5 built-in task plugins (`WeeklyBookmarkDigestTask`, `MonthlyFinancialAuditTask`, `PortfolioRebalanceAlertTask`, `BillDueDigestTask`, `HabitConsistencyReviewTask`):
@@ -132,6 +132,10 @@ Format: `Ruling: <decision> — <why> — <cost if wrong>`. New rulings go here 
 - *Ruling: Agent approval endpoint `POST /api/v1/agent/approvals/:id/approve` requires `VerifiedUser` and is registered in `SENSITIVE` — aligns the backend with the frontend's `useSensitiveAction` so sensitive AI actions cannot be approved by stale sessions or MCP tokens without a fresh passkey within 5 minutes — cost if wrong: approving an action prompts for passkey verification if the session was verified over 5 minutes ago.*
 - *Ruling: `ScheduledAgentTask::allowed_tools()` defaults to `Some(Vec::new())` (fail-closed) — ensures custom or incomplete task plugins cannot execute unapproved tools in unattended background jobs, and `resume.rs` evaluates tool authorization before committing the started execution marker — cost if wrong: custom tasks must explicitly implement `allowed_tools` if they require tool access.*
 - *Ruling: `ResolvedAiConfig::resolve_effective(...)` is the shared runtime entry point across chat, agent jobs, and API — ensures autonomous agents and UI reflect the admin console's active provider, model, and encrypted vault secrets rather than falling back strictly to environment variables — cost if wrong: none.*
+
+### Rulings (2026-10-17 — Quote-Based AI Confirmation Hardening)
+
+- *Ruling: `AiReplyTracker` verifies authentic AI replies via `(room_key, event_id, owner_id)` tuple and 1-hour TTL — guarantees quoting the bot's own AI prompts does not trigger untrusted input taint or trap users in infinite confirmation loops, while preventing cross-room replay, cross-owner privilege escalation, and untracked webhook alert steering — cost if wrong: quotes from restarts after > 1 hour fall back to requiring unquoted confirmation.*
 
 ---
 

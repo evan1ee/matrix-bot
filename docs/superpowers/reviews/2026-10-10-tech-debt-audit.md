@@ -30,7 +30,7 @@ Evidence came from the code, not from memory: production line counts (lines befo
 | TD-12 | Frontend has no unit tests; large components | Test / code | 2 | 2 | 3 | **12** | 2 | Open |
 | TD-13 | Deferred edge cases: `SyncHealth` parse, briefing window wrap-around | Code | 1 | 2 | 2 | **12** | 2 | Open |
 | TD-14 | 23 `too_many_arguments` sites | Code | 2 | 1 | 3 | **9** | 2 | Open |
-| TD-15 | Any quoted message taints the AI turn, so quote-based confirmation fails | Code / UX | 2 | 1 | 3 | **9** | 3 | Open |
+| TD-15 | Any quoted message taints the AI turn, so quote-based confirmation fails | Code / UX | 2 | 1 | 3 | **9** | 3 | **Done** |
 | TD-16 | Major-version lag: axum 0.7, utoipa 4, tower-http 0.5, thiserror 1 | Dependency | 2 | 2 | 4 | **8** | 3 | Open |
 | TD-17 | Built-in agent tasks are stubs marked `[TODO Extension]` | Code | 2 | 2 | 4 | **8** | 3 | Open |
 
@@ -115,8 +115,8 @@ Each fix needs a regression test that fails first. **Effort:** 2–3 hours.
 **Evidence:** 23 sites, mostly in repository insert functions (`finance/transactions.rs`, `portfolio/trades.rs`, `portfolio/audit.rs`, `provider_secrets.rs`, `knowledge/search.rs`) and chat adapters (`chat/llm.rs`, `chat/ocr`, `chat/voice`, `matrix/attachments.rs`).
 **Fix:** Have repositories take the validated domain command or a `New…` struct that already exists at the boundary, and have chat adapters take a context struct. Do each site when its feature is next touched. **Effort:** spread over time.
 
-### TD-15 — Quote taint blocks quote-based confirmation (9)
-This is HANDOFF Track 2 item 2. Track the event IDs of real AI replies in a bounded store, so that quoting the bot's own AI reply does not taint the turn. Because this touches a security boundary, it needs a spec first. **Effort:** 1–2 days.
+### TD-15 — Quote taint blocks quote-based confirmation (9) (Done 2026-10-17)
+Tracked authentic AI reply event IDs via an in-memory bounded cache (`AiReplyTracker` in `LlmService`) matching `(room_key, event_id, owner_id)` with 1-hour TTL. Quoting genuine AI confirmation questions no longer causes taint, while webhook alerts, foreign messages, and cross-room quotes strictly remain tainted.
 
 ### TD-16 — Major-version lag (8)
 Current versions: `axum 0.7` → 0.8, `utoipa 4` → 5, `tower-http 0.5` → 0.6, `thiserror 1` → 2, `chrono-tz 0.9`, `webpki-roots 0.26`.
@@ -158,7 +158,7 @@ Each phase is sized to run alongside feature work. Every item ships as its own C
 13. **TD-05:** migrate the remaining modules.
 
 ### Phase 3 — planned work items (each needs a spec in `docs/superpowers/specs/`)
-14. **TD-15:** authentic-AI-reply tracking for quote confirmation.
+14. **TD-15:** authentic-AI-reply tracking for quote confirmation (**Done** 2026-10-17).
 15. **TD-16:** the axum, tower-http and utoipa major upgrade.
 16. **TD-17:** procedural pipelines for the built-in agent tasks.
 
