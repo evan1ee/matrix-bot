@@ -486,33 +486,31 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn quoting_an_authentic_ai_reply_does_not_taint_the_turn() {
+    async fn quoting_an_authentic_ai_reply_does_not_taint_and_runs_the_tool() {
         use crate::llm::test_support::*;
         let (pool, owner, todo_id) = pool_with_todo("chat-quote-authentic").await;
         let services = crate::application::AppServices::new(&pool);
         let (url, _seen) = scripted_replies(vec![
             tool_reply("delete_todo", serde_json::json!({"id": todo_id})),
-            text_reply("deleted"),
+            text_reply("Deleted."),
         ])
         .await;
 
+        // Record the authentic bot prompt event
+        let event_id = "$bot_prompt_event_123:server";
         let room_id = "!room:test";
-        let ai_event_id = "$authentic_msg";
-        services.llm.record_authentic_reply(room_id, ai_event_id, &owner);
+        services.llm.record_authentic_reply(room_id, event_id, &owner);
 
-        let authentic_quote = crate::domain::chat::QuotedMessage::new(
-            Some("@bot:test".to_string()),
-            "Do you want me to delete this todo?".to_string(),
-            Some(ai_event_id.to_string()),
-        );
+        let mut prompt_quote = quote("@bot:test", "Delete todo #1? Please confirm.");
+        prompt_quote.event_id = Some(event_id.to_string());
 
         ask(
             &services,
             &pool,
             &url,
             &owner,
-            "yes, proceed",
-            Some(&authentic_quote),
+            "yes",
+            Some(&prompt_quote),
         )
         .await;
 
@@ -522,6 +520,84 @@ mod tests {
             .await
             .unwrap()
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn quoting_authentic_reply_with_wrong_room_or_owner_still_taints() {
+        use crate::llm::test_support::*;
+
+        // 1. Quoting an authentic reply from a different room still taints.
+        {
+            let (pool, owner, todo_id) = pool_with_todo("chat-quote-wrong-room").await;
+            let services = crate::application::AppServices::new(&pool);
+            let (url, _seen) = scripted_replies(vec![
+                tool_reply("delete_todo", serde_json::json!({"id": todo_id})),
+                text_reply("ok"),
+            ])
+            .await;
+
+            let event_id = "$bot_prompt_other_room:server";
+            services
+                .llm
+                .record_authentic_reply("!other_room:server", event_id, &owner);
+
+            let mut quote_wrong_room = quote("@bot:test", "Delete todo #1? Please confirm.");
+            quote_wrong_room.event_id = Some(event_id.to_string());
+
+            ask(
+                &services,
+                &pool,
+                &url,
+                &owner,
+                "yes",
+                Some(&quote_wrong_room),
+            )
+            .await;
+
+            assert!(services
+                .todos
+                .find_owned(&owner, todo_id)
+                .await
+                .unwrap()
+                .is_some());
+        }
+
+        // 2. Quoting an authentic reply recorded for a different owner still taints.
+        {
+            let (pool, owner, todo_id) = pool_with_todo("chat-quote-wrong-owner").await;
+            let services = crate::application::AppServices::new(&pool);
+            let (url, _seen) = scripted_replies(vec![
+                tool_reply("delete_todo", serde_json::json!({"id": todo_id})),
+                text_reply("ok"),
+            ])
+            .await;
+
+            let other_owner = AccountId::from_seed("chat-quote-other-owner");
+            let event_id = "$bot_prompt_other_owner:server";
+            services
+                .llm
+                .record_authentic_reply("!room:test", event_id, &other_owner);
+
+            let mut quote_wrong_owner = quote("@bot:test", "Delete todo #1? Please confirm.");
+            quote_wrong_owner.event_id = Some(event_id.to_string());
+
+            ask(
+                &services,
+                &pool,
+                &url,
+                &owner,
+                "yes",
+                Some(&quote_wrong_owner),
+            )
+            .await;
+
+            assert!(services
+                .todos
+                .find_owned(&owner, todo_id)
+                .await
+                .unwrap()
+                .is_some());
+        }
     }
 
     #[tokio::test]
