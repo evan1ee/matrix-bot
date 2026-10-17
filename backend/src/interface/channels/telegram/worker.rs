@@ -11,12 +11,12 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
 use super::commands::CommandRefusal;
-use super::inbound::{normalize, Normalized, UpdateKind};
+use super::inbound::{normalize, parse_message_ref, Normalized, UpdateKind};
 use super::ingress::RecentUpdates;
 use super::outbound::{bounded, deliver};
 use super::progress::TelegramProgress;
 use super::render::{plan, Plan};
-use crate::interface::channels::adapter::ChannelError;
+use crate::interface::channels::adapter::{ChannelError, SentRef};
 use crate::interface::channels::inbound::{Inbound, InboundOutcome, InboundText};
 use crate::interface::channels::message::IncomingMessage;
 use crate::llm::progress::ProgressSink;
@@ -168,8 +168,29 @@ async fn run_turn(ctx: &WorkerCtx, n: Normalized) {
         wants_progress(&n.text).then(|| Arc::new(TelegramProgress::new(ctx.bot.clone(), chat)));
     let sink = progress.clone().map(|p| p as Arc<dyn ProgressSink>);
     let outcome = dispatch(&ctx.inbound, &n.message, n.text, sink).await;
+    let (is_ai, owner_id) = match &outcome {
+        InboundOutcome::Replied(reply) => (reply.is_ai, reply.owner_id),
+        _ => (false, None),
+    };
     match plan_reply(outcome, in_group) {
-        Ok(Some(plan)) => post(&ctx.bot, &n.kind, plan).await,
+        Ok(Some(plan)) => {
+            if let Some(sent) = post(&ctx.bot, &n.kind, plan).await {
+                if is_ai {
+                    if let Some(owner) = owner_id {
+                        if let Some(ref m_ref) = sent.message {
+                            if let Some((_chat, msg_id)) = parse_message_ref(m_ref) {
+                                let chat_key = n.message.conversation.to_storage();
+                                ctx.inbound.services().llm.record_authentic_reply(
+                                    &chat_key,
+                                    &msg_id.to_string(),
+                                    &owner,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+        }
         Ok(None) => {}
         // A reply Telegram can never carry still gets an answer.
         Err(err) => {
@@ -208,10 +229,14 @@ async fn acknowledge(bot: &Bot, kind: &UpdateKind) {
 }
 
 /// Delivers `plan` as a reply to the triggering message.
-async fn post(bot: &Bot, kind: &UpdateKind, plan: Plan) {
+async fn post(bot: &Bot, kind: &UpdateKind, plan: Plan) -> Option<SentRef> {
     let chat = ChatId(chat_of(kind));
-    if let Err(err) = deliver(bot, chat, Some(message_of(kind)), plan).await {
-        warn!(error = %err, "Could not deliver a Telegram reply");
+    match deliver(bot, chat, Some(message_of(kind)), plan).await {
+        Ok(sent) => Some(sent),
+        Err(err) => {
+            warn!(error = %err, "Could not deliver a Telegram reply");
+            None
+        }
     }
 }
 

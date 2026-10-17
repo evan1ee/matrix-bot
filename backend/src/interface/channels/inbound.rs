@@ -68,6 +68,10 @@ impl Inbound {
         }
     }
 
+    pub fn services(&self) -> &AppServices {
+        &self.services
+    }
+
     pub async fn handle(
         &self,
         msg: &IncomingMessage,
