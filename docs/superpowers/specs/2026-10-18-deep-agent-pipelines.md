@@ -142,7 +142,7 @@ Delivered OutgoingMessage (Text + Voice Note via Outbound)
 
 ### 3.4 Capability 4: Deterministic Bill Due & Cash Flow Adequacy Analysis
 
-- **Module:** `backend/src/domain/bills/due.rs`
+- **Module:** `backend/src/domain/recurring_bills/due.rs`
 - **Domain Types:**
   ```rust
   #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

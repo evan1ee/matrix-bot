@@ -15,8 +15,8 @@
 - Modify: `backend/src/domain/portfolio/mod.rs`
 - Create: `backend/src/domain/finance/audit.rs`
 - Modify: `backend/src/domain/finance/mod.rs`
-- Create: `backend/src/domain/bills/due.rs`
-- Modify: `backend/src/domain/bills/mod.rs`
+- Create: `backend/src/domain/recurring_bills/due.rs`
+- Modify: `backend/src/domain/recurring_bills/mod.rs`
 - Create: `backend/src/domain/habits/consistency.rs`
 - Modify: `backend/src/domain/habits/mod.rs`
 
@@ -31,7 +31,7 @@
 - [ ] **Step 1: Write unit tests for pure domain functions (TDD RED)**
 - [ ] **Step 2: Implement domain data structures and pure functions (TDD GREEN)**
 - [ ] **Step 3: Verify all unit tests pass**
-  - Run: `cargo test -p matrix-bot domain::portfolio::rebalance domain::finance::audit domain::bills::due domain::habits::consistency`
+  - Run: `cargo test -p matrix-bot domain::portfolio::rebalance domain::finance::audit domain::recurring_bills::due domain::habits::consistency`
 - [ ] **Step 4: Commit**
   - Message: `feat(domain): implement deterministic calculation engines for agent task pipelines`
 
