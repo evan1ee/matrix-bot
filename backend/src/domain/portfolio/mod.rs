@@ -2,6 +2,7 @@ pub mod alerts;
 pub mod audit;
 pub mod history;
 pub mod models;
+pub mod rebalance;
 
 use chrono::{DateTime, Utc};
 use thiserror::Error;
@@ -13,6 +14,9 @@ pub use models::{
     build_summaries, cost_of, normalise_symbol, realized_pl_minor, weighted_avg_cost_minor,
     BuyOutcome, CashBalance, Holding, PortfolioCurrencySummary, SellOutcome, WithdrawOutcome,
     QUANTITY_EXPONENT,
+};
+pub use rebalance::{
+    evaluate_portfolio_drift, AssetAllocationDrift, PortfolioDriftReport, RebalanceAction,
 };
 
 /// Maximum allowed length for a holding's note.

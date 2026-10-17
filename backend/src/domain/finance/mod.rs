@@ -4,6 +4,7 @@
 //! and sharing without dependencies on transports or database frameworks.
 
 pub mod analytics;
+pub mod audit;
 pub mod fx;
 pub mod money;
 pub mod net_worth;
@@ -11,6 +12,8 @@ pub mod receipt;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+
+pub use audit::{evaluate_monthly_audit, CategorySpendingAnalysis, MonthlyAuditReport};
 
 use crate::domain::accounts::AccountId;
 use crate::domain::storage::StorageKey;

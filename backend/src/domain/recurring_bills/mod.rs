@@ -1,7 +1,11 @@
 //! Recurring bills domain entities, value objects and invariants.
 
+pub mod due;
+
 use chrono::{DateTime, Duration, Months, NaiveDateTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
+
+pub use due::{evaluate_bill_cash_adequacy, BillDueAnalysis, BillUrgency, CashFlowAdequacyReport};
 
 use crate::domain::accounts::AccountId;
 

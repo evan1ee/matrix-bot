@@ -2,10 +2,16 @@
 //!
 //! Depends only on std, chrono, serde, and thiserror.
 
+pub mod consistency;
+
 use std::collections::HashSet;
 
 use chrono::{Duration, NaiveDate};
 use serde::{Deserialize, Serialize};
+
+pub use consistency::{
+    evaluate_habit_consistency, HabitConsistencyItem, HabitConsistencyReport, HabitTrend,
+};
 
 use crate::domain::accounts::AccountId;
 
