@@ -124,22 +124,113 @@ pub fn create_commands() -> Vec<CreateCommand> {
         .iter()
         .map(|spec| {
             let max = u16::try_from(spec.max_length).unwrap_or(u16::MAX);
-            CreateCommand::new(spec.name)
+            let mut cmd = CreateCommand::new(spec.name)
                 .description(spec.description)
-                .dm_permission(true)
-                .add_option(
-                    CreateCommandOption::new(
-                        CommandOptionType::String,
-                        spec.option,
-                        if spec.required {
-                            "What to ask"
-                        } else {
-                            "Arguments, as after the command on Matrix"
-                        },
-                    )
-                    .required(spec.required)
-                    .max_length(max),
-                )
+                .dm_permission(true);
+
+            match spec.name {
+                "todo" => {
+                    cmd = cmd
+                        .add_option(
+                            CreateCommandOption::new(
+                                CommandOptionType::SubCommand,
+                                "add",
+                                "Add a todo item",
+                            )
+                            .add_sub_option(
+                                CreateCommandOption::new(
+                                    CommandOptionType::String,
+                                    "task",
+                                    "Task description",
+                                )
+                                .required(true)
+                                .max_length(max),
+                            ),
+                        )
+                        .add_option(
+                            CreateCommandOption::new(
+                                CommandOptionType::SubCommand,
+                                "done",
+                                "Mark a todo item as completed",
+                            )
+                            .add_sub_option(
+                                CreateCommandOption::new(
+                                    CommandOptionType::Integer,
+                                    "id",
+                                    "Todo item ID",
+                                )
+                                .required(true)
+                                .min_int_value(1),
+                            ),
+                        )
+                        .add_option(
+                            CreateCommandOption::new(
+                                CommandOptionType::SubCommand,
+                                "list",
+                                "List todo items",
+                            )
+                            .add_sub_option(
+                                CreateCommandOption::new(
+                                    CommandOptionType::Integer,
+                                    "page",
+                                    "Page number",
+                                )
+                                .required(false)
+                                .min_int_value(1),
+                            ),
+                        );
+                }
+                "expense" => {
+                    cmd = cmd
+                        .add_option(
+                            CreateCommandOption::new(
+                                CommandOptionType::SubCommand,
+                                "add",
+                                "Record an expense",
+                            )
+                            .add_sub_option(
+                                CreateCommandOption::new(
+                                    CommandOptionType::String,
+                                    "amount",
+                                    "Expense amount, e.g. 12.50",
+                                )
+                                .required(true)
+                                .max_length(max),
+                            )
+                            .add_sub_option(
+                                CreateCommandOption::new(
+                                    CommandOptionType::String,
+                                    "note",
+                                    "Expense note or description",
+                                )
+                                .required(true)
+                                .max_length(max),
+                            ),
+                        )
+                        .add_option(CreateCommandOption::new(
+                            CommandOptionType::SubCommand,
+                            "list",
+                            "List recent expenses",
+                        ));
+                }
+                _ => {
+                    cmd = cmd.add_option(
+                        CreateCommandOption::new(
+                            CommandOptionType::String,
+                            spec.option,
+                            if spec.required {
+                                "What to ask"
+                            } else {
+                                "Arguments, as after the command on Matrix"
+                            },
+                        )
+                        .required(spec.required)
+                        .max_length(max),
+                    );
+                }
+            }
+
+            cmd
         })
         .collect()
 }
@@ -205,6 +296,47 @@ mod tests {
         assert_eq!(ask["options"][0]["required"], true);
         assert_eq!(ask["options"][0]["max_length"], 4000);
         assert_eq!(ask["dm_permission"], true);
+    }
+
+    #[test]
+    fn registration_builders_register_subcommands_for_todo_and_expense() {
+        let json = serde_json::to_value(create_commands()).unwrap();
+        let commands = json.as_array().unwrap();
+
+        let todo = commands.iter().find(|c| c["name"] == "todo").unwrap();
+        let todo_opts = todo["options"].as_array().unwrap();
+        assert_eq!(todo_opts.len(), 3);
+        assert_eq!(todo_opts[0]["name"], "add");
+        assert_eq!(todo_opts[0]["type"], 1); // SubCommand
+        assert_eq!(todo_opts[0]["options"][0]["name"], "task");
+        assert_eq!(todo_opts[0]["options"][0]["type"], 3); // String
+        assert_eq!(todo_opts[0]["options"][0]["required"], true);
+        assert_eq!(todo_opts[1]["name"], "done");
+        assert_eq!(todo_opts[1]["type"], 1);
+        assert_eq!(todo_opts[1]["options"][0]["name"], "id");
+        assert_eq!(todo_opts[1]["options"][0]["type"], 4); // Integer
+        assert_eq!(todo_opts[1]["options"][0]["required"], true);
+        assert_eq!(todo_opts[1]["options"][0]["min_value"], 1.0);
+        assert_eq!(todo_opts[2]["name"], "list");
+        assert_eq!(todo_opts[2]["type"], 1);
+        assert_eq!(todo_opts[2]["options"][0]["name"], "page");
+        assert_eq!(todo_opts[2]["options"][0]["type"], 4); // Integer
+        assert_eq!(todo_opts[2]["options"][0]["required"], false);
+        assert_eq!(todo_opts[2]["options"][0]["min_value"], 1.0);
+
+        let expense = commands.iter().find(|c| c["name"] == "expense").unwrap();
+        let expense_opts = expense["options"].as_array().unwrap();
+        assert_eq!(expense_opts.len(), 2);
+        assert_eq!(expense_opts[0]["name"], "add");
+        assert_eq!(expense_opts[0]["type"], 1);
+        assert_eq!(expense_opts[0]["options"][0]["name"], "amount");
+        assert_eq!(expense_opts[0]["options"][0]["type"], 3);
+        assert_eq!(expense_opts[0]["options"][0]["required"], true);
+        assert_eq!(expense_opts[0]["options"][1]["name"], "note");
+        assert_eq!(expense_opts[0]["options"][1]["type"], 3);
+        assert_eq!(expense_opts[0]["options"][1]["required"], true);
+        assert_eq!(expense_opts[1]["name"], "list");
+        assert_eq!(expense_opts[1]["type"], 1);
     }
 
     #[test]

@@ -2,10 +2,11 @@
 //! network, no services, so it is tested against fixtures alone.
 
 use serenity::all::{
-    CommandDataOptionValue, CommandInteraction, ComponentInteraction, Member, Message, User,
+    CommandDataOption, CommandDataOptionValue, CommandInteraction, ComponentInteraction, Member,
+    Message, User,
 };
 
-use super::commands::{inbound_text, CommandRefusal};
+use super::commands::{inbound_text, CommandRefusal, ARGS_MAX};
 use crate::domain::channels::{Channel, ConversationAddress, PlatformIdentity, PlatformUserId};
 use crate::interface::channels::inbound::InboundText;
 use crate::interface::channels::message::{IncomingMessage, MessageRef};
@@ -19,15 +20,29 @@ pub struct Parsed {
 /// when it came from a DM; `is_mentioned` always (a slash command addresses
 /// the bot, B12).
 pub fn from_command(interaction: &CommandInteraction) -> Result<Parsed, CommandRefusal> {
-    let value = interaction
+    let text = if let Some((sub_name, sub_opts)) = interaction
         .data
         .options
         .iter()
         .find_map(|option| match &option.value {
-            CommandDataOptionValue::String(s) => Some(s.as_str()),
+            CommandDataOptionValue::SubCommand(sub_opts) => {
+                Some((option.name.as_str(), sub_opts.as_slice()))
+            }
             _ => None,
-        });
-    let text = inbound_text(&interaction.data.name, value)?;
+        })
+    {
+        parse_subcommand(&interaction.data.name, sub_name, sub_opts)?
+    } else {
+        let value = interaction
+            .data
+            .options
+            .iter()
+            .find_map(|option| match &option.value {
+                CommandDataOptionValue::String(s) => Some(s.as_str()),
+                _ => None,
+            });
+        inbound_text(&interaction.data.name, value)?
+    };
     let sender = identity(&interaction.user, interaction.member.as_deref())
         .ok_or_else(|| CommandRefusal::Unknown(interaction.data.name.clone()))?;
     let message = IncomingMessage {
@@ -42,6 +57,123 @@ pub fn from_command(interaction: &CommandInteraction) -> Result<Parsed, CommandR
         is_mentioned: true,
     };
     Ok(Parsed { message, text })
+}
+
+fn parse_subcommand(
+    command_name: &str,
+    sub_name: &str,
+    sub_opts: &[CommandDataOption],
+) -> Result<InboundText, CommandRefusal> {
+    match command_name {
+        "todo" => match sub_name {
+            "add" => {
+                let task = sub_opts
+                    .iter()
+                    .find_map(|opt| match &opt.value {
+                        CommandDataOptionValue::String(s) if opt.name == "task" => {
+                            Some(s.as_str().trim())
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                if task.chars().count() > ARGS_MAX {
+                    return Err(CommandRefusal::TooLong { max: ARGS_MAX });
+                }
+                let raw_args = if task.is_empty() {
+                    "add".to_owned()
+                } else {
+                    format!("add {task}")
+                };
+                let full_body = format!("todo {raw_args}");
+                Ok(InboundText::Command {
+                    command: "todo".to_owned(),
+                    raw_args,
+                    full_body,
+                })
+            }
+            "done" => {
+                let id = sub_opts.iter().find_map(|opt| match &opt.value {
+                    CommandDataOptionValue::Integer(i) if opt.name == "id" => Some(*i),
+                    _ => None,
+                });
+                let raw_args = match id {
+                    Some(id) => format!("done {id}"),
+                    None => "done".to_owned(),
+                };
+                let full_body = format!("todo {raw_args}");
+                Ok(InboundText::Command {
+                    command: "todo".to_owned(),
+                    raw_args,
+                    full_body,
+                })
+            }
+            "list" => {
+                let page = sub_opts.iter().find_map(|opt| match &opt.value {
+                    CommandDataOptionValue::Integer(i) if opt.name == "page" => Some(*i),
+                    _ => None,
+                });
+                let raw_args = match page {
+                    Some(p) => format!("list {p}"),
+                    None => "list".to_owned(),
+                };
+                let full_body = format!("todo {raw_args}");
+                Ok(InboundText::Command {
+                    command: "todo".to_owned(),
+                    raw_args,
+                    full_body,
+                })
+            }
+            _ => Err(CommandRefusal::Unknown(format!("todo {sub_name}"))),
+        },
+        "expense" => match sub_name {
+            "add" => {
+                let amount = sub_opts
+                    .iter()
+                    .find_map(|opt| match &opt.value {
+                        CommandDataOptionValue::String(s) if opt.name == "amount" => {
+                            Some(s.as_str().trim())
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                let note = sub_opts
+                    .iter()
+                    .find_map(|opt| match &opt.value {
+                        CommandDataOptionValue::String(s) if opt.name == "note" => {
+                            Some(s.as_str().trim())
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                if amount.chars().count() + note.chars().count() > ARGS_MAX {
+                    return Err(CommandRefusal::TooLong { max: ARGS_MAX });
+                }
+                let raw_args = match (amount.is_empty(), note.is_empty()) {
+                    (true, true) => "add".to_owned(),
+                    (false, true) => format!("add {amount}"),
+                    (true, false) => format!("add {note}"),
+                    (false, false) => format!("add {amount} {note}"),
+                };
+                let full_body = format!("expense {raw_args}");
+                Ok(InboundText::Command {
+                    command: "expense".to_owned(),
+                    raw_args,
+                    full_body,
+                })
+            }
+            "list" => {
+                let raw_args = "list".to_owned();
+                let full_body = "expense list".to_owned();
+                Ok(InboundText::Command {
+                    command: "expense".to_owned(),
+                    raw_args,
+                    full_body,
+                })
+            }
+            _ => Err(CommandRefusal::Unknown(format!("expense {sub_name}"))),
+        },
+        _ => Err(CommandRefusal::Unknown(format!("{command_name} {sub_name}"))),
+    }
 }
 
 /// A component interaction (button click). Conversation is the channel it was
@@ -340,5 +472,208 @@ mod tests {
             v["data"]["custom_id"] = long.into();
         }));
         assert!(matches!(refused, Err(CommandRefusal::TooLong { .. })));
+    }
+
+    #[test]
+    fn typed_subcommands_for_todo_parse_into_inbound_commands() {
+        // /todo add task:"milk"
+        let add_parsed = from_command(&interaction(|v| {
+            v["data"]["name"] = "todo".into();
+            v["data"]["options"] = serde_json::json!([
+                {
+                    "name": "add",
+                    "type": 1,
+                    "options": [
+                        { "name": "task", "type": 3, "value": "milk" }
+                    ]
+                }
+            ]);
+        }))
+        .unwrap();
+        match add_parsed.text {
+            InboundText::Command {
+                command,
+                raw_args,
+                full_body,
+            } => {
+                assert_eq!(command, "todo");
+                assert_eq!(raw_args, "add milk");
+                assert_eq!(full_body, "todo add milk");
+            }
+            _ => panic!("expected a command"),
+        }
+
+        // /todo done id:3
+        let done_parsed = from_command(&interaction(|v| {
+            v["data"]["name"] = "todo".into();
+            v["data"]["options"] = serde_json::json!([
+                {
+                    "name": "done",
+                    "type": 1,
+                    "options": [
+                        { "name": "id", "type": 4, "value": 3 }
+                    ]
+                }
+            ]);
+        }))
+        .unwrap();
+        match done_parsed.text {
+            InboundText::Command {
+                command,
+                raw_args,
+                full_body,
+            } => {
+                assert_eq!(command, "todo");
+                assert_eq!(raw_args, "done 3");
+                assert_eq!(full_body, "todo done 3");
+            }
+            _ => panic!("expected a command"),
+        }
+
+        // /todo list
+        let list_parsed = from_command(&interaction(|v| {
+            v["data"]["name"] = "todo".into();
+            v["data"]["options"] = serde_json::json!([
+                {
+                    "name": "list",
+                    "type": 1,
+                    "options": []
+                }
+            ]);
+        }))
+        .unwrap();
+        match list_parsed.text {
+            InboundText::Command {
+                command,
+                raw_args,
+                full_body,
+            } => {
+                assert_eq!(command, "todo");
+                assert_eq!(raw_args, "list");
+                assert_eq!(full_body, "todo list");
+            }
+            _ => panic!("expected a command"),
+        }
+
+        // /todo list page:2
+        let list_paged = from_command(&interaction(|v| {
+            v["data"]["name"] = "todo".into();
+            v["data"]["options"] = serde_json::json!([
+                {
+                    "name": "list",
+                    "type": 1,
+                    "options": [
+                        { "name": "page", "type": 4, "value": 2 }
+                    ]
+                }
+            ]);
+        }))
+        .unwrap();
+        match list_paged.text {
+            InboundText::Command {
+                command,
+                raw_args,
+                full_body,
+            } => {
+                assert_eq!(command, "todo");
+                assert_eq!(raw_args, "list 2");
+                assert_eq!(full_body, "todo list 2");
+            }
+            _ => panic!("expected a command"),
+        }
+
+        // overlong task refused
+        let overlong_parsed = from_command(&interaction(|v| {
+            v["data"]["name"] = "todo".into();
+            v["data"]["options"] = serde_json::json!([
+                {
+                    "name": "add",
+                    "type": 1,
+                    "options": [
+                        { "name": "task", "type": 3, "value": "x".repeat(501) }
+                    ]
+                }
+            ]);
+        }));
+        assert!(matches!(overlong_parsed, Err(CommandRefusal::TooLong { .. })));
+    }
+
+    #[test]
+    fn typed_subcommands_for_expense_parse_into_inbound_commands() {
+        // /expense add amount:"12.50" note:"coffee"
+        let add_parsed = from_command(&interaction(|v| {
+            v["data"]["name"] = "expense".into();
+            v["data"]["options"] = serde_json::json!([
+                {
+                    "name": "add",
+                    "type": 1,
+                    "options": [
+                        { "name": "amount", "type": 3, "value": "12.50" },
+                        { "name": "note", "type": 3, "value": "coffee" }
+                    ]
+                }
+            ]);
+        }))
+        .unwrap();
+        match add_parsed.text {
+            InboundText::Command {
+                command,
+                raw_args,
+                full_body,
+            } => {
+                assert_eq!(command, "expense");
+                assert_eq!(raw_args, "add 12.50 coffee");
+                assert_eq!(full_body, "expense add 12.50 coffee");
+            }
+            _ => panic!("expected a command"),
+        }
+
+        // /expense list
+        let list_parsed = from_command(&interaction(|v| {
+            v["data"]["name"] = "expense".into();
+            v["data"]["options"] = serde_json::json!([
+                {
+                    "name": "list",
+                    "type": 1,
+                    "options": []
+                }
+            ]);
+        }))
+        .unwrap();
+        match list_parsed.text {
+            InboundText::Command {
+                command,
+                raw_args,
+                full_body,
+            } => {
+                assert_eq!(command, "expense");
+                assert_eq!(raw_args, "list");
+                assert_eq!(full_body, "expense list");
+            }
+            _ => panic!("expected a command"),
+        }
+    }
+
+    #[test]
+    fn fallback_args_option_still_parses_for_todo() {
+        let parsed = from_command(&interaction(|v| {
+            v["data"]["name"] = "todo".into();
+            v["data"]["options"] = serde_json::json!([
+                { "name": "args", "type": 3, "value": "add milk" }
+            ]);
+        }))
+        .unwrap();
+        match parsed.text {
+            InboundText::Command {
+                command,
+                raw_args,
+                full_body,
+            } => {
+                assert_eq!(command, "todo");
+                assert_eq!(raw_args, "add milk");
+                assert_eq!(full_body, "todo add milk");
+            }
+            _ => panic!("expected a command"),
+        }
     }
 }
