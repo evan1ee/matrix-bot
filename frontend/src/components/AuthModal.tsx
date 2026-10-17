@@ -293,6 +293,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 placeholder="Select saved passkey or click Sign in"
                 className="rounded-lg border border-neutral-300 px-3 py-2 text-neutral-900 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
                 disabled={busy}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !busy) handleSignIn();
+                }}
               />
               <span className="text-xs text-neutral-500 dark:text-neutral-400">
                 Select your passkey from the browser autofill dropdown, or click below.
