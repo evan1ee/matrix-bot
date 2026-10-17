@@ -82,8 +82,11 @@ Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in sequence:
    - Add typed slash command options (in addition to the single `args` string fast-path).
    - Inbound receipt/image attachment ingestion over Discord DMs (saving to `StorageService` and enqueuing `media.process_receipt`).
 
-4. **WebAuthn Conditional UI (Passkey Autofill):**
-   - Implement passkey autofill on the web sign-in form using the WebAuthn Conditional UI standard (`mediation: 'conditional'`) for seamless page-load sign-in.
+4. **WebAuthn Conditional UI (Passkey Autofill) (Fixed):**
+   - Added `isConditionalMediationAvailable()` check and `opts?: SignInOptions` (`{ conditional, signal }`) in `frontend/src/core/passkey.ts`.
+   - Integrated passkey autofill input (`autoComplete="username webauthn"`) in `frontend/src/components/AuthModal.tsx` in `'signin'` mode.
+   - Managed silent background conditional mediation lifecycle with `AbortController`, cleanly aborting on modal close, mode transitions, and manual sign-in without user-facing alert popups.
+   - Added comprehensive Playwright E2E virtual authenticator tests verifying autofill, cancellation, and manual fallback.
 
 5. **Minor Deferred Edge Cases (Fixed):**
    - `SyncHealth`: Fallback handling added (`|| 'unknown'`) when formatting last sync timestamp in web UI.
