@@ -122,6 +122,21 @@ test('signs in with no username typed', async ({ anonApp, api }) => {
   // Register first, so the authenticator holds a discoverable credential.
   await registerPasskey(anonApp);
 
+  // Intercept credentials.get so conditional mediation waits for autofill interaction
+  await anonApp.evaluate(() => {
+    const orig = navigator.credentials.get.bind(navigator.credentials);
+    navigator.credentials.get = (options) => {
+      if (options?.mediation === 'conditional') {
+        return new Promise((_, reject) => {
+          options.signal?.addEventListener('abort', () => {
+            reject(new DOMException('The operation was aborted.', 'AbortError'));
+          });
+        });
+      }
+      return orig(options);
+    };
+  });
+
   const account = await openAuthModal(anonApp);
   await account.getByRole('button', { name: /sign out/i }).click();
 
@@ -132,6 +147,7 @@ test('signs in with no username typed', async ({ anonApp, api }) => {
 
   const dialog = await openAuthModal(anonApp);
   await expect(dialog.getByRole('textbox')).toHaveAttribute('autocomplete', 'username webauthn');
+  await dialog.getByRole('button', { name: /^sign in$/i }).click();
   await expectSignedIn(anonApp);
 
   const finish = api.requests.find((r) => r.url === '/auth/passkey/login/finish')?.body as any;
@@ -253,4 +269,109 @@ test('signin modal renders passkey autofill input with username webauthn autocom
   const autofillInput = dialog.locator('input[autocomplete="username webauthn"]');
   await expect(autofillInput).toBeVisible();
 });
+
+test('signs in seamlessly via WebAuthn conditional UI autofill', async ({ anonApp, api }) => {
+  await addVirtualAuthenticator(anonApp);
+  await anonApp.goto('/');
+
+  // Register an account first so a passkey exists
+  await registerPasskey(anonApp);
+
+  // Delay conditional mediation slightly so the autofill input's presence is observable
+  // before the virtual authenticator fulfills the request and closes the modal.
+  await anonApp.evaluate(() => {
+    const orig = navigator.credentials.get.bind(navigator.credentials);
+    navigator.credentials.get = async (options) => {
+      if (options?.mediation === 'conditional') {
+        await new Promise((r) => setTimeout(r, 150));
+      }
+      return orig(options);
+    };
+  });
+
+  const account = await openAuthModal(anonApp);
+  await account.getByRole('button', { name: /sign out/i }).click();
+
+  // Signing out causes the sign-in modal to open automatically with conditional UI attached
+  const dialog = anonApp.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  const input = dialog.locator('input[autocomplete="username webauthn"]');
+  await expect(input).toBeVisible();
+
+  // Virtual authenticator automatically fulfills conditional mediation requests
+  await expectSignedIn(anonApp);
+
+  const finish = api.requests.find((r) => r.url === '/auth/passkey/login/finish')?.body as any;
+  expect(finish.credential.response.signature).toBeTruthy();
+});
+
+test('cancels conditional UI cleanly when switching modes or closing the dialog', async ({ anonApp }) => {
+  await addVirtualAuthenticator(anonApp);
+  await anonApp.goto('/');
+
+  const dialog = await openAuthModal(anonApp);
+  const input = dialog.locator('input[autocomplete="username webauthn"]');
+  await expect(input).toBeVisible();
+
+  // Switching modes aborts active conditional mediation; abort errors must never produce alert popups
+  await dialog.getByRole('button', { name: /create an account instead/i }).click();
+  await expect(dialog.getByLabel(/display name/i)).toBeVisible();
+  await expect(anonApp.getByRole('alert')).toHaveCount(0);
+
+  // Switch back to sign-in
+  await dialog.getByRole('button', { name: /already have an account/i }).click();
+  await expect(input).toBeVisible();
+  await expect(anonApp.getByRole('alert')).toHaveCount(0);
+
+  // Switch to recovery
+  await dialog.getByRole('button', { name: /recovery code/i }).click();
+  await expect(dialog.getByLabel(/recovery code/i)).toBeVisible();
+  await expect(anonApp.getByRole('alert')).toHaveCount(0);
+
+  // Close dialog via Escape
+  await anonApp.keyboard.press('Escape');
+  await expect(dialog).toBeHidden();
+  await expect(anonApp.getByRole('alert')).toHaveCount(0);
+});
+
+test('manual button sign-in while conditional mediation was active succeeds without conflict', async ({
+  anonApp,
+  api,
+}) => {
+  await addVirtualAuthenticator(anonApp);
+  await anonApp.goto('/');
+
+  await registerPasskey(anonApp);
+
+  // Intercept credentials.get to keep conditional mediation pending until aborted
+  await anonApp.evaluate(() => {
+    const orig = navigator.credentials.get.bind(navigator.credentials);
+    navigator.credentials.get = (options) => {
+      if (options?.mediation === 'conditional') {
+        return new Promise((_, reject) => {
+          options.signal?.addEventListener('abort', () => {
+            reject(new DOMException('The operation was aborted.', 'AbortError'));
+          });
+        });
+      }
+      return orig(options);
+    };
+  });
+
+  const account = await openAuthModal(anonApp);
+  await account.getByRole('button', { name: /sign out/i }).click();
+
+  const dialog = anonApp.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('input[autocomplete="username webauthn"]')).toBeVisible();
+
+  // Click manual sign-in button while conditional mediation is pending
+  await dialog.getByRole('button', { name: /^sign in$/i }).click();
+  await expectSignedIn(anonApp);
+  await expect(anonApp.getByRole('alert')).toHaveCount(0);
+
+  const finish = api.requests.find((r) => r.url === '/auth/passkey/login/finish')?.body as any;
+  expect(finish.credential.response.signature).toBeTruthy();
+});
+
 

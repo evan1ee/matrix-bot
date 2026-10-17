@@ -85,7 +85,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
 
         try {
           await signInWithPasskey({ conditional: true, signal: controller.signal });
-          if (active) {
+          if (active && !controller.signal.aborted) {
             onSuccessRef.current();
             onCloseRef.current();
           }
