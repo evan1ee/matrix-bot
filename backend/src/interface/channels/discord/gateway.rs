@@ -12,10 +12,11 @@ use tokio::sync::mpsc;
 use tracing::{info, warn};
 
 use super::commands::{create_commands, defer_mode, DeferMode};
-use super::inbound::{from_command, from_direct_message};
+use super::inbound::{from_command, from_component, from_direct_message};
 use super::outbound::{bounded, edit_response};
 use super::render::Post;
 use super::worker::Work;
+use crate::interface::channels::inbound::InboundText;
 
 /// How many events may wait for a worker before the bot answers "busy".
 pub const QUEUE_CAPACITY: usize = 32;
@@ -57,43 +58,96 @@ impl EventHandler for Gateway {
     }
 
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
-        let Interaction::Command(command) = interaction else {
-            return;
-        };
-        let parsed = match from_command(&command) {
-            Ok(parsed) => parsed,
-            Err(refusal) => {
-                let answer = CreateInteractionResponse::Message(
-                    CreateInteractionResponseMessage::new()
-                        .content(refusal.reply_text())
-                        .ephemeral(true),
-                );
-                if let Err(err) = bounded(command.create_response(&ctx.http, answer)).await {
-                    warn!(error = %err, "Could not refuse a Discord command");
+        match interaction {
+            Interaction::Command(command) => {
+                let parsed = match from_command(&command) {
+                    Ok(parsed) => parsed,
+                    Err(refusal) => {
+                        let answer = CreateInteractionResponse::Message(
+                            CreateInteractionResponseMessage::new()
+                                .content(refusal.reply_text())
+                                .ephemeral(true),
+                        );
+                        if let Err(err) = bounded(command.create_response(&ctx.http, answer)).await {
+                            warn!(error = %err, "Could not refuse a Discord command");
+                        }
+                        return;
+                    }
+                };
+                let mode = defer_mode(&command.data.name, command.guild_id.is_some());
+                let deferred = match mode {
+                    DeferMode::Ephemeral => bounded(command.defer_ephemeral(&ctx.http)).await,
+                    DeferMode::Public => bounded(command.defer(&ctx.http)).await,
+                };
+                if let Err(err) = deferred {
+                    warn!(error = %err, "Could not acknowledge a Discord command; dropped");
+                    return;
                 }
-                return;
+                let command = Arc::new(command);
+                let work = Work::Command {
+                    interaction: Arc::clone(&command),
+                    parsed,
+                    mode,
+                };
+                if self.queue.try_send(work).is_err() {
+                    let busy =
+                        command.edit_response(&ctx.http, edit_response(Post::text(BUSY_REPLY)));
+                    if let Err(err) = bounded(busy).await {
+                        warn!(error = %err, "Could not tell a Discord user the bot is busy");
+                    }
+                }
             }
-        };
-        let mode = defer_mode(&command.data.name, command.guild_id.is_some());
-        let deferred = match mode {
-            DeferMode::Ephemeral => bounded(command.defer_ephemeral(&ctx.http)).await,
-            DeferMode::Public => bounded(command.defer(&ctx.http)).await,
-        };
-        if let Err(err) = deferred {
-            warn!(error = %err, "Could not acknowledge a Discord command; dropped");
-            return;
-        }
-        let command = Arc::new(command);
-        let work = Work::Command {
-            interaction: Arc::clone(&command),
-            parsed,
-            mode,
-        };
-        if self.queue.try_send(work).is_err() {
-            let busy = command.edit_response(&ctx.http, edit_response(Post::text(BUSY_REPLY)));
-            if let Err(err) = bounded(busy).await {
-                warn!(error = %err, "Could not tell a Discord user the bot is busy");
+            Interaction::Component(component) => {
+                let parsed = match from_component(&component) {
+                    Ok(parsed) => parsed,
+                    Err(refusal) => {
+                        let answer = CreateInteractionResponse::Message(
+                            CreateInteractionResponseMessage::new()
+                                .content(refusal.reply_text())
+                                .ephemeral(true),
+                        );
+                        if let Err(err) =
+                            bounded(component.create_response(&ctx.http, answer)).await
+                        {
+                            warn!(
+                                error = %err,
+                                "Could not refuse a Discord component interaction"
+                            );
+                        }
+                        return;
+                    }
+                };
+                let command_name = match &parsed.text {
+                    InboundText::Command { command, .. } => command.as_str(),
+                    InboundText::FreeText(_) => parsed.message.text.as_str(),
+                };
+                let mode = defer_mode(command_name, component.guild_id.is_some());
+                let deferred = match mode {
+                    DeferMode::Ephemeral => bounded(component.defer_ephemeral(&ctx.http)).await,
+                    DeferMode::Public => bounded(component.defer(&ctx.http)).await,
+                };
+                if let Err(err) = deferred {
+                    warn!(
+                        error = %err,
+                        "Could not acknowledge a Discord component interaction; dropped"
+                    );
+                    return;
+                }
+                let component = Arc::new(component);
+                let work = Work::Component {
+                    interaction: Arc::clone(&component),
+                    parsed,
+                    mode,
+                };
+                if self.queue.try_send(work).is_err() {
+                    let busy =
+                        component.edit_response(&ctx.http, edit_response(Post::text(BUSY_REPLY)));
+                    if let Err(err) = bounded(busy).await {
+                        warn!(error = %err, "Could not tell a Discord user the bot is busy");
+                    }
+                }
             }
+            _ => {}
         }
     }
 

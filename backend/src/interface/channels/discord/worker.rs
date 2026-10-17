@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use serenity::all::{ChannelId, CommandInteraction, Http, MessageId};
+use serenity::all::{ChannelId, CommandInteraction, ComponentInteraction, Http, MessageId};
 use tokio::sync::{mpsc, Mutex};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
@@ -26,6 +26,11 @@ pub const DISCORD_WORKERS: usize = 4;
 pub enum Work {
     Command {
         interaction: Arc<CommandInteraction>,
+        parsed: Parsed,
+        mode: DeferMode,
+    },
+    Component {
+        interaction: Arc<ComponentInteraction>,
         parsed: Parsed,
         mode: DeferMode,
     },
@@ -120,6 +125,17 @@ async fn handle(work: Work, inbound: &Inbound, http: &Arc<Http>) {
                 warn!(error = %err, "Could not deliver a Discord command reply");
             }
         }
+        Work::Component {
+            interaction,
+            parsed,
+            mode,
+        } => {
+            let outcome = inbound.handle(&parsed.message, parsed.text, None).await;
+            let in_guild = !parsed.message.is_direct;
+            if let Err(err) = deliver_component(http, &interaction, outcome, in_guild, mode).await {
+                warn!(error = %err, "Could not deliver a Discord component reply");
+            }
+        }
         Work::Direct {
             channel,
             message,
@@ -148,6 +164,31 @@ async fn handle(work: Work, inbound: &Inbound, http: &Arc<Http>) {
 async fn deliver_command(
     http: &Http,
     interaction: &CommandInteraction,
+    outcome: InboundOutcome,
+    in_guild: bool,
+    mode: DeferMode,
+) -> Result<(), ChannelError> {
+    let plan = match plan_command_reply(outcome, in_guild, mode) {
+        Ok(plan) => plan,
+        // A reply Discord can never carry (an oversized file) still resolves the
+        // interaction, with the reason instead of a spinner.
+        Err(err) => CommandReplyPlan {
+            original: Post::text(format!("That reply could not be sent here ({err}).")),
+            follow_ups: Vec::new(),
+            follow_ups_ephemeral: false,
+        },
+    };
+    bounded(interaction.edit_response(http, edit_response(plan.original))).await?;
+    for post in plan.follow_ups {
+        bounded(interaction.create_followup(http, follow_up(post, plan.follow_ups_ephemeral)))
+            .await?;
+    }
+    Ok(())
+}
+
+async fn deliver_component(
+    http: &Http,
+    interaction: &ComponentInteraction,
     outcome: InboundOutcome,
     in_guild: bool,
     mode: DeferMode,
@@ -217,5 +258,65 @@ mod tests {
         )
         .unwrap();
         assert_eq!(plan.original, Post::text("x"));
+    }
+
+    #[test]
+    fn a_reply_with_actions_carries_buttons_on_planned_response() {
+        use crate::interface::channels::message::Action;
+
+        let mut reply = Reply::html("<b>Done!</b>");
+        reply.content.actions = vec![Action {
+            label: "Done #1".into(),
+            command: "todo done 1".into(),
+        }];
+        let plan =
+            plan_command_reply(InboundOutcome::Replied(reply), true, DeferMode::Ephemeral).unwrap();
+        assert_eq!(plan.original.description, Some("**Done!**".into()));
+        assert_eq!(
+            plan.original.buttons,
+            vec![("Done #1".into(), "todo done 1".into())]
+        );
+        assert!(plan.follow_ups.is_empty());
+        assert!(plan.follow_ups_ephemeral);
+    }
+
+    const COMMAND_FIXTURE: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../contracts/channels/discord_command_interaction.json"
+    ));
+    const DM_FIXTURE: &str = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../contracts/channels/discord_dm_message.json"
+    ));
+
+    fn component_fixture(edit: impl FnOnce(&mut serde_json::Value)) -> ComponentInteraction {
+        let mut value: serde_json::Value = serde_json::from_str(COMMAND_FIXTURE).unwrap();
+        let dm_msg: serde_json::Value = serde_json::from_str(DM_FIXTURE).unwrap();
+        value["type"] = 3.into();
+        value["data"] = serde_json::json!({
+            "custom_id": "todo done 1",
+            "component_type": 2
+        });
+        value["message"] = dm_msg;
+        edit(&mut value);
+        serde_json::from_value(value).expect("the fixture is a serenity ComponentInteraction")
+    }
+
+    #[test]
+    fn component_work_matches_and_unpacks() {
+        let interaction = component_fixture(|_| {});
+        let parsed = super::super::inbound::from_component(&interaction).unwrap();
+        let work = Work::Component {
+            interaction: Arc::new(interaction),
+            parsed,
+            mode: DeferMode::Ephemeral,
+        };
+        match work {
+            Work::Component { mode, parsed, .. } => {
+                assert_eq!(mode, DeferMode::Ephemeral);
+                assert_eq!(parsed.message.text, "todo done 1");
+            }
+            _ => panic!("expected Work::Component"),
+        }
     }
 }
