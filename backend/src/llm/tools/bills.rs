@@ -15,6 +15,39 @@ pub async fn execute_tool(
     args: &serde_json::Value,
 ) -> Option<Result<String, String>> {
     match name {
+        "evaluate_bill_due_adequacy" => Some(
+            async {
+                let acct = *owner_id;
+                let days_ahead = args
+                    .get("days_ahead")
+                    .and_then(|v| v.as_i64())
+                    .unwrap_or(14)
+                    .clamp(1, 60);
+                let settings = services.settings.get_or_default(&acct).await;
+                let today = Utc::now().with_timezone(&settings.tz()).date_naive();
+                let bills = services
+                    .recurring_bills
+                    .list_by_owner(&acct)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let cash_balances = services
+                    .portfolio
+                    .list_cash(&acct)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let available_cash_minor =
+                    cash_balances.iter().map(|c| c.balance_minor).sum::<i64>();
+                let report = crate::domain::recurring_bills::due::evaluate_bill_cash_adequacy(
+                    &bills,
+                    available_cash_minor,
+                    today,
+                    days_ahead,
+                );
+                serde_json::to_string(&report).map_err(|e| e.to_string())
+            }
+            .await,
+        ),
+
         "get_my_recurring_bills" => Some(
             async {
                 let acct = *owner_id;
@@ -282,5 +315,110 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
                 "additionalProperties": false
             }),
         ),
+        ToolDefinition::function(
+            "evaluate_bill_due_adequacy",
+            "Evaluate upcoming recurring bills due within a planning horizon (default 14 days) and calculate cash flow adequacy against available cash balances.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "days_ahead": {
+                        "type": "integer",
+                        "description": "Planning horizon in days ahead to evaluate bills against available cash (default: 14, range: 1..60)."
+                    }
+                },
+                "additionalProperties": false
+            }),
+        ),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::DbPool;
+    use crate::domain::recurring_bills::due::CashFlowAdequacyReport;
+
+    async fn setup() -> DbPool {
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        pool
+    }
+
+    #[test]
+    fn test_evaluate_bill_due_adequacy_schema() {
+        let defs = tool_definitions();
+        let due_def = defs
+            .iter()
+            .find(|d| d.function.name == "evaluate_bill_due_adequacy")
+            .expect("evaluate_bill_due_adequacy tool definition must exist");
+        let props = due_def.function.parameters.get("properties").unwrap();
+        assert!(props.get("days_ahead").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_execute_evaluate_bill_due_adequacy() {
+        let pool = setup().await;
+        let alice = AccountId::from_seed("@alice_bills_due:test");
+        crate::db::pool::seed_account(&pool, &alice).await;
+        let services = crate::application::AppServices::new(&pool);
+
+        // Deposit cash: $50
+        services
+            .portfolio
+            .deposit_cash(&alice, "USD", 2, 5000, None)
+            .await
+            .unwrap();
+
+        // Create recurring bill due in 3 days: $100
+        let due_date = (Utc::now() + chrono::Duration::days(3))
+            .format("%Y-%m-%d")
+            .to_string();
+
+        let (bill, _) = services
+            .recurring_bills
+            .create(
+                &alice,
+                NewRecurringBill {
+                    room_id: "!room:1".to_string(),
+                    sender_name: "Alice".to_string(),
+                    name: "Server Hosting".to_string(),
+                    amount_minor: 10000,
+                    currency: "USD".to_string(),
+                    currency_exponent: 2,
+                    frequency: "monthly".to_string(),
+                    due_day: Some(15),
+                    category: "infrastructure".to_string(),
+                    auto_pay: false,
+                    notes: None,
+                    next_due_at: due_date,
+                    total_installments: None,
+                    remind_before_minutes: None,
+                    remind_room_id: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let result = execute_tool(
+            &services,
+            &pool,
+            &alice,
+            "!room:1",
+            "evaluate_bill_due_adequacy",
+            &json!({ "days_ahead": 7 }),
+        )
+        .await
+        .expect("evaluate_bill_due_adequacy must be handled")
+        .expect("tool execution should succeed");
+
+        let report: CashFlowAdequacyReport =
+            serde_json::from_str(&result).expect("valid CashFlowAdequacyReport JSON");
+
+        assert_eq!(report.total_due_minor, 10000);
+        assert_eq!(report.available_cash_minor, 5000);
+        assert_eq!(report.projected_shortfall_minor, 5000);
+        assert!(report.has_shortfall);
+        assert_eq!(report.bills.len(), 1);
+        assert_eq!(report.bills[0].bill_id, bill.id);
+    }
 }

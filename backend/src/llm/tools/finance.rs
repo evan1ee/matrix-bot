@@ -17,6 +17,39 @@ pub async fn execute_tool(
 ) -> Option<Result<String, String>> {
     let owner_acct = *owner_id;
     match name {
+        "audit_monthly_finances" => Some(
+            async {
+                let spike_threshold_pct = args
+                    .get("spike_threshold_pct")
+                    .and_then(|v| v.as_f64())
+                    .unwrap_or(20.0);
+                let since = Utc::now() - Duration::days(30);
+                let filter = ListTransactionsFilter {
+                    direction: Some(Direction::Expense),
+                    since: Some(since),
+                    limit: Some(1000),
+                    ..Default::default()
+                };
+                let transactions = services
+                    .finance
+                    .list_transactions(&owner_acct, &filter)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let bills = services
+                    .recurring_bills
+                    .list_by_owner(&owner_acct)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let report = crate::domain::finance::audit::evaluate_monthly_audit(
+                    &transactions,
+                    &bills,
+                    spike_threshold_pct,
+                );
+                serde_json::to_string(&report).map_err(|e| e.to_string())
+            }
+            .await,
+        ),
+
         "get_my_financial_summary" => Some(
             async {
                 let from = Utc::now() - Duration::days(365);
@@ -401,6 +434,20 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
                 "additionalProperties": false
             }),
         ),
+        ToolDefinition::function(
+            "audit_monthly_finances",
+            "Perform a deterministic monthly financial audit over the past 30 days: categorize spending, flag category spikes exceeding a threshold, and reconcile against recurring commitments.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "spike_threshold_pct": {
+                        "type": "number",
+                        "description": "Drift/spike threshold percentage of total spending to flag anomalous categories (default: 20.0)."
+                    }
+                },
+                "additionalProperties": false
+            }),
+        ),
     ]
 }
 
@@ -440,5 +487,60 @@ mod tests {
         .expect("record_finance_entry must be handled");
 
         assert!(result.is_err(), "a note over the limit must be rejected");
+    }
+
+    #[test]
+    fn test_audit_monthly_finances_schema() {
+        let defs = tool_definitions();
+        let audit_def = defs
+            .iter()
+            .find(|d| d.function.name == "audit_monthly_finances")
+            .expect("audit_monthly_finances tool definition must exist");
+        let props = audit_def.function.parameters.get("properties").unwrap();
+        assert!(props.get("spike_threshold_pct").is_some());
+    }
+
+    #[tokio::test]
+    async fn test_execute_audit_monthly_finances() {
+        let pool = setup().await;
+        let alice = AccountId::from_seed("@alice_finance_audit:test");
+        crate::db::pool::seed_account(&pool, &alice).await;
+        let services = crate::application::AppServices::new(&pool);
+
+        services
+            .finance
+            .record_expense(
+                &alice,
+                10000,
+                "USD",
+                2,
+                Some("Dining"),
+                Some("Team Dinner"),
+                None,
+                "!room:1",
+                "Alice",
+            )
+            .await
+            .unwrap();
+
+        let result = execute_tool(
+            &services,
+            &pool,
+            &alice,
+            "!room:1",
+            "audit_monthly_finances",
+            &json!({ "spike_threshold_pct": 20.0 }),
+        )
+        .await
+        .expect("audit_monthly_finances must be handled")
+        .expect("tool execution should succeed");
+
+        let report: crate::domain::finance::audit::MonthlyAuditReport =
+            serde_json::from_str(&result).expect("valid MonthlyAuditReport JSON");
+
+        assert_eq!(report.total_spending_minor, 10000);
+        assert_eq!(report.categories.len(), 1);
+        assert_eq!(report.categories[0].category, "Dining");
+        assert_eq!(report.flagged_spikes, vec!["Dining".to_string()]);
     }
 }

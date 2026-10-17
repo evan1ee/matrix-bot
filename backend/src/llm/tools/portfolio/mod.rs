@@ -2,6 +2,7 @@ use crate::db::DbPool;
 pub mod alerts;
 pub mod cash;
 pub mod net_worth;
+pub mod rebalance;
 
 use serde_json::json;
 
@@ -39,6 +40,10 @@ pub async fn execute_tool(
 
     // 4. Trade and portfolio holding operations
     match name {
+        "evaluate_portfolio_rebalance" => {
+            Some(rebalance::execute_tool(services, owner_id, args).await)
+        }
+
         "get_my_portfolio_summary" => Some(
             async {
                 let summary = services
@@ -392,6 +397,7 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
     defs.extend(cash::tool_definitions());
     defs.extend(alerts::tool_definitions());
     defs.extend(net_worth::tool_definitions());
+    defs.push(rebalance::tool_definition());
     defs
 }
 

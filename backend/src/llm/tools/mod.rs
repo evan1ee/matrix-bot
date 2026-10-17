@@ -55,7 +55,7 @@ mod tests {
     #[tokio::test]
     async fn test_tool_definitions() {
         let defs = ToolRegistry::get_tool_definitions();
-        assert_eq!(defs.len(), 52);
+        assert_eq!(defs.len(), 56);
         let names: Vec<_> = defs.iter().map(|d| d.function.name.as_str()).collect();
         assert!(names.contains(&"get_my_tasks"));
         assert!(names.contains(&"add_todo"));
@@ -65,6 +65,7 @@ mod tests {
         assert!(names.contains(&"record_finance_entry"));
         assert!(names.contains(&"list_finance_transactions"));
         assert!(names.contains(&"get_spending_by_category"));
+        assert!(names.contains(&"audit_monthly_finances"));
         assert!(names.contains(&"delete_finance_entry"));
         assert!(names.contains(&"set_reminder"));
         assert!(names.contains(&"cancel_reminder"));
@@ -73,6 +74,7 @@ mod tests {
         assert!(names.contains(&"buy_portfolio_holding"));
         assert!(names.contains(&"sell_portfolio_holding"));
         assert!(names.contains(&"get_portfolio_holding"));
+        assert!(names.contains(&"evaluate_portfolio_rebalance"));
         assert!(names.contains(&"create_portfolio_price_alert"));
         assert!(names.contains(&"get_portfolio_price_alerts"));
         assert!(names.contains(&"cancel_portfolio_price_alert"));
@@ -80,6 +82,7 @@ mod tests {
         assert!(names.contains(&"get_my_habits"));
         assert!(names.contains(&"log_habit"));
         assert!(names.contains(&"create_habit"));
+        assert!(names.contains(&"evaluate_habit_consistency"));
         assert!(names.contains(&"delete_habit"));
         assert!(names.contains(&"log_life_day"));
         assert!(names.contains(&"get_life_profile"));
@@ -87,6 +90,7 @@ mod tests {
         assert!(names.contains(&"get_my_recurring_bills"));
         assert!(names.contains(&"pay_recurring_bill"));
         assert!(names.contains(&"create_recurring_bill"));
+        assert!(names.contains(&"evaluate_bill_due_adequacy"));
         assert!(names.contains(&"delete_recurring_bill"));
         assert!(names.contains(&"get_my_footprints"));
         assert!(names.contains(&"record_footprint"));
@@ -713,5 +717,153 @@ mod tests {
         .await
         .unwrap();
         assert!(webhooks_res.starts_with('['));
+    }
+
+    #[tokio::test]
+    async fn test_execute_analytical_agent_tools() {
+        let (db, owner) = setup_db().await;
+        let services = crate::application::AppServices::new(&db.pool);
+
+        // 1. evaluate_portfolio_rebalance
+        services
+            .portfolio
+            .deposit_cash(&owner, "USD", 2, 200000, None)
+            .await
+            .unwrap();
+        services
+            .portfolio
+            .buy(
+                &owner,
+                crate::domain::portfolio::TradeRequest {
+                    symbol: "AAPL",
+                    quantity: "5",
+                    price: "150.00",
+                    currency: "USD",
+                    note: None,
+                    executed_at: None,
+                },
+            )
+            .await
+            .unwrap();
+        services
+            .portfolio
+            .set_price(&owner, "AAPL", 15000)
+            .await
+            .unwrap();
+
+        let rebalance_res = ToolRegistry::execute_tool(
+            &services,
+            &db.pool,
+            &owner,
+            "!room:a",
+            "evaluate_portfolio_rebalance",
+            r#"{"targets":{"AAPL":50.0,"BTC":50.0},"threshold_pct":5.0}"#,
+        )
+        .await
+        .unwrap();
+        assert!(rebalance_res.contains("total_value_minor"));
+        assert!(rebalance_res.contains("needs_rebalance"));
+
+        // 2. audit_monthly_finances
+        services
+            .finance
+            .record_expense(
+                &owner,
+                25000,
+                "USD",
+                2,
+                Some("Dining"),
+                Some("Team dinner"),
+                None,
+                "!room:a",
+                "Alice",
+            )
+            .await
+            .unwrap();
+
+        let audit_res = ToolRegistry::execute_tool(
+            &services,
+            &db.pool,
+            &owner,
+            "!room:a",
+            "audit_monthly_finances",
+            r#"{"spike_threshold_pct":15.0}"#,
+        )
+        .await
+        .unwrap();
+        assert!(audit_res.contains("total_spending_minor"));
+        assert!(audit_res.contains("Dining"));
+
+        // 3. evaluate_bill_due_adequacy
+        let due_date = (chrono::Utc::now() + chrono::Duration::days(5))
+            .format("%Y-%m-%d")
+            .to_string();
+        services
+            .recurring_bills
+            .create(
+                &owner,
+                crate::domain::recurring_bills::NewRecurringBill {
+                    room_id: "!room:a".to_string(),
+                    sender_name: "Alice".to_string(),
+                    name: "Cloud VPS".to_string(),
+                    amount_minor: 5000,
+                    currency: "USD".to_string(),
+                    currency_exponent: 2,
+                    frequency: "monthly".to_string(),
+                    due_day: Some(15),
+                    category: "infrastructure".to_string(),
+                    auto_pay: false,
+                    notes: None,
+                    next_due_at: due_date,
+                    total_installments: None,
+                    remind_before_minutes: None,
+                    remind_room_id: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let bill_res = ToolRegistry::execute_tool(
+            &services,
+            &db.pool,
+            &owner,
+            "!room:a",
+            "evaluate_bill_due_adequacy",
+            r#"{"days_ahead":14}"#,
+        )
+        .await
+        .unwrap();
+        assert!(bill_res.contains("total_due_minor"));
+        assert!(bill_res.contains("available_cash_minor"));
+
+        // 4. evaluate_habit_consistency
+        let habit = services
+            .habits
+            .create_habit(&owner, "Reading", None, Some("daily"), None, Some(7))
+            .await
+            .unwrap();
+        let settings = services.settings.get_or_default(&owner).await;
+        let today = chrono::Utc::now()
+            .with_timezone(&settings.tz())
+            .format("%Y-%m-%d")
+            .to_string();
+        services
+            .habits
+            .toggle_log(&owner, habit.id, &today, None)
+            .await
+            .unwrap();
+
+        let habit_res = ToolRegistry::execute_tool(
+            &services,
+            &db.pool,
+            &owner,
+            "!room:a",
+            "evaluate_habit_consistency",
+            r#"{}"#,
+        )
+        .await
+        .unwrap();
+        assert!(habit_res.contains("total_active"));
+        assert!(habit_res.contains("Reading"));
     }
 }

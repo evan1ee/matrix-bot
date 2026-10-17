@@ -20,6 +20,20 @@ pub async fn execute_tool(
         .to_string();
 
     match name {
+        "evaluate_habit_consistency" => Some(
+            async {
+                let habits = services
+                    .habits
+                    .list_with_status(&acct, &today_str)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let report =
+                    crate::domain::habits::consistency::evaluate_habit_consistency(&habits);
+                serde_json::to_string(&report).map_err(|e| e.to_string())
+            }
+            .await,
+        ),
+
         "get_my_habits" => Some(
             async {
                 let habits = services
@@ -231,5 +245,83 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
                 "additionalProperties": false
             }),
         ),
+        ToolDefinition::function(
+            "evaluate_habit_consistency",
+            "Evaluate weekly habit completion consistency, streaks, and identify slipping or at-risk habits.",
+            json!({
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }),
+        ),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::DbPool;
+    use crate::domain::habits::consistency::HabitConsistencyReport;
+
+    async fn setup() -> DbPool {
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        pool
+    }
+
+    #[test]
+    fn test_evaluate_habit_consistency_schema() {
+        let defs = tool_definitions();
+        let consistency_def = defs
+            .iter()
+            .find(|d| d.function.name == "evaluate_habit_consistency")
+            .expect("evaluate_habit_consistency tool definition must exist");
+        let props = consistency_def.function.parameters.get("properties").unwrap();
+        assert!(props.as_object().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_execute_evaluate_habit_consistency() {
+        let pool = setup().await;
+        let alice = AccountId::from_seed("@alice_habit_consistency:test");
+        crate::db::pool::seed_account(&pool, &alice).await;
+        let services = crate::application::AppServices::new(&pool);
+
+        let habit = services
+            .habits
+            .create_habit(&alice, "Daily Meditation", None, Some("daily"), None, Some(7))
+            .await
+            .unwrap();
+
+        let settings = services.settings.get_or_default(&alice).await;
+        let today = Utc::now()
+            .with_timezone(&settings.tz())
+            .format("%Y-%m-%d")
+            .to_string();
+
+        services
+            .habits
+            .toggle_log(&alice, habit.id, &today, None)
+            .await
+            .unwrap();
+
+        let result = execute_tool(
+            &services,
+            &pool,
+            &alice,
+            "evaluate_habit_consistency",
+            &json!({}),
+        )
+        .await
+        .expect("evaluate_habit_consistency must be handled")
+        .expect("tool execution should succeed");
+
+        let report: HabitConsistencyReport =
+            serde_json::from_str(&result).expect("valid HabitConsistencyReport JSON");
+
+        assert_eq!(report.total_active, 1);
+        assert_eq!(report.items.len(), 1);
+        assert_eq!(report.items[0].habit_id, habit.id);
+        assert_eq!(report.items[0].name, "Daily Meditation");
+    }
 }
