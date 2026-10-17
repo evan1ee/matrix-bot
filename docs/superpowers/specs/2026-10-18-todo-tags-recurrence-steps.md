@@ -46,6 +46,7 @@ ALTER TABLE todos
     ADD COLUMN tags         TEXT[]  NOT NULL DEFAULT '{}',
     ADD COLUMN recurrence   TEXT    NOT NULL DEFAULT 'none'
         CHECK (recurrence IN ('none', 'daily', 'weekly', 'monthly', 'yearly')),
+    ADD COLUMN recurrence_anchor TIMESTAMPTZ,
     ADD COLUMN next_todo_id BIGINT  REFERENCES todos(id) ON DELETE SET NULL,
     ADD CONSTRAINT todos_recurrence_needs_due
         CHECK (recurrence = 'none' OR due_at IS NOT NULL);
@@ -78,14 +79,15 @@ CREATE INDEX idx_todo_steps_owner ON todo_steps(owner_id);
 
 **`domain/todos`**
 
-- `TodoItem` gains `tags: Vec<Tag>`, `recurrence: RecurrencePattern` (reused from `domain/reminders`), `next_todo_id: Option<i64>`.
+- `TodoItem` gains `tags: Vec<Tag>`, `recurrence: RecurrencePattern` (reused from `domain/reminders`), `recurrence_anchor`, `next_todo_id: Option<i64>`.
 - `NewTodo` gains `tags`, `recurrence`; `TodoPatch` gains `tags: Option<Vec<Tag>>` (whole-set replace), `recurrence: Option<RecurrencePattern>`.
 - Validation (added to the existing `validate` functions):
   - at most `MAX_TAGS = 10` tags;
   - a recurrence other than `None` requires a due date — on create, and on patch against the merged result (the service checks the patch applied to the locked row, so clearing the due date of a recurring todo is refused).
 - `TodoStep { id, todo_id, position, text, done }`; `MAX_STEPS = 50`, `MAX_STEP_TEXT_LEN = 200`; `validate_step_text`.
 - `TodoWithSteps { todo: TodoItem, steps: Vec<TodoStep> }` read model for single-todo reads; list rows carry `steps_done` / `steps_total`.
-- Pure `successor(todo: &TodoItem, now, tz) -> Option<NewTodo>`: `None` when `recurrence == None` or no due date; otherwise the same text, priority, tags, recurrence and `remind_before_minutes`, with `due_at = next_occurrence_in_tz(due_at, recurrence, now, tz)`. Missed periods are skipped (strictly after `now`).
+- `recurrence_anchor: Option<DateTime<Utc>>` on `TodoItem`: the due date the series started from. Set to `due_at` when recurrence is turned on or the due date of a recurring todo is changed; cleared when recurrence is set to `none`; inherited by successors. Stepping from the anchor rather than from each successor's due date keeps month-end series on their day (Jan 31 → Feb 28 → Mar 31 instead of drifting to the 28th).
+- Pure `successor(todo: &TodoItem, now, tz) -> Option<NewTodo>`: `None` when `recurrence == None` or no due date; otherwise the same text, priority, tags, recurrence, anchor and `remind_before_minutes`, with `due_at = next_occurrence_in_tz(anchor, recurrence, max(now, due_at), tz)`. Missed periods are skipped, and an early completion still moves to the period after the current due date.
 - A todo-domain error enum (`thiserror`) mapped to `AppError::Validation` in `application/todos`.
 
 ## 5. Service behaviour (`application/todos`)
