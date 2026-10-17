@@ -72,10 +72,15 @@ Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in sequence:
 1. **Quote-Based AI Confirmation Without Taint (Fixed):**
    - Implemented authentic AI reply tracking via in-memory bounded cache (`AiReplyTracker`) in `LlmService`. Sent AI response message IDs are recorded by channel adapters (Matrix `show_reply` capturing both placeholder and replacement event IDs, and Telegram worker). Inbound quotes are verified against `(room_key, event_id, owner_id)`. Quoting genuine AI confirmation prompts avoids turn taint and allows held action execution without infinite confirmation loops, while webhook alerts, foreign messages, and cross-room/cross-owner quotes strictly remain tainted.
 
-2. **Deep Procedural Pipelines for Built-in Agent Tasks (`backend/src/domain/agent/task.rs`):**
-   - Expand specialized procedural workflows for the 5 built-in task plugins (`WeeklyBookmarkDigestTask`, `MonthlyFinancialAuditTask`, `PortfolioRebalanceAlertTask`, `BillDueDigestTask`, `HabitConsistencyReviewTask`):
-     - Direct Kokoro TTS audio compilation for weekly bookmark digests.
-     - Deterministic mathematical portfolio drift calculation before invoking LLM synthesis.
+2. **Deep Procedural Pipelines for Built-in Agent Tasks (Fixed):**
+   - Implemented 4 deterministic domain calculation engines with integer minor-unit math and strict invariant validation:
+     - `portfolio::rebalance::evaluate_portfolio_drift`: Computes asset allocation drift percentages against target weights and derives rebalancing actions (`Buy`, `Sell`, `InBand`) without direct trade execution.
+     - `finance::audit::evaluate_monthly_audit`: Aggregates transactions, splits recurring bills vs discretionary spending, computes percentage distributions, and flags category spending spikes exceeding a configurable threshold.
+     - `recurring_bills::due::evaluate_bill_cash_adequacy`: Groups recurring bills by temporal urgency buckets (`DueToday`, `DueWithin3Days`, `DueWithin14Days`, `Later`) and evaluates cash reserve adequacy against liquid cash account balances.
+     - `habits::consistency::evaluate_habit_consistency`: Evaluates 7-day completion rates, tracks active streaks, and categorizes trends (`Strong`, `Stable`, `AtRisk`, `Slipping`).
+   - Exposed 4 analytical tools to the autonomous agent and chat LLM via `llm/tools/` conforming to the OpenAI schema standard (`evaluate_portfolio_rebalance`, `audit_monthly_finances`, `evaluate_bill_due_adequacy`, `evaluate_habit_consistency`).
+   - Enhanced all 5 built-in task plugins (`WeeklyBookmarkDigestTask`, `MonthlyFinancialAuditTask`, `PortfolioRebalanceAlertTask`, `BillDueDigestTask`, `HabitConsistencyReviewTask`) with specialized tool whitelists, deep procedural prompts, and configurable thresholds.
+   - Built multi-modal Kokoro TTS audio compilation pipeline in `backend/src/interface/jobs/agent/audio.rs` and `mod.rs`: extracts `<audio_script>...</audio_script>`, synthesizes Ogg Opus audio via `TtsClient`, attaches it to delivered messages (`AttachmentKind::Audio`), cleanly strips tags from plain/HTML text, and degrades fail-open if TTS is unconfigured or unavailable.
 
 3. **Discord Channel Capabilities Expansion (Fixed):**
    - Implemented interactive ActionRow buttons in `render.rs` and `outbound.rs` chunked up to 5x5 per message (`CreateActionRow::Buttons`), with component interaction parsing in `inbound.rs` and dispatching in `gateway.rs` and `worker.rs` (`Work::Component`).
@@ -144,6 +149,12 @@ Format: `Ruling: <decision> — <why> — <cost if wrong>`. New rulings go here 
 
 - *Ruling: Discord slash commands register subcommands (`/todo add`, `/todo done`, etc.) without a root-level `args` string option — Discord's interaction API strictly forbids combining root-level arguments and subcommands on the same command (HTTP 400 `50035`), while inbound parsing maintains backward-compatible `args` fallback — cost if wrong: users typing `/todo` without subcommands see Discord autocomplete guide them to subcommands.*
 - *Ruling: Direct image ingestion over Discord is restricted strictly to direct messages (DMs) from linked accounts — attachments in guild channels or from unlinked senders fail closed with immediate return or `UNLINKED_REPLY` without downloading bytes or persisting storage — cost if wrong: guild members must DM the bot to scan receipts.*
+
+### Rulings (2026-10-18 — Deep Procedural Agent Pipelines)
+
+- *Ruling: Deterministic domain calculation engines (`portfolio::rebalance`, `finance::audit`, `recurring_bills::due`, `habits::consistency`) perform exact integer minor-unit math and rule evaluation prior to or during LLM synthesis — prevents floating-point inaccuracies, LLM hallucination in financial/streak math, and guarantees consistent analysis across all 5 built-in agent tasks — cost if wrong: none.*
+- *Ruling: Multi-modal Kokoro TTS audio digest compilation extracts `<audio_script>...</audio_script>`, synthesizes Ogg Opus audio via `TtsClient`, attaches it as `AttachmentKind::Audio` to the delivered message, and strips the tag from plain/HTML text with fail-open graceful degradation — gives users audio podcast briefings in supported channels without breaking text delivery or aborting agent runs if TTS is unconfigured or unavailable — cost if wrong: none.*
+- *Ruling: Non-execution trade safety invariant enforced across portfolio tools — `evaluate_portfolio_rebalance` calculates mathematical drift and recommended buy/sell rebalancing amounts, explicitly instructing the agent to explain adjustments without executing trades directly — prevents autonomous agent execution of destructive financial transactions without human-in-the-loop approval — cost if wrong: none.*
 
 ---
 
