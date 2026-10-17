@@ -65,7 +65,10 @@ pub fn posts(content: &Content) -> Result<Vec<Post>, ChannelError> {
                 );
                 return None;
             }
-            let label: String = action.label.chars().take(80).collect();
+            let label: String = action.label.trim().chars().take(80).collect();
+            if label.is_empty() {
+                return None;
+            }
             Some((label, action.command.clone()))
         })
         .take(25)
@@ -294,6 +297,11 @@ mod tests {
     #[test]
     fn button_rendering_applies_limits_and_filtering() {
         let mut content = Content::text("Tasks");
+        // 0. whitespace-only label -> dropped
+        content.actions.push(Action {
+            label: "   \t\n".into(),
+            command: "todo done 99".into(),
+        });
         // 1. empty command -> dropped
         content.actions.push(Action {
             label: "Empty".into(),

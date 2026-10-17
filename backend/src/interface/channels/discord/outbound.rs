@@ -122,9 +122,11 @@ pub fn edit_response(post: Post) -> EditInteractionResponse {
     if let Some(e) = embed(post.description) {
         builder = builder.embed(e);
     }
-    if !post.buttons.is_empty() {
-        builder = builder.components(create_action_rows(&post.buttons));
-    }
+    builder = builder.components(if post.buttons.is_empty() {
+        Vec::new()
+    } else {
+        create_action_rows(&post.buttons)
+    });
     for file in post.files {
         builder = builder.new_attachment(attachment(file));
     }
