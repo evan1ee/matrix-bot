@@ -1,8 +1,9 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { KeyRound, Loader2, ShieldCheck, X } from 'lucide-react';
 import {
   describePasskeyError,
   enrollPasskey,
+  isConditionalMediationAvailable,
   isPasskeySupported,
   registerPasskey,
   signInWithPasskey,
@@ -62,6 +63,53 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isOpen, busy, onClose]);
 
+  const conditionalAbortRef = useRef<AbortController | null>(null);
+  const onSuccessRef = useRef(onSuccess);
+  onSuccessRef.current = onSuccess;
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    let active = true;
+
+    if (isOpen && !user && mode === 'signin' && isPasskeySupported()) {
+      void (async () => {
+        const available = await isConditionalMediationAvailable();
+        if (!active || !available) return;
+
+        if (conditionalAbortRef.current) {
+          conditionalAbortRef.current.abort();
+        }
+        const controller = new AbortController();
+        conditionalAbortRef.current = controller;
+
+        try {
+          await signInWithPasskey({ conditional: true, signal: controller.signal });
+          if (active) {
+            onSuccessRef.current();
+            onCloseRef.current();
+          }
+        } catch (err: unknown) {
+          if (
+            controller.signal.aborted ||
+            (err instanceof DOMException && err.name === 'AbortError') ||
+            (typeof err === 'object' && err !== null && 'name' in err && (err as { name: string }).name === 'AbortError')
+          ) {
+            return;
+          }
+        }
+      })();
+    }
+
+    return () => {
+      active = false;
+      if (conditionalAbortRef.current) {
+        conditionalAbortRef.current.abort();
+        conditionalAbortRef.current = null;
+      }
+    };
+  }, [isOpen, mode, user]);
+
   if (!isOpen) return null;
 
   const supported = isPasskeySupported();
@@ -81,7 +129,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
   };
 
   const handleSignOut = () => run(signOut);
-  const handleSignIn = () => run(signInWithPasskey);
+  const handleSignIn = () => {
+    if (conditionalAbortRef.current) {
+      conditionalAbortRef.current.abort();
+      conditionalAbortRef.current = null;
+    }
+    return run(signInWithPasskey);
+  };
   const handleRegister = () => {
     if (!displayName.trim()) {
       setError('Choose a name to show on your account.');
@@ -227,6 +281,23 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <p className="text-sm text-neutral-600 dark:text-neutral-400">
               Use the passkey on this device. There is nothing to type.
             </p>
+
+            <label className="flex flex-col gap-1.5">
+              <span className="text-sm font-medium text-neutral-700 dark:text-neutral-300">
+                Passkey autofill
+              </span>
+              <input
+                type="text"
+                name="username"
+                autoComplete="username webauthn"
+                placeholder="Select saved passkey or click Sign in"
+                className="rounded-lg border border-neutral-300 px-3 py-2 text-neutral-900 dark:border-neutral-700 dark:bg-neutral-800 dark:text-neutral-100"
+                disabled={busy}
+              />
+              <span className="text-xs text-neutral-500 dark:text-neutral-400">
+                Select your passkey from the browser autofill dropdown, or click below.
+              </span>
+            </label>
 
             <button
               type="button"

@@ -131,9 +131,7 @@ test('signs in with no username typed', async ({ anonApp, api }) => {
   await expectSignedOut(anonApp);
 
   const dialog = await openAuthModal(anonApp);
-  // The whole claim of this design: there is nothing to type.
-  await expect(dialog.getByRole('textbox')).toHaveCount(0);
-  await dialog.getByRole('button', { name: /^sign in$/i }).click();
+  await expect(dialog.getByRole('textbox')).toHaveAttribute('autocomplete', 'username webauthn');
   await expectSignedIn(anonApp);
 
   const finish = api.requests.find((r) => r.url === '/auth/passkey/login/finish')?.body as any;
@@ -177,10 +175,10 @@ test('a rejected sign-in is explained rather than swallowed', async ({ anonApp, 
   // signature did not verify. Deliberately driven from the server rather than
   // by dismissing the real prompt: Chrome reports a dismissal only after the
   // ceremony times out, which would hang the suite rather than test anything.
+  const dialog = await openAuthModal(anonApp);
+  await expect(dialog.getByRole('textbox')).toHaveAttribute('autocomplete', 'username webauthn');
   api.failNext = { path: /passkey\/login\/start/, status: 401, error: 'Sign-in failed' };
-
-  await openAuthModal(anonApp);
-  await anonApp.getByRole('dialog').getByRole('button', { name: /^sign in$/i }).click();
+  await dialog.getByRole('button', { name: /^sign in$/i }).click();
 
   await expect(anonApp.getByRole('alert')).toBeVisible();
   await expect(anonApp.getByRole('alert')).toContainText(/sign-in failed/i);
@@ -247,3 +245,12 @@ test('passkey module exports conditional mediation detection and supports condit
   });
   expect(isAvailableType).toBe('function');
 });
+
+test('signin modal renders passkey autofill input with username webauthn autocomplete', async ({ anonApp }) => {
+  await addVirtualAuthenticator(anonApp);
+  await anonApp.goto('/');
+  const dialog = await openAuthModal(anonApp);
+  const autofillInput = dialog.locator('input[autocomplete="username webauthn"]');
+  await expect(autofillInput).toBeVisible();
+});
+
