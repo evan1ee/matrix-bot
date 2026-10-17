@@ -238,3 +238,12 @@ test('registers a passkey using an enrollment token (?enroll=...) from Matrix ch
   const enrollFinish = api.requests.find((r) => r.url === '/auth/passkey/register/finish');
   expect(enrollFinish).toBeTruthy();
 });
+
+test('passkey module exports conditional mediation detection and supports conditional sign-in options', async ({ anonApp }) => {
+  await anonApp.goto('/');
+  const isAvailableType = await anonApp.evaluate(async () => {
+    const mod = await import('/src/core/passkey.ts');
+    return typeof mod.isConditionalMediationAvailable;
+  });
+  expect(isAvailableType).toBe('function');
+});

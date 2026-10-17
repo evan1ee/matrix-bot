@@ -39,6 +39,21 @@ export function isPasskeySupported(): boolean {
   return typeof window !== 'undefined' && !!window.PublicKeyCredential;
 }
 
+/** Whether this browser supports conditional mediation (passkey autofill). */
+export async function isConditionalMediationAvailable(): Promise<boolean> {
+  if (typeof window === 'undefined' || !window.PublicKeyCredential) {
+    return false;
+  }
+  if (typeof PublicKeyCredential.isConditionalMediationAvailable === 'function') {
+    try {
+      return await PublicKeyCredential.isConditionalMediationAvailable();
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
 interface CeremonyStart {
   ceremony_id: string;
   options: any;
@@ -139,19 +154,33 @@ export async function registerPasskey(
   });
 }
 
+export interface SignInOptions {
+  conditional?: boolean;
+  signal?: AbortSignal;
+}
+
 /**
  * Signs in without a username.
  *
  * The credential itself carries the account handle, so the browser's own
  * picker is the account picker and nothing is typed.
  */
-export async function signInWithPasskey(): Promise<AccountSummary> {
+export async function signInWithPasskey(opts?: SignInOptions): Promise<AccountSummary> {
   const start = await fetchApi<CeremonyStart>('/auth/passkey/login/start', {
     method: 'POST',
+    signal: opts?.signal,
   });
 
+  const requestOptions = toRequestOptions(start.options);
+  if (opts?.conditional) {
+    (requestOptions as any).mediation = 'conditional';
+  }
+  if (opts?.signal) {
+    (requestOptions as any).signal = opts.signal;
+  }
+
   const credential = (await navigator.credentials.get(
-    toRequestOptions(start.options)
+    requestOptions
   )) as PublicKeyCredential | null;
 
   if (!credential) {
@@ -164,6 +193,7 @@ export async function signInWithPasskey(): Promise<AccountSummary> {
       ceremony_id: start.ceremony_id,
       credential: serialiseAssertion(credential),
     }),
+    signal: opts?.signal,
   });
 }
 
