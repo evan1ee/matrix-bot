@@ -18,11 +18,12 @@ pub const NO_REPLY: &str = "Nothing to answer for that.";
 
 const FENCE: &str = "```";
 
-/// One Discord message: one embed description and, on the last post only, the files.
+/// One Discord message: one embed description and, on the last post only, the files and buttons.
 #[derive(Debug, PartialEq)]
 pub struct Post {
     pub description: Option<String>,
     pub files: Vec<Attachment>,
+    pub buttons: Vec<(String, String)>,
 }
 
 impl Post {
@@ -30,13 +31,14 @@ impl Post {
         Self {
             description: Some(description.into()),
             files: Vec::new(),
+            buttons: Vec::new(),
         }
     }
 }
 
 /// `Content` → posts: Markdown from `html` (else the escaped `plain`), split at
-/// line boundaries into embed-sized chunks, files on the last post. Actions are
-/// dropped (B5). Empty content without files becomes [`NO_REPLY`].
+/// line boundaries into embed-sized chunks, files and buttons on the last post.
+/// Empty content without files or buttons becomes [`NO_REPLY`].
 pub fn posts(content: &Content) -> Result<Vec<Post>, ChannelError> {
     if let Some(big) = content
         .attachments
@@ -49,12 +51,26 @@ pub fn posts(content: &Content) -> Result<Vec<Post>, ChannelError> {
             MAX_UPLOAD_BYTES / (1024 * 1024)
         )));
     }
-    if !content.actions.is_empty() {
-        debug!(
-            count = content.actions.len(),
-            "Discord renders no buttons; actions dropped"
-        );
-    }
+    let buttons: Vec<(String, String)> = content
+        .actions
+        .iter()
+        .filter_map(|action| {
+            if action.command.is_empty() {
+                return None;
+            }
+            if action.command.len() > 100 {
+                debug!(
+                    command = action.command,
+                    "Discord button custom_id exceeds 100 bytes; dropped"
+                );
+                return None;
+            }
+            let label: String = action.label.chars().take(80).collect();
+            Some((label, action.command.clone()))
+        })
+        .take(25)
+        .collect();
+
     let markdown = match &content.html {
         Some(html) => html_to_markdown(html),
         None => escape_markdown(content.plain.trim()),
@@ -64,7 +80,10 @@ pub fn posts(content: &Content) -> Result<Vec<Post>, ChannelError> {
         .map(Some)
         .collect();
     if chunks.is_empty() {
-        chunks.push((content.attachments.is_empty()).then(|| NO_REPLY.to_owned()));
+        chunks.push(
+            (content.attachments.is_empty() && buttons.is_empty())
+                .then(|| NO_REPLY.to_owned()),
+        );
     }
     let last = chunks.len() - 1;
     Ok(chunks
@@ -74,6 +93,11 @@ pub fn posts(content: &Content) -> Result<Vec<Post>, ChannelError> {
             description,
             files: if i == last {
                 content.attachments.clone()
+            } else {
+                Vec::new()
+            },
+            buttons: if i == last {
+                buttons.clone()
             } else {
                 Vec::new()
             },
@@ -257,13 +281,84 @@ mod tests {
     }
 
     #[test]
-    fn actions_are_ignored() {
-        let mut content = Content::html("<b>x</b>");
+    fn posts_render_actions_as_buttons() {
+        let mut content = Content::text("Your tasks");
+        content.actions = vec![Action {
+            label: "Done #1".into(),
+            command: "todo done 1".into(),
+        }];
+        let rendered = posts(&content).unwrap();
+        assert_eq!(rendered[0].buttons, vec![("Done #1".into(), "todo done 1".into())]);
+    }
+
+    #[test]
+    fn button_rendering_applies_limits_and_filtering() {
+        let mut content = Content::text("Tasks");
+        // 1. empty command -> dropped
         content.actions.push(Action {
-            label: "Done".into(),
+            label: "Empty".into(),
+            command: "".into(),
+        });
+        // 2. command > 100 bytes -> dropped
+        content.actions.push(Action {
+            label: "Overlong".into(),
+            command: "a".repeat(101),
+        });
+        // 3. label > 80 chars -> truncated
+        content.actions.push(Action {
+            label: "l".repeat(100),
             command: "todo done 1".into(),
         });
-        assert_eq!(posts(&content).unwrap(), vec![Post::text("**x**")]);
+        // 4. exactly 100 bytes command -> kept
+        content.actions.push(Action {
+            label: "Exact 100".into(),
+            command: "b".repeat(100),
+        });
+        // 5. add 30 more valid actions to test 25 limit
+        for i in 0..30 {
+            content.actions.push(Action {
+                label: format!("Task {i}"),
+                command: format!("todo done {i}"),
+            });
+        }
+        let rendered = posts(&content).unwrap();
+        assert_eq!(rendered[0].buttons.len(), 25);
+        assert_eq!(rendered[0].buttons[0].0, "l".repeat(80));
+        assert_eq!(rendered[0].buttons[0].1, "todo done 1");
+        assert_eq!(rendered[0].buttons[1].0, "Exact 100");
+        assert_eq!(rendered[0].buttons[1].1, "b".repeat(100));
+        assert_eq!(rendered[0].buttons[2].0, "Task 0");
+    }
+
+    #[test]
+    fn buttons_ride_on_the_last_post_only() {
+        let mut content = Content::text("x\n".repeat(3000));
+        content.actions.push(Action {
+            label: "Click".into(),
+            command: "help".into(),
+        });
+        let rendered = posts(&content).unwrap();
+        assert!(rendered.len() > 1);
+        assert!(rendered[..rendered.len() - 1]
+            .iter()
+            .all(|p| p.buttons.is_empty()));
+        assert_eq!(
+            rendered.last().unwrap().buttons,
+            vec![("Click".into(), "help".into())]
+        );
+    }
+
+    #[test]
+    fn buttons_alone_have_no_text_and_no_reply_notice() {
+        let mut content = Content::default();
+        content.actions.push(Action {
+            label: "Click".into(),
+            command: "help".into(),
+        });
+        let rendered = posts(&content).unwrap();
+        assert_eq!(rendered.len(), 1);
+        assert_eq!(rendered[0].description, None);
+        assert_eq!(rendered[0].buttons, vec![("Click".into(), "help".into())]);
     }
 
     #[test]

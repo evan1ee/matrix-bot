@@ -1,7 +1,9 @@
 //! Discord events → `IncomingMessage`s for the shared pipeline. Pure: no
 //! network, no services, so it is tested against fixtures alone.
 
-use serenity::all::{CommandDataOptionValue, CommandInteraction, Member, Message, User};
+use serenity::all::{
+    CommandDataOptionValue, CommandInteraction, ComponentInteraction, Member, Message, User,
+};
 
 use super::commands::{inbound_text, CommandRefusal};
 use crate::domain::channels::{Channel, ConversationAddress, PlatformIdentity, PlatformUserId};
@@ -33,6 +35,32 @@ pub fn from_command(interaction: &CommandInteraction) -> Result<Parsed, CommandR
         conversation: ConversationAddress::Discord(interaction.channel_id.get()),
         sender,
         message_id: MessageRef(format!("interaction:{}", interaction.id.get())),
+        text: interaction_body(&text),
+        reply_to: None,
+        quoted: None,
+        is_direct: interaction.guild_id.is_none(),
+        is_mentioned: true,
+    };
+    Ok(Parsed { message, text })
+}
+
+/// A component interaction (button click). Conversation is the channel it was
+/// used in; `is_direct` when it came from a DM; `is_mentioned` always (a button
+/// interaction addresses the bot).
+pub fn from_component(interaction: &ComponentInteraction) -> Result<Parsed, CommandRefusal> {
+    let trimmed = interaction.data.custom_id.trim();
+    let (name, args) = match trimmed.split_once(char::is_whitespace) {
+        Some((name, args)) => (name, Some(args.trim())),
+        None => (trimmed, None),
+    };
+    let text = inbound_text(name, args)?;
+    let sender = identity(&interaction.user, interaction.member.as_ref())
+        .ok_or_else(|| CommandRefusal::Unknown(interaction.data.custom_id.clone()))?;
+    let message = IncomingMessage {
+        channel: Channel::Discord,
+        conversation: ConversationAddress::Discord(interaction.channel_id.get()),
+        sender,
+        message_id: MessageRef(format!("interaction:component:{}", interaction.id.get())),
         text: interaction_body(&text),
         reply_to: None,
         quoted: None,
@@ -129,6 +157,19 @@ mod tests {
         serde_json::from_value(value).expect("the fixture is a serenity Message")
     }
 
+    fn component(edit: impl FnOnce(&mut serde_json::Value)) -> ComponentInteraction {
+        let mut value: serde_json::Value = serde_json::from_str(COMMAND_FIXTURE).unwrap();
+        let dm_msg: serde_json::Value = serde_json::from_str(DM_FIXTURE).unwrap();
+        value["type"] = 3.into();
+        value["data"] = serde_json::json!({
+            "custom_id": "todo done 1",
+            "component_type": 2
+        });
+        value["message"] = dm_msg;
+        edit(&mut value);
+        serde_json::from_value(value).expect("the fixture is a serenity ComponentInteraction")
+    }
+
     #[test]
     fn a_guild_slash_command_becomes_an_incoming_command() {
         let parsed = from_command(&interaction(|_| {})).unwrap();
@@ -216,5 +257,88 @@ mod tests {
         assert_eq!(parse_message_ref(&message_ref(1, 2)), Some((1, 2)));
         assert_eq!(parse_message_ref(&MessageRef("interaction:5".into())), None);
         assert_eq!(parse_message_ref(&MessageRef("message:x:2".into())), None);
+    }
+
+    #[test]
+    fn a_guild_component_interaction_becomes_an_incoming_command() {
+        let parsed = from_component(&component(|_| {})).unwrap();
+        let m = &parsed.message;
+        assert_eq!(m.channel, Channel::Discord);
+        assert_eq!(
+            m.conversation,
+            ConversationAddress::Discord(1_100_000_000_000_000_002)
+        );
+        assert_eq!(m.sender.channel(), Channel::Discord);
+        assert_eq!(m.sender.user_id().as_str(), "1100000000000000003");
+        assert_eq!(m.sender.display_name(), Some("Evan in the guild"));
+        assert_eq!(
+            m.message_id,
+            MessageRef("interaction:component:1100000000000000001".into())
+        );
+        assert_eq!(m.text, "todo done 1");
+        assert!(!m.is_direct);
+        assert!(m.is_mentioned);
+        assert!(m.reply_to.is_none() && m.quoted.is_none());
+        match parsed.text {
+            InboundText::Command {
+                command,
+                raw_args,
+                full_body,
+            } => {
+                assert_eq!(command, "todo");
+                assert_eq!(raw_args, "done 1");
+                assert_eq!(full_body, "todo done 1");
+            }
+            InboundText::FreeText(_) => panic!("expected a command"),
+        }
+    }
+
+    #[test]
+    fn a_dm_component_interaction_is_direct_and_named_by_the_global_name() {
+        let parsed = from_component(&component(|v| {
+            let o = v.as_object_mut().unwrap();
+            o.remove("guild_id");
+            o.remove("member");
+        }))
+        .unwrap();
+        assert!(parsed.message.is_direct);
+        assert_eq!(parsed.message.sender.display_name(), Some("Evan"));
+    }
+
+    #[test]
+    fn a_component_interaction_without_args_parses_bare_command() {
+        let parsed = from_component(&component(|v| {
+            v["data"]["custom_id"] = "help".into();
+        }))
+        .unwrap();
+        match parsed.text {
+            InboundText::Command {
+                command,
+                raw_args,
+                full_body,
+            } => {
+                assert_eq!(command, "help");
+                assert_eq!(raw_args, "");
+                assert_eq!(full_body, "help");
+            }
+            InboundText::FreeText(_) => panic!("expected a command"),
+        }
+    }
+
+    #[test]
+    fn an_unknown_command_in_component_interaction_is_refused() {
+        let refused = from_component(&component(|v| {
+            v["data"]["custom_id"] = "unknown_command".into();
+        }));
+        assert!(matches!(refused, Err(CommandRefusal::Unknown(_))));
+    }
+
+    #[test]
+    fn an_over_long_command_in_component_interaction_is_refused() {
+        let long = format!("todo {}", "x".repeat(501));
+        let refused = from_component(&component(|v| {
+            v["data"]["custom_id"] = long.into();
+        }));
+        assert!(matches!(refused, Err(CommandRefusal::TooLong { .. })));
     }
 }

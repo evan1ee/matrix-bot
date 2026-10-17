@@ -5,9 +5,9 @@ use std::future::Future;
 use std::time::Duration;
 
 use serenity::all::{
-    ChannelId, CreateAllowedMentions, CreateAttachment, CreateEmbed,
-    CreateInteractionResponseFollowup, CreateMessage, EditInteractionResponse, Http, MessageId,
-    Nonce, UserId,
+    ButtonStyle, ChannelId, CreateActionRow, CreateAllowedMentions, CreateAttachment, CreateButton,
+    CreateEmbed, CreateInteractionResponseFollowup, CreateMessage, EditInteractionResponse, Http,
+    MessageId, Nonce, UserId,
 };
 
 use super::inbound::{message_ref, parse_message_ref};
@@ -89,10 +89,30 @@ fn attachment(file: Attachment) -> CreateAttachment {
     CreateAttachment::bytes(file.bytes, file.filename)
 }
 
+pub fn create_action_rows(buttons: &[(String, String)]) -> Vec<CreateActionRow> {
+    buttons
+        .chunks(5)
+        .map(|chunk| {
+            let row = chunk
+                .iter()
+                .map(|(label, custom_id)| {
+                    CreateButton::new(custom_id)
+                        .label(label)
+                        .style(ButtonStyle::Secondary)
+                })
+                .collect();
+            CreateActionRow::Buttons(row)
+        })
+        .collect()
+}
+
 pub fn create_message(post: Post) -> CreateMessage {
     let mut builder = CreateMessage::new().allowed_mentions(no_mentions());
     if let Some(e) = embed(post.description) {
         builder = builder.embed(e);
+    }
+    if !post.buttons.is_empty() {
+        builder = builder.components(create_action_rows(&post.buttons));
     }
     builder.add_files(post.files.into_iter().map(attachment))
 }
@@ -101,6 +121,9 @@ pub fn edit_response(post: Post) -> EditInteractionResponse {
     let mut builder = EditInteractionResponse::new().allowed_mentions(no_mentions());
     if let Some(e) = embed(post.description) {
         builder = builder.embed(e);
+    }
+    if !post.buttons.is_empty() {
+        builder = builder.components(create_action_rows(&post.buttons));
     }
     for file in post.files {
         builder = builder.new_attachment(attachment(file));
@@ -114,6 +137,9 @@ pub fn follow_up(post: Post, ephemeral: bool) -> CreateInteractionResponseFollow
         .ephemeral(ephemeral);
     if let Some(e) = embed(post.description) {
         builder = builder.embed(e);
+    }
+    if !post.buttons.is_empty() {
+        builder = builder.components(create_action_rows(&post.buttons));
     }
     builder.add_files(post.files.into_iter().map(attachment))
 }
@@ -219,12 +245,56 @@ mod tests {
         let post = Post {
             description: None,
             files: vec![file()],
+            buttons: Vec::new(),
         };
         let message = serde_json::to_value(create_message(post)).unwrap();
         assert_eq!(message["attachments"][0]["filename"], "voice.ogg");
         assert!(message
             .get("embeds")
             .is_none_or(|e| e.as_array().is_some_and(Vec::is_empty)));
+    }
+
+    #[test]
+    fn buttons_are_chunked_into_action_rows_and_attached_to_builders() {
+        let buttons: Vec<(String, String)> = (0..12)
+            .map(|i| (format!("Label {i}"), format!("cmd_{i}")))
+            .collect();
+        let rows = create_action_rows(&buttons);
+        assert_eq!(rows.len(), 3); // 5 + 5 + 2
+
+        let post = Post {
+            description: Some("desc".into()),
+            files: Vec::new(),
+            buttons: vec![("Done #1".into(), "todo done 1".into())],
+        };
+
+        let message = serde_json::to_value(create_message(Post {
+            description: post.description.clone(),
+            files: Vec::new(),
+            buttons: post.buttons.clone(),
+        }))
+        .unwrap();
+        assert_eq!(message["components"][0]["type"], 1); // ActionRow
+        assert_eq!(message["components"][0]["components"][0]["type"], 2); // Button
+        assert_eq!(message["components"][0]["components"][0]["style"], 2); // Secondary
+        assert_eq!(message["components"][0]["components"][0]["label"], "Done #1");
+        assert_eq!(message["components"][0]["components"][0]["custom_id"], "todo done 1");
+
+        let edit = serde_json::to_value(edit_response(Post {
+            description: post.description.clone(),
+            files: Vec::new(),
+            buttons: post.buttons.clone(),
+        }))
+        .unwrap();
+        assert_eq!(edit["components"][0]["components"][0]["custom_id"], "todo done 1");
+
+        let follow = serde_json::to_value(follow_up(Post {
+            description: post.description.clone(),
+            files: Vec::new(),
+            buttons: post.buttons.clone(),
+        }, false))
+        .unwrap();
+        assert_eq!(follow["components"][0]["components"][0]["custom_id"], "todo done 1");
     }
 
     #[tokio::test]
