@@ -114,7 +114,12 @@ impl Inbound {
             .catch_unwind()
             .await;
         match dispatched {
-            Ok(Some(reply)) => InboundOutcome::Replied(reply),
+            Ok(Some(mut reply)) => {
+                if reply.owner_id.is_none() {
+                    reply.owner_id = Some(owner);
+                }
+                InboundOutcome::Replied(reply)
+            }
             Ok(None) => InboundOutcome::Ignored,
             Err(panic) => {
                 error!(channel = %msg.channel, "Command dispatch panicked: {panic:?}");
@@ -326,6 +331,10 @@ mod tests {
             true,
         );
         let out = inbound.handle(&msg, cmd("todo", "list"), None).await;
+        match &out {
+            InboundOutcome::Replied(r) => assert_eq!(r.owner_id, Some(a)),
+            _ => panic!("expected replied outcome"),
+        }
         assert_reply_contains(out, "handled by todo");
     }
 

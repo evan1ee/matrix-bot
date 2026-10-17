@@ -2,6 +2,7 @@
 //! reachable only through the opaque [`MessageRef`] it minted (R72): there is
 //! deliberately no generic metadata map.
 
+use crate::domain::accounts::AccountId;
 use crate::domain::channels::{Channel, ConversationAddress, PlatformIdentity};
 use crate::domain::chat::QuotedMessage;
 use crate::utils::strip_html;
@@ -89,10 +90,12 @@ impl Content {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Reply {
     pub content: Content,
     pub visibility: Visibility,
+    pub is_ai: bool,
+    pub owner_id: Option<AccountId>,
 }
 
 impl Reply {
@@ -100,7 +103,28 @@ impl Reply {
         Self {
             content: Content::html(html),
             visibility: Visibility::Normal,
+            is_ai: false,
+            owner_id: None,
         }
+    }
+
+    pub fn ai(html: impl Into<String>) -> Self {
+        Self {
+            content: Content::html(html),
+            visibility: Visibility::Normal,
+            is_ai: true,
+            owner_id: None,
+        }
+    }
+
+    pub fn mark_ai(mut self) -> Self {
+        self.is_ai = true;
+        self
+    }
+
+    pub fn with_owner(mut self, owner: AccountId) -> Self {
+        self.owner_id = Some(owner);
+        self
     }
 
     pub fn private(html: impl Into<String>) -> Self {
@@ -177,6 +201,7 @@ impl OutgoingMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::accounts::AccountId;
 
     #[test]
     fn reply_from_html_derives_its_plain_text() {
@@ -185,4 +210,34 @@ mod tests {
         assert_eq!(r.visibility, Visibility::Normal);
         assert_eq!(Reply::private("<i>x</i>").visibility, Visibility::Private);
     }
+
+    #[test]
+    fn reply_ai_and_owner_provenance() {
+        let owner = AccountId::generate();
+
+        let r_html = Reply::html("<b>hello</b>");
+        assert!(!r_html.is_ai);
+        assert_eq!(r_html.owner_id, None);
+
+        let r_ai = Reply::ai("<b>assistant</b>");
+        assert!(r_ai.is_ai);
+        assert_eq!(r_ai.owner_id, None);
+
+        let r_marked = Reply::html("plain").mark_ai();
+        assert!(r_marked.is_ai);
+        assert_eq!(r_marked.owner_id, None);
+
+        let r_owned = Reply::ai("<b>assistant</b>").with_owner(owner);
+        assert!(r_owned.is_ai);
+        assert_eq!(r_owned.owner_id, Some(owner));
+
+        let r_from = Reply::from("plain text".to_string());
+        assert!(!r_from.is_ai);
+        assert_eq!(r_from.owner_id, None);
+
+        let r_priv = Reply::private("secret");
+        assert!(!r_priv.is_ai);
+        assert_eq!(r_priv.owner_id, None);
+    }
 }
+

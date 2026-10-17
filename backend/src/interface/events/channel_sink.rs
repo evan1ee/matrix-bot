@@ -91,6 +91,8 @@ impl DeliverySink for ChannelSink {
             Reply {
                 content,
                 visibility: Visibility::Normal,
+                is_ai: false,
+                owner_id: None,
             },
         );
         message.idempotency_key = Some(format!("outbox-{}", delivery.id));

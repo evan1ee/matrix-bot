@@ -154,6 +154,8 @@ pub(crate) fn message(target: Target, plain: &str, html: &str) -> OutgoingMessag
                 ..Content::default()
             },
             visibility: Visibility::Normal,
+            is_ai: false,
+            owner_id: None,
         },
     )
 }
