@@ -77,10 +77,10 @@ Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in sequence:
      - Direct Kokoro TTS audio compilation for weekly bookmark digests.
      - Deterministic mathematical portfolio drift calculation before invoking LLM synthesis.
 
-3. **Discord Channel Capabilities Expansion:**
-   - Add interactive ActionRow buttons for task completion (matching Telegram's inline keyboard "Done" buttons).
-   - Add typed slash command options (in addition to the single `args` string fast-path).
-   - Inbound receipt/image attachment ingestion over Discord DMs (saving to `StorageService` and enqueuing `media.process_receipt`).
+3. **Discord Channel Capabilities Expansion (Fixed):**
+   - Implemented interactive ActionRow buttons in `render.rs` and `outbound.rs` chunked up to 5x5 per message (`CreateActionRow::Buttons`), with component interaction parsing in `inbound.rs` and dispatching in `gateway.rs` and `worker.rs` (`Work::Component`).
+   - Implemented typed slash command options and subcommands in `commands.rs` and `inbound.rs` (`/todo add task:`, `/todo done id:`, `/todo list page:`, `/expense add amount: note:`, `/expense list`) with backward-compatible single `args` string parsing.
+   - Implemented inbound receipt/image attachment ingestion over Discord DMs in `gateway.rs` and `worker.rs` (`Work::DirectAttachment`), resolving linked account owners, enforcing 10 MiB limit and download timeout, persisting into object storage (`StorageCategory::Receipts`), enqueuing durable `media.process_receipt` background jobs, and replying with receipt acknowledgments.
 
 4. **WebAuthn Conditional UI (Passkey Autofill) (Fixed):**
    - Added `isConditionalMediationAvailable()` check and `opts?: SignInOptions` (`{ conditional, signal }`) in `frontend/src/core/passkey.ts`.
@@ -139,6 +139,11 @@ Format: `Ruling: <decision> — <why> — <cost if wrong>`. New rulings go here 
 ### Rulings (2026-10-17 — Quote-Based AI Confirmation Hardening)
 
 - *Ruling: `AiReplyTracker` verifies authentic AI replies via `(room_key, event_id, owner_id)` tuple and 1-hour TTL — guarantees quoting the bot's own AI prompts does not trigger untrusted input taint or trap users in infinite confirmation loops, while preventing cross-room replay, cross-owner privilege escalation, and untracked webhook alert steering — cost if wrong: quotes from restarts after > 1 hour fall back to requiring unquoted confirmation.*
+
+### Rulings (2026-10-17 — Discord Channel Capabilities Expansion)
+
+- *Ruling: Discord slash commands register subcommands (`/todo add`, `/todo done`, etc.) without a root-level `args` string option — Discord's interaction API strictly forbids combining root-level arguments and subcommands on the same command (HTTP 400 `50035`), while inbound parsing maintains backward-compatible `args` fallback — cost if wrong: users typing `/todo` without subcommands see Discord autocomplete guide them to subcommands.*
+- *Ruling: Direct image ingestion over Discord is restricted strictly to direct messages (DMs) from linked accounts — attachments in guild channels or from unlinked senders fail closed with immediate return or `UNLINKED_REPLY` without downloading bytes or persisting storage — cost if wrong: guild members must DM the bot to scan receipts.*
 
 ---
 
