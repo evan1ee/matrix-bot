@@ -2,8 +2,8 @@
 //! network, no services, so it is tested against fixtures alone.
 
 use serenity::all::{
-    CommandDataOption, CommandDataOptionValue, CommandInteraction, ComponentInteraction, Member,
-    Message, User,
+    Attachment, CommandDataOption, CommandDataOptionValue, CommandInteraction,
+    ComponentInteraction, Member, Message, User,
 };
 
 use super::commands::{inbound_text, CommandRefusal, ARGS_MAX};
@@ -251,7 +251,7 @@ fn interaction_body(text: &InboundText) -> String {
 
 /// Display name: guild nickname, else global name, else username. `None` only
 /// for an id that is no snowflake, which Discord never sends.
-fn identity(user: &User, member: Option<&Member>) -> Option<PlatformIdentity> {
+pub(crate) fn identity(user: &User, member: Option<&Member>) -> Option<PlatformIdentity> {
     let user_id = PlatformUserId::parse(Channel::Discord, &user.id.get().to_string()).ok()?;
     let display_name = member
         .and_then(|m| m.nick.clone())
@@ -262,6 +262,60 @@ fn identity(user: &User, member: Option<&Member>) -> Option<PlatformIdentity> {
         user_id,
         Some(display_name),
     ))
+}
+
+/// True when an attachment looks like an image by its MIME type or extension.
+pub fn is_image_attachment(attachment: &Attachment) -> bool {
+    if let Some(ct) = &attachment.content_type {
+        if ct.starts_with("image/") {
+            return true;
+        }
+    }
+    let lower = attachment.filename.to_ascii_lowercase();
+    lower.ends_with(".png")
+        || lower.ends_with(".jpg")
+        || lower.ends_with(".jpeg")
+        || lower.ends_with(".webp")
+        || lower.ends_with(".gif")
+}
+
+/// Sniffs extension and content-type from magic bytes or attachment metadata.
+pub fn image_meta(attachment: &Attachment, bytes: &[u8]) -> (&'static str, &'static str) {
+    if bytes.starts_with(b"\xFF\xD8\xFF") {
+        ("jpg", "image/jpeg")
+    } else if bytes.starts_with(b"\x89PNG\r\n\x1a\n") {
+        ("png", "image/png")
+    } else if bytes.len() >= 12 && &bytes[0..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        ("webp", "image/webp")
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        ("gif", "image/gif")
+    } else {
+        let mime = attachment
+            .content_type
+            .as_deref()
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if mime.contains("jpeg") || mime.contains("jpg") {
+            ("jpg", "image/jpeg")
+        } else if mime.contains("png") {
+            ("png", "image/png")
+        } else if mime.contains("webp") {
+            ("webp", "image/webp")
+        } else if mime.contains("gif") {
+            ("gif", "image/gif")
+        } else {
+            let lower = attachment.filename.to_ascii_lowercase();
+            if lower.ends_with(".png") {
+                ("png", "image/png")
+            } else if lower.ends_with(".webp") {
+                ("webp", "image/webp")
+            } else if lower.ends_with(".gif") {
+                ("gif", "image/gif")
+            } else {
+                ("jpg", "image/jpeg")
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -675,5 +729,73 @@ mod tests {
             }
             _ => panic!("expected a command"),
         }
+    }
+
+    fn attachment_fixture(filename: &str, content_type: Option<&str>) -> Attachment {
+        serde_json::from_value(serde_json::json!({
+            "id": "1100000000000000020",
+            "filename": filename,
+            "size": 1024,
+            "url": "https://cdn.discordapp.com/attachments/1/2/pic.png",
+            "proxy_url": "https://media.discordapp.net/attachments/1/2/pic.png",
+            "content_type": content_type,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn is_image_attachment_detects_mime_and_extensions() {
+        let png = attachment_fixture("receipt.png", Some("image/png"));
+        assert!(is_image_attachment(&png));
+
+        let jpeg_mime = attachment_fixture("receipt.dat", Some("image/jpeg"));
+        assert!(is_image_attachment(&jpeg_mime));
+
+        let jpg_ext = attachment_fixture("scan.JPG", None);
+        assert!(is_image_attachment(&jpg_ext));
+
+        let webp_ext = attachment_fixture("photo.webp", Some("application/octet-stream"));
+        assert!(is_image_attachment(&webp_ext));
+
+        let gif_ext = attachment_fixture("anim.gif", None);
+        assert!(is_image_attachment(&gif_ext));
+
+        let pdf = attachment_fixture("document.pdf", Some("application/pdf"));
+        assert!(!is_image_attachment(&pdf));
+
+        let txt = attachment_fixture("notes.txt", None);
+        assert!(!is_image_attachment(&txt));
+    }
+
+    #[test]
+    fn image_meta_resolves_magic_bytes_mime_and_extension() {
+        let dummy = attachment_fixture("unknown.bin", None);
+
+        // Magic bytes
+        let (ext, mime) = image_meta(&dummy, b"\xFF\xD8\xFF\xE0\x00\x10JFIF");
+        assert_eq!((ext, mime), ("jpg", "image/jpeg"));
+
+        let (ext, mime) = image_meta(&dummy, b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR");
+        assert_eq!((ext, mime), ("png", "image/png"));
+
+        let (ext, mime) = image_meta(&dummy, b"RIFF\x20\x00\x00\x00WEBPVP8 ");
+        assert_eq!((ext, mime), ("webp", "image/webp"));
+
+        let (ext, mime) = image_meta(&dummy, b"GIF89a\x01\x00\x01\x00");
+        assert_eq!((ext, mime), ("gif", "image/gif"));
+
+        // Content-type fallback
+        let webp_att = attachment_fixture("receipt", Some("image/webp"));
+        let (ext, mime) = image_meta(&webp_att, b"not_magic");
+        assert_eq!((ext, mime), ("webp", "image/webp"));
+
+        // Filename fallback
+        let png_att = attachment_fixture("receipt.png", None);
+        let (ext, mime) = image_meta(&png_att, b"not_magic");
+        assert_eq!((ext, mime), ("png", "image/png"));
+
+        // Default
+        let (ext, mime) = image_meta(&dummy, b"not_magic");
+        assert_eq!((ext, mime), ("jpg", "image/jpeg"));
     }
 }

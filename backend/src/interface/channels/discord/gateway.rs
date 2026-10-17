@@ -12,7 +12,7 @@ use tokio::sync::mpsc;
 use tracing::{info, warn};
 
 use super::commands::{create_commands, defer_mode, DeferMode};
-use super::inbound::{from_command, from_component, from_direct_message};
+use super::inbound::{from_command, from_component, from_direct_message, is_image_attachment};
 use super::outbound::{bounded, edit_response};
 use super::render::Post;
 use super::worker::Work;
@@ -152,6 +152,30 @@ impl EventHandler for Gateway {
     }
 
     async fn message(&self, _ctx: Context, message: Message) {
+        if message.author.bot || message.guild_id.is_some() {
+            return;
+        }
+        if let Some(attachment) = message.attachments.iter().find(|a| is_image_attachment(a)) {
+            let caption = {
+                let trimmed = message.content.trim();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed.to_owned())
+                }
+            };
+            let work = Work::DirectAttachment {
+                channel: message.channel_id,
+                message: message.id,
+                author: message.author.clone(),
+                attachment: attachment.clone(),
+                caption,
+            };
+            if self.queue.try_send(work).is_err() {
+                warn!("Discord work queue full; a direct attachment was dropped");
+            }
+            return;
+        }
         let Some(parsed) = from_direct_message(&message) else {
             return;
         };

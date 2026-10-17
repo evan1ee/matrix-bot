@@ -72,6 +72,10 @@ impl Inbound {
         &self.services
     }
 
+    pub fn db(&self) -> &Database {
+        &self.db
+    }
+
     pub async fn handle(
         &self,
         msg: &IncomingMessage,

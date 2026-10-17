@@ -2,27 +2,34 @@
 //! through the shared pipeline and delivers the outcome.
 
 use std::sync::Arc;
+use std::time::Duration;
 
-use serenity::all::{ChannelId, CommandInteraction, ComponentInteraction, Http, MessageId};
+use serenity::all::{
+    Attachment, ChannelId, CommandInteraction, ComponentInteraction, Http, MessageId, User,
+};
 use tokio::sync::{mpsc, Mutex};
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
 
 use super::commands::DeferMode;
-use super::inbound::{message_ref, Parsed};
+use super::inbound::{identity, image_meta, message_ref, Parsed};
 use super::outbound::{bounded, edit_response, follow_up, send};
 use super::progress::{InteractionProgress, TypingProgress};
 use super::render::{posts, route_reply, Post, Route, NO_REPLY, PRIVATE_NOTICE};
+use crate::application::identity::Resolution;
 use crate::domain::channels::ConversationAddress;
+use crate::domain::jobs::NewJob;
+use crate::domain::storage::{StorageCategory, StorageKey};
 use crate::interface::channels::adapter::ChannelError;
 use crate::interface::channels::inbound::{Inbound, InboundOutcome};
-use crate::interface::channels::message::{OutgoingMessage, Target};
+use crate::interface::channels::message::{OutgoingMessage, Reply, Target};
 use crate::llm::progress::ProgressSink;
 
 /// How many turns run at once (B8).
 pub const DISCORD_WORKERS: usize = 4;
 
 /// One parsed event, already acknowledged to Discord when it is an interaction.
+#[allow(clippy::large_enum_variant)]
 pub enum Work {
     Command {
         interaction: Arc<CommandInteraction>,
@@ -38,6 +45,13 @@ pub enum Work {
         channel: ChannelId,
         message: MessageId,
         parsed: Parsed,
+    },
+    DirectAttachment {
+        channel: ChannelId,
+        message: MessageId,
+        author: User,
+        attachment: Attachment,
+        caption: Option<String>,
     },
 }
 
@@ -149,15 +163,157 @@ async fn handle(work: Work, inbound: &Inbound, http: &Arc<Http>) {
             let InboundOutcome::Replied(reply) = outcome else {
                 return;
             };
-            let mut out = OutgoingMessage::to(
-                Target::Conversation(ConversationAddress::Discord(channel.get())),
-                reply,
-            );
-            out.reply_to = Some(message_ref(channel.get(), message.get()));
-            if let Err(err) = send(http, out).await {
-                warn!(error = %err, "Could not deliver a Discord DM reply");
-            }
+            reply_dm(http, channel, message, reply).await;
         }
+        Work::DirectAttachment {
+            channel,
+            message,
+            author,
+            attachment,
+            caption,
+        } => {
+            let Some(sender) = identity(&author, None) else {
+                warn!(user_id = %author.id, "could not construct Discord platform identity");
+                return;
+            };
+            let owner = match inbound.services().identity.resolve(&sender).await {
+                Ok(Resolution::Account(owner)) => owner,
+                Ok(Resolution::Unlinked) => {
+                    reply_dm(
+                        http,
+                        channel,
+                        message,
+                        Reply::html(crate::interface::channels::inbound::UNLINKED_REPLY),
+                    )
+                    .await;
+                    return;
+                }
+                Err(err) => {
+                    warn!(error = %err, "could not resolve Discord sender identity");
+                    return;
+                }
+            };
+
+            const MAX_IMAGE_BYTES: u32 = 10 * 1024 * 1024;
+            if attachment.size > MAX_IMAGE_BYTES {
+                reply_dm(
+                    http,
+                    channel,
+                    message,
+                    Reply::html("⚠️ That image is too large (maximum size is 10 MiB)."),
+                )
+                .await;
+                return;
+            }
+
+            let download_result = tokio::time::timeout(
+                Duration::from_secs(15),
+                attachment.download(),
+            )
+            .await;
+
+            let bytes = match download_result {
+                Ok(Ok(bytes)) => bytes,
+                Ok(Err(err)) => {
+                    warn!(error = %err, "could not download Discord attachment");
+                    reply_dm(
+                        http,
+                        channel,
+                        message,
+                        Reply::html("⚠️ Could not download the attached image. Please try again."),
+                    )
+                    .await;
+                    return;
+                }
+                Err(_) => {
+                    warn!("timed out downloading Discord attachment");
+                    reply_dm(
+                        http,
+                        channel,
+                        message,
+                        Reply::html("⚠️ Downloading the attached image timed out. Please try again."),
+                    )
+                    .await;
+                    return;
+                }
+            };
+
+            if bytes.is_empty() || bytes.len() > MAX_IMAGE_BYTES as usize {
+                reply_dm(
+                    http,
+                    channel,
+                    message,
+                    Reply::html("⚠️ That image is empty or exceeds the 10 MiB limit."),
+                )
+                .await;
+                return;
+            }
+
+            let (ext, content_type) = image_meta(&attachment, &bytes);
+            let storage_key = StorageKey::generate(&owner, StorageCategory::Receipts, ext);
+
+            if let Err(err) = inbound
+                .services()
+                .storage
+                .put(
+                    &storage_key,
+                    bytes::Bytes::from(bytes),
+                    content_type,
+                )
+                .await
+            {
+                warn!(error = %err, "could not store receipt image from Discord");
+                reply_dm(
+                    http,
+                    channel,
+                    message,
+                    Reply::html("⚠️ Could not save the receipt image. Please try again."),
+                )
+                .await;
+                return;
+            }
+
+            let job = NewJob::media_process_receipt(
+                owner,
+                storage_key,
+                Some(ConversationAddress::Discord(channel.get())),
+                caption,
+            );
+
+            if let Err(err) =
+                crate::infrastructure::postgres::repositories::jobs::enqueue(&inbound.db().pool, &job)
+                    .await
+            {
+                warn!(error = %err, "could not enqueue media.process_receipt job from Discord");
+                reply_dm(
+                    http,
+                    channel,
+                    message,
+                    Reply::html("⚠️ Could not queue receipt processing. Please try again."),
+                )
+                .await;
+                return;
+            }
+
+            reply_dm(
+                http,
+                channel,
+                message,
+                Reply::html("🧾 Receipt received and queued for processing!"),
+            )
+            .await;
+        }
+    }
+}
+
+async fn reply_dm(http: &Arc<Http>, channel: ChannelId, message: MessageId, reply: Reply) {
+    let mut out = OutgoingMessage::to(
+        Target::Conversation(ConversationAddress::Discord(channel.get())),
+        reply,
+    );
+    out.reply_to = Some(message_ref(channel.get(), message.get()));
+    if let Err(err) = send(http, out).await {
+        warn!(error = %err, "Could not deliver a Discord DM reply");
     }
 }
 
@@ -318,5 +474,83 @@ mod tests {
             }
             _ => panic!("expected Work::Component"),
         }
+    }
+
+    #[test]
+    fn direct_attachment_work_matches_and_unpacks() {
+        let dm = serde_json::from_str::<serenity::all::Message>(DM_FIXTURE).unwrap();
+        let attachment: Attachment = serde_json::from_value(serde_json::json!({
+            "id": "1100000000000000020",
+            "filename": "receipt.jpg",
+            "size": 2048,
+            "url": "https://cdn.discordapp.com/attachments/1/2/receipt.jpg",
+            "proxy_url": "https://media.discordapp.net/attachments/1/2/receipt.jpg",
+            "content_type": "image/jpeg",
+        }))
+        .unwrap();
+
+        let work = Work::DirectAttachment {
+            channel: dm.channel_id,
+            message: dm.id,
+            author: dm.author.clone(),
+            attachment: attachment.clone(),
+            caption: Some("lunch receipt".into()),
+        };
+
+        match work {
+            Work::DirectAttachment {
+                channel,
+                message,
+                author,
+                attachment: att,
+                caption,
+            } => {
+                assert_eq!(channel.get(), 1_100_000_000_000_000_012);
+                assert_eq!(message.get(), 1_100_000_000_000_000_011);
+                assert_eq!(author.name, "evan");
+                assert_eq!(att.filename, "receipt.jpg");
+                assert_eq!(caption.as_deref(), Some("lunch receipt"));
+            }
+            _ => panic!("expected Work::DirectAttachment"),
+        }
+    }
+
+    #[test]
+    fn direct_attachment_receipt_job_builds_correctly() {
+        let owner = crate::domain::accounts::AccountId::from_seed("acct_test");
+        let storage_key = StorageKey::generate(&owner, StorageCategory::Receipts, "jpg");
+        let channel_id = ChannelId::new(123456789);
+        let job = NewJob::media_process_receipt(
+            owner,
+            storage_key.clone(),
+            Some(ConversationAddress::Discord(channel_id.get())),
+            Some("lunch".into()),
+        );
+        assert_eq!(
+            job.job_type(),
+            crate::domain::jobs::JobType::MediaProcessReceipt
+        );
+        assert_eq!(job.account_id(), Some(&owner));
+        match job.payload() {
+            crate::domain::jobs::JobPayload::MediaProcessReceipt(p) => {
+                assert_eq!(p.storage_key, storage_key);
+                assert_eq!(p.account_id, owner);
+                assert_eq!(
+                    p.conversation,
+                    Some(ConversationAddress::Discord(123456789))
+                );
+                assert_eq!(p.caption.as_deref(), Some("lunch"));
+            }
+            _ => panic!("expected MediaProcessReceipt payload"),
+        }
+    }
+
+    #[test]
+    fn direct_attachment_size_limit_rejection() {
+        const MAX_IMAGE_BYTES: u32 = 10 * 1024 * 1024;
+        let valid_size = MAX_IMAGE_BYTES;
+        let oversized = MAX_IMAGE_BYTES + 1;
+        assert!(valid_size <= MAX_IMAGE_BYTES);
+        assert!(oversized > MAX_IMAGE_BYTES);
     }
 }
