@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
+mod audio;
 mod resume;
 
 use super::{deliverable, message, parse_payload, Outbound};
@@ -18,7 +19,7 @@ use crate::domain::agent::{
     model_steps, step_budget, AgentRunId, AgentStep, RunStatus, StepStatus,
 };
 use crate::domain::jobs::{AgentExecutePayload, JobType};
-use crate::interface::channels::message::Target;
+use crate::interface::channels::message::{Attachment, Target};
 use crate::jobs::{JobContext, JobError, JobHandler};
 use crate::llm::agent::{ReActEngine, StepContext, StepOutcome};
 use crate::llm::resolved_config::ResolvedAiConfig;
@@ -51,14 +52,23 @@ impl AgentExecuteRunHandler {
         }
     }
 
-    async fn deliver_message(&self, conversation: Option<&str>, plain: &str, html: &str) {
+    async fn deliver_message(
+        &self,
+        conversation: Option<&str>,
+        plain: &str,
+        html: &str,
+        attachment: Option<Attachment>,
+    ) {
         let Some(room_str) = conversation else {
             return;
         };
         let Some((target_address, _channel)) = deliverable(room_str) else {
             return;
         };
-        let msg = message(Target::Conversation(target_address), plain, html);
+        let mut msg = message(Target::Conversation(target_address), plain, html);
+        if let Some(att) = attachment {
+            msg.content.attachments.push(att);
+        }
         let _ = self.outbound.send(msg).await;
     }
 }
@@ -151,6 +161,7 @@ impl JobHandler for AgentExecuteRunHandler {
                         "<p>❌ <b>Agent Run Failed</b>: {}</p>",
                         html_escape(&error_msg)
                     ),
+                    None,
                 )
                 .await;
                 return Ok(());
@@ -271,7 +282,7 @@ impl JobHandler for AgentExecuteRunHandler {
                         approval.id
                     );
 
-                    self.deliver_message(p.origin_conversation.as_deref(), &plain, &html)
+                    self.deliver_message(p.origin_conversation.as_deref(), &plain, &html, None)
                         .await;
 
                     return Ok(());
@@ -304,14 +315,49 @@ impl JobHandler for AgentExecuteRunHandler {
                         .await
                         .map_err(JobError::from)?;
 
-                    let plain = format!("🎯 Agent Goal Completed:\n\n{}", final_answer);
+                    let audio_script = audio::extract_audio_script(&final_answer);
+                    let cleaned_answer = audio::strip_audio_script(&final_answer);
+                    let attachment = if let Some(script) = &audio_script {
+                        let task_voice = if let Some(task_uuid) = run.scheduled_task_id {
+                            if let Ok(tasks) = self.services.agent.list_scheduled_tasks(&owner).await {
+                                tasks
+                                    .into_iter()
+                                    .find(|t| t.id == task_uuid)
+                                    .and_then(|t| {
+                                        t.config
+                                            .get("voice")
+                                            .and_then(|v| v.as_str().map(|s| s.to_string()))
+                                    })
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
+                        audio::compile_audio_digest(
+                            &self.services,
+                            &owner,
+                            script,
+                            task_voice.as_deref(),
+                        )
+                        .await
+                    } else {
+                        None
+                    };
+
+                    let plain = format!("🎯 Agent Goal Completed:\n\n{}", cleaned_answer);
                     let html = format!(
                         "<p>🎯 <b>Agent Goal Completed</b></p><p>{}</p>",
-                        html_escape(&final_answer)
+                        html_escape(&cleaned_answer)
                     );
 
-                    self.deliver_message(p.origin_conversation.as_deref(), &plain, &html)
-                        .await;
+                    self.deliver_message(
+                        p.origin_conversation.as_deref(),
+                        &plain,
+                        &html,
+                        attachment,
+                    )
+                    .await;
 
                     return Ok(());
                 }
@@ -349,7 +395,7 @@ impl JobHandler for AgentExecuteRunHandler {
                         html_escape(&error)
                     );
 
-                    self.deliver_message(p.origin_conversation.as_deref(), &plain, &html)
+                    self.deliver_message(p.origin_conversation.as_deref(), &plain, &html, None)
                         .await;
 
                     return Ok(());
@@ -1063,7 +1109,7 @@ mod tests {
         assert!(
             offered
                 .iter()
-                .all(|n| ["get_my_habits", "get_daily_log"].contains(n)),
+                .all(|n| ["get_my_habits", "get_daily_log", "evaluate_habit_consistency"].contains(n)),
             "only whitelisted tools are offered: {offered:?}"
         );
     }
@@ -1111,9 +1157,262 @@ mod tests {
             run.error
                 .as_deref()
                 .unwrap_or_default()
-                .contains("not allowed by task policy"),
+                .contains("not permitted by task whitelist"),
             "{:?}",
             run.error
         );
+    }
+
+    #[tokio::test]
+    async fn completed_goal_with_audio_script_compiles_digest_and_cleans_message() {
+        use crate::domain::config::SettingValue;
+        use crate::interface::channels::message::AttachmentKind;
+        use crate::llm::test_support::*;
+        use axum::routing::post;
+
+        let fake_audio = b"fake-digest-ogg-audio".to_vec();
+        let app = axum::Router::new().route(
+            "/audio/speech",
+            post({
+                let audio = fake_audio.clone();
+                move || {
+                    let audio = audio.clone();
+                    async move {
+                        let mut resp = axum::response::Response::new(axum::body::Body::from(audio));
+                        resp.headers_mut().insert(
+                            "x-duration-ms",
+                            axum::http::HeaderValue::from_static("6000"),
+                        );
+                        resp
+                    }
+                }
+            }),
+        );
+        let tts_base_url = crate::infrastructure::inference::test_support::spawn_server(app).await;
+
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let services = AppServices::new(&pool);
+        let owner = AccountId::from_seed("agent-audio-digest-test");
+        crate::db::pool::seed_account(&pool, &owner).await;
+
+        services
+            .app_config
+            .update_setting(
+                &owner,
+                crate::domain::config::SettingKey::InferenceTtsBaseUrl,
+                SettingValue::String(tts_base_url),
+            )
+            .await
+            .unwrap();
+
+        let outbound = FakeOutbound::connected();
+        let final_text = "Weekly Digest Summary:\n\n<audio_script>Welcome to your audio podcast briefing!</audio_script>\n\nHope you enjoyed!";
+        let (url, _seen) = scripted_replies(vec![text_reply(final_text)]).await;
+        let handler = AgentExecuteRunHandler::new(
+            services.clone(),
+            pool.clone(),
+            outbound.clone(),
+            ReActEngine::from_proxy(None),
+            test_config(url),
+        );
+
+        let run = services
+            .agent
+            .start_user_goal(owner, None, "Generate weekly digest", None)
+            .await
+            .unwrap();
+
+        let ctx = JobContext {
+            job_id: JobId(301),
+            account_id: Some(owner),
+            attempt: 1,
+            max_attempts: 3,
+            cancel: CancellationToken::new(),
+        };
+        let payload = serde_json::json!({
+            "run_id": run.id.as_uuid(),
+            "origin_conversation": "!test_room:matrix.org",
+        });
+
+        handler.run(&ctx, payload).await.unwrap();
+
+        let msgs = outbound.messages();
+        assert_eq!(msgs.len(), 1, "exactly one completion message delivered");
+        let msg = &msgs[0];
+
+        // Delivered text must be stripped of audio tags
+        assert!(msg.content.plain.contains("Weekly Digest Summary:"));
+        assert!(msg.content.plain.contains("Hope you enjoyed!"));
+        assert!(!msg.content.plain.contains("<audio_script>"));
+        assert!(!msg.content.plain.contains("Welcome to your audio podcast briefing!"));
+
+        // Attachment must be attached
+        assert_eq!(msg.content.attachments.len(), 1);
+        let att = &msg.content.attachments[0];
+        assert_eq!(att.kind, AttachmentKind::Audio);
+        assert_eq!(att.mime, "audio/ogg");
+        assert_eq!(att.filename, "weekly-digest.ogg");
+        assert_eq!(att.bytes, fake_audio);
+        assert_eq!(att.duration_ms, Some(6000));
+    }
+
+    #[tokio::test]
+    async fn completed_goal_with_audio_script_degrades_gracefully_when_tts_unconfigured() {
+        use crate::llm::test_support::*;
+
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let services = AppServices::new(&pool);
+        let owner = AccountId::from_seed("agent-audio-unconf-test");
+        crate::db::pool::seed_account(&pool, &owner).await;
+
+        let outbound = FakeOutbound::connected();
+        let final_text = "Here is the news:\n\n<audio_script>Voice digest.</audio_script>\n\nEnd of news.";
+        let (url, _seen) = scripted_replies(vec![text_reply(final_text)]).await;
+        let handler = AgentExecuteRunHandler::new(
+            services.clone(),
+            pool.clone(),
+            outbound.clone(),
+            ReActEngine::from_proxy(None),
+            test_config(url),
+        );
+
+        let run = services
+            .agent
+            .start_user_goal(owner, None, "Generate news", None)
+            .await
+            .unwrap();
+
+        let ctx = JobContext {
+            job_id: JobId(302),
+            account_id: Some(owner),
+            attempt: 1,
+            max_attempts: 3,
+            cancel: CancellationToken::new(),
+        };
+        let payload = serde_json::json!({
+            "run_id": run.id.as_uuid(),
+            "origin_conversation": "!test_room2:matrix.org",
+        });
+
+        handler.run(&ctx, payload).await.unwrap();
+
+        let msgs = outbound.messages();
+        assert_eq!(msgs.len(), 1);
+        let msg = &msgs[0];
+
+        // Delivered text must be stripped of audio tags
+        assert!(msg.content.plain.contains("Here is the news:"));
+        assert!(msg.content.plain.contains("End of news."));
+        assert!(!msg.content.plain.contains("<audio_script>"));
+        assert!(!msg.content.plain.contains("Voice digest."));
+
+        // No attachment because TTS unconfigured
+        assert_eq!(msg.content.attachments.len(), 0);
+    }
+
+    #[tokio::test]
+    async fn completed_scheduled_task_with_voice_config_uses_task_voice() {
+        use crate::domain::agent::TaskId;
+        use crate::domain::config::SettingValue;
+        use crate::llm::test_support::*;
+        use axum::routing::post;
+        use std::sync::{Arc, Mutex};
+
+        let captured_voice = Arc::new(Mutex::new(None::<String>));
+        let fake_audio = b"fake-digest-ogg-audio".to_vec();
+        let app = axum::Router::new().route(
+            "/audio/speech",
+            post({
+                let audio = fake_audio.clone();
+                let captured = captured_voice.clone();
+                move |axum::Json(body): axum::Json<serde_json::Value>| {
+                    let audio = audio.clone();
+                    let captured = captured.clone();
+                    async move {
+                        if let Some(v) = body.get("voice").and_then(|v| v.as_str()) {
+                            *captured.lock().unwrap() = Some(v.to_string());
+                        }
+                        let mut resp = axum::response::Response::new(axum::body::Body::from(audio));
+                        resp.headers_mut().insert(
+                            "x-duration-ms",
+                            axum::http::HeaderValue::from_static("3000"),
+                        );
+                        resp
+                    }
+                }
+            }),
+        );
+        let tts_base_url = crate::infrastructure::inference::test_support::spawn_server(app).await;
+
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let services = AppServices::new(&pool);
+        let owner = AccountId::from_seed("agent-task-voice-test");
+        crate::db::pool::seed_account(&pool, &owner).await;
+
+        services
+            .app_config
+            .update_setting(
+                &owner,
+                crate::domain::config::SettingKey::InferenceTtsBaseUrl,
+                SettingValue::String(tts_base_url),
+            )
+            .await
+            .unwrap();
+
+        let outbound = FakeOutbound::connected();
+        let final_text = "Weekly Digest:\n\n<audio_script>Voice digest with custom voice.</audio_script>\n\nDone.";
+        let (url, _seen) = scripted_replies(vec![text_reply(final_text)]).await;
+        let handler = AgentExecuteRunHandler::new(
+            services.clone(),
+            pool.clone(),
+            outbound.clone(),
+            ReActEngine::from_proxy(None),
+            test_config(url),
+        );
+
+        let task_def = services
+            .agent
+            .schedule_task(
+                &owner,
+                TaskId::new("weekly_bookmark_digest").unwrap(),
+                "0 9 * * 1",
+                serde_json::json!({ "voice": "special-digest-voice" }),
+                crate::utils::time::now_at_storage_precision() - chrono::Duration::minutes(1),
+            )
+            .await
+            .unwrap();
+
+        services.agent.enqueue_due_scheduled_tasks().await.unwrap();
+        let run = services
+            .agent
+            .get_active_run(&owner)
+            .await
+            .unwrap()
+            .expect("due scheduled task started a run");
+        assert_eq!(run.scheduled_task_id, Some(task_def.id));
+
+        let ctx = JobContext {
+            job_id: JobId(303),
+            account_id: Some(owner),
+            attempt: 1,
+            max_attempts: 3,
+            cancel: CancellationToken::new(),
+        };
+        let payload = serde_json::json!({
+            "run_id": run.id.as_uuid(),
+            "origin_conversation": "!test_room3:matrix.org",
+        });
+
+        handler.run(&ctx, payload).await.unwrap();
+
+        let voice = captured_voice.lock().unwrap().clone();
+        assert_eq!(voice, Some("special-digest-voice".to_string()));
+
+        let msgs = outbound.messages();
+        assert_eq!(msgs.len(), 1);
+        assert_eq!(msgs[0].content.attachments.len(), 1);
     }
 }

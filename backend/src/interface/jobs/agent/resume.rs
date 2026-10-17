@@ -61,6 +61,7 @@ impl AgentExecuteRunHandler {
                 "<p>❌ <b>Agent Goal Failed</b></p><p>{}</p>",
                 html_escape(error)
             ),
+            None,
         )
         .await;
         Ok(())
