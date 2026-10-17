@@ -192,21 +192,27 @@ impl ScheduledAgentTask for WeeklyBookmarkDigestTask {
     fn formulate_goal(&self, config: &serde_json::Value) -> String {
         let limit = config.get("limit").and_then(|v| v.as_i64()).unwrap_or(10);
         let tag_filter = config.get("tag").and_then(|v| v.as_str()).unwrap_or("");
+        let audio = config
+            .get("audio")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(true);
 
-        if tag_filter.is_empty() {
-            format!(
-                "Review the user's unread bookmarks (up to {} items). \
-                 Synthesize an insightful weekly digest categorizing articles by topic \
-                 and highlighting top key takeaways.",
-                limit
-            )
+        let review_scope = if tag_filter.is_empty() {
+            format!("Review the user's unread bookmarks (up to {limit} items).")
         } else {
-            format!(
-                "Review the user's unread bookmarks tagged with '{}' (up to {} items). \
-                 Synthesize an insightful weekly digest highlighting top key takeaways.",
-                tag_filter, limit
-            )
-        }
+            format!("Review the user's unread bookmarks tagged with '{tag_filter}' (up to {limit} items).")
+        };
+
+        let audio_instruction = if audio {
+            " In addition to the markdown digest, generate an audio-ready spoken briefing enclosed in <audio_script>...</audio_script> tags (150-250 words, natural phrasing, free of markdown syntax, bullet characters, or URLs, suitable for text-to-speech audio delivery)."
+        } else {
+            ""
+        };
+
+        format!(
+            "{review_scope} \
+             Synthesize a comprehensive markdown digest with bullet takeaways.{audio_instruction}"
+        )
     }
 }
 
@@ -229,16 +235,24 @@ impl ScheduledAgentTask for MonthlyFinancialAuditTask {
 
     fn allowed_tools(&self) -> Option<Vec<String>> {
         Some(vec![
+            "audit_monthly_finances".to_string(),
             "list_finance_transactions".to_string(),
             "get_spending_by_category".to_string(),
             "get_my_recurring_bills".to_string(),
         ])
     }
 
-    fn formulate_goal(&self, _config: &serde_json::Value) -> String {
-        "Analyze the user's financial transactions and spending by category for the past month. \
-         Identify spending spikes, compare against recurring bills, and highlight savings opportunities."
-            .to_string()
+    fn formulate_goal(&self, config: &serde_json::Value) -> String {
+        let spike_threshold_pct = config
+            .get("spike_threshold_pct")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(20.0);
+
+        format!(
+            "Run audit_monthly_finances with spike_threshold_pct: {spike_threshold_pct}. \
+             Analyze spending categories, identify flagged category spikes, and compare recurring bills vs discretionary spend. \
+             Highlight specific savings opportunities and formulate actionable budget recommendations."
+        )
     }
 }
 
@@ -261,16 +275,40 @@ impl ScheduledAgentTask for PortfolioRebalanceAlertTask {
 
     fn allowed_tools(&self) -> Option<Vec<String>> {
         Some(vec![
+            "evaluate_portfolio_rebalance".to_string(),
+            "get_my_portfolio_summary".to_string(),
             "get_portfolio_holding".to_string(),
-            "get_portfolio_performance_history".to_string(),
             "get_portfolio_price_alerts".to_string(),
         ])
     }
 
-    fn formulate_goal(&self, _config: &serde_json::Value) -> String {
-        "Inspect all portfolio holdings, calculate current asset allocation weights, \
-         and evaluate target allocation drift. Do NOT execute any trades directly without explicit approval."
-            .to_string()
+    fn formulate_goal(&self, config: &serde_json::Value) -> String {
+        let drift_threshold_pct = config
+            .get("drift_threshold_pct")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(5.0);
+        let targets = config.get("targets").filter(|v| !v.is_null());
+
+        let target_instructions = match targets {
+            Some(t) => {
+                let target_str = t
+                    .as_str()
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| t.to_string());
+                format!(
+                    "Run evaluate_portfolio_rebalance with target allocations: {target_str} and drift_threshold_pct: {drift_threshold_pct}."
+                )
+            }
+            None => format!(
+                "Inspect holdings via get_my_portfolio_summary and check for severe allocation concentrations (drift threshold: {drift_threshold_pct}%)."
+            ),
+        };
+
+        format!(
+            "{target_instructions} \
+             Detail any holdings exceeding the drift threshold with recommended Buy/Sell adjustments. \
+             Do NOT execute any trades directly without explicit approval."
+        )
     }
 }
 
@@ -293,15 +331,23 @@ impl ScheduledAgentTask for BillDueDigestTask {
 
     fn allowed_tools(&self) -> Option<Vec<String>> {
         Some(vec![
+            "evaluate_bill_due_adequacy".to_string(),
             "get_my_recurring_bills".to_string(),
             "list_finance_transactions".to_string(),
         ])
     }
 
-    fn formulate_goal(&self, _config: &serde_json::Value) -> String {
-        "Check upcoming recurring bills due in the next 14 days. \
-         List due dates, amounts, and verify sufficient account cash balance to cover them."
-            .to_string()
+    fn formulate_goal(&self, config: &serde_json::Value) -> String {
+        let days_ahead = config
+            .get("days_ahead")
+            .and_then(|v| v.as_i64())
+            .unwrap_or(14);
+
+        format!(
+            "Run evaluate_bill_due_adequacy with days_ahead: {days_ahead}. \
+             Group upcoming bills by urgency (DueToday, DueWithin3Days, DueWithin14Days). \
+             Compare total bill commitments against available cash balances and clearly flag any projected cash shortfall."
+        )
     }
 }
 
@@ -324,15 +370,21 @@ impl ScheduledAgentTask for HabitConsistencyReviewTask {
 
     fn allowed_tools(&self) -> Option<Vec<String>> {
         Some(vec![
+            "evaluate_habit_consistency".to_string(),
             "get_my_habits".to_string(),
             "get_daily_log".to_string(),
         ])
     }
 
-    fn formulate_goal(&self, _config: &serde_json::Value) -> String {
-        "Review the user's habit completion logs and streaks for the past 7 days. \
-         Celebrate wins, identify slipping habits, and propose a lightweight improvement strategy."
-            .to_string()
+    fn formulate_goal(&self, config: &serde_json::Value) -> String {
+        let days = config.get("days").and_then(|v| v.as_i64()).unwrap_or(7);
+
+        format!(
+            "Run evaluate_habit_consistency to analyze habit performance over the past {days} days. \
+             Highlight top streaks and celebrate consistent habits. \
+             Identify slipping or at-risk habits (missed 2+ consecutive days or completion rate < 50%). \
+             Propose a tailored, lightweight improvement and recovery strategy."
+        )
     }
 }
 
@@ -394,8 +446,9 @@ mod tests {
         assert_eq!(
             registry.tool_policy(&run_for("habit_consistency_review", true)),
             Some(vec![
+                "evaluate_habit_consistency".to_string(),
                 "get_my_habits".to_string(),
-                "get_daily_log".to_string()
+                "get_daily_log".to_string(),
             ])
         );
     }
@@ -411,10 +464,164 @@ mod tests {
         assert_eq!(
             registry.tool_policy(&orphan),
             Some(vec![
+                "evaluate_habit_consistency".to_string(),
                 "get_my_habits".to_string(),
-                "get_daily_log".to_string()
+                "get_daily_log".to_string(),
             ])
         );
+    }
+
+    #[test]
+    fn builtin_plugins_allowed_tools_match_whitelists() {
+        let registry = ScheduledTaskRegistry::with_builtins();
+
+        let weekly_bookmarks = registry
+            .get(&TaskId::new("weekly_bookmark_digest").unwrap())
+            .unwrap();
+        assert_eq!(
+            weekly_bookmarks.allowed_tools(),
+            Some(vec![
+                "get_my_bookmarks".to_string(),
+                "toggle_bookmark_favorite".to_string(),
+                "archive_bookmark".to_string(),
+            ])
+        );
+
+        let monthly_finance = registry
+            .get(&TaskId::new("monthly_financial_audit").unwrap())
+            .unwrap();
+        assert_eq!(
+            monthly_finance.allowed_tools(),
+            Some(vec![
+                "audit_monthly_finances".to_string(),
+                "list_finance_transactions".to_string(),
+                "get_spending_by_category".to_string(),
+                "get_my_recurring_bills".to_string(),
+            ])
+        );
+
+        let portfolio = registry
+            .get(&TaskId::new("portfolio_rebalance_check").unwrap())
+            .unwrap();
+        assert_eq!(
+            portfolio.allowed_tools(),
+            Some(vec![
+                "evaluate_portfolio_rebalance".to_string(),
+                "get_my_portfolio_summary".to_string(),
+                "get_portfolio_holding".to_string(),
+                "get_portfolio_price_alerts".to_string(),
+            ])
+        );
+
+        let bills = registry
+            .get(&TaskId::new("bill_due_digest").unwrap())
+            .unwrap();
+        assert_eq!(
+            bills.allowed_tools(),
+            Some(vec![
+                "evaluate_bill_due_adequacy".to_string(),
+                "get_my_recurring_bills".to_string(),
+                "list_finance_transactions".to_string(),
+            ])
+        );
+
+        let habits = registry
+            .get(&TaskId::new("habit_consistency_review").unwrap())
+            .unwrap();
+        assert_eq!(
+            habits.allowed_tools(),
+            Some(vec![
+                "evaluate_habit_consistency".to_string(),
+                "get_my_habits".to_string(),
+                "get_daily_log".to_string(),
+            ])
+        );
+    }
+
+    #[test]
+    fn builtin_plugins_formulate_goal_defaults_and_custom_configs() {
+        let registry = ScheduledTaskRegistry::with_builtins();
+
+        // 1. Weekly Bookmark Digest
+        let bookmark_task = registry
+            .get(&TaskId::new("weekly_bookmark_digest").unwrap())
+            .unwrap();
+        let default_goal = bookmark_task.formulate_goal(&serde_json::json!({}));
+        assert!(default_goal.contains("Review the user's unread bookmarks (up to 10 items)"));
+        assert!(default_goal.contains("Synthesize a comprehensive markdown digest with bullet takeaways"));
+        assert!(default_goal.contains("<audio_script>"));
+        assert!(default_goal.contains("150-250 words"));
+
+        let no_audio_goal = bookmark_task.formulate_goal(&serde_json::json!({
+            "limit": 5,
+            "tag": "rust",
+            "audio": false
+        }));
+        assert!(no_audio_goal.contains("tagged with 'rust'"));
+        assert!(no_audio_goal.contains("up to 5 items"));
+        assert!(!no_audio_goal.contains("<audio_script>"));
+
+        // 2. Monthly Financial Audit
+        let finance_task = registry
+            .get(&TaskId::new("monthly_financial_audit").unwrap())
+            .unwrap();
+        let default_fin = finance_task.formulate_goal(&serde_json::json!({}));
+        assert!(default_fin.contains("audit_monthly_finances"));
+        assert!(default_fin.contains("spike_threshold_pct: 20"));
+        assert!(default_fin.contains("spending categories"));
+        assert!(default_fin.contains("recurring bills vs discretionary spend"));
+        assert!(default_fin.contains("savings opportunities"));
+
+        let custom_fin = finance_task.formulate_goal(&serde_json::json!({"spike_threshold_pct": 35.5}));
+        assert!(custom_fin.contains("spike_threshold_pct: 35.5"));
+
+        // 3. Portfolio Rebalance Alert
+        let portfolio_task = registry
+            .get(&TaskId::new("portfolio_rebalance_check").unwrap())
+            .unwrap();
+        let default_port = portfolio_task.formulate_goal(&serde_json::json!({}));
+        assert!(default_port.contains("get_my_portfolio_summary"));
+        assert!(default_port.contains("severe allocation concentrations"));
+        assert!(default_port.contains("drift threshold: 5"));
+        assert!(default_port.contains("Do NOT execute any trades directly without explicit approval"));
+
+        let custom_port = portfolio_task.formulate_goal(&serde_json::json!({
+            "targets": {"AAPL": 50, "GOOGL": 50},
+            "drift_threshold_pct": 3.0
+        }));
+        assert!(custom_port.contains("evaluate_portfolio_rebalance"));
+        assert!(custom_port.contains("drift_threshold_pct: 3"));
+        assert!(custom_port.contains("AAPL"));
+        assert!(custom_port.contains("Do NOT execute any trades directly without explicit approval"));
+
+        // 4. Bill Due Digest
+        let bill_task = registry
+            .get(&TaskId::new("bill_due_digest").unwrap())
+            .unwrap();
+        let default_bill = bill_task.formulate_goal(&serde_json::json!({}));
+        assert!(default_bill.contains("evaluate_bill_due_adequacy"));
+        assert!(default_bill.contains("days_ahead: 14"));
+        assert!(default_bill.contains("DueToday, DueWithin3Days, DueWithin14Days"));
+        assert!(default_bill.contains("projected cash shortfall"));
+
+        let custom_bill = bill_task.formulate_goal(&serde_json::json!({"days_ahead": 7}));
+        assert!(custom_bill.contains("days_ahead: 7"));
+
+        // 5. Habit Consistency Review
+        let habit_task = registry
+            .get(&TaskId::new("habit_consistency_review").unwrap())
+            .unwrap();
+        let default_habit = habit_task.formulate_goal(&serde_json::json!({}));
+        assert!(default_habit.contains("evaluate_habit_consistency"));
+        assert!(default_habit.contains("past 7 days"));
+        assert!(default_habit.contains("top streaks"));
+        assert!(default_habit.contains(
+            "slipping or at-risk habits (missed 2+ consecutive days or completion rate < 50%)"
+        ));
+        assert!(default_habit.contains("tailored, lightweight improvement and recovery strategy"));
+
+        let custom_habit = habit_task.formulate_goal(&serde_json::json!({"days": 14}));
+        assert!(custom_habit.contains("past 14 days"));
     }
 
     #[test]
