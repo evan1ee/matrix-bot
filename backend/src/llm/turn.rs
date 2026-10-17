@@ -60,30 +60,8 @@ pub async fn run_turn(
         ));
     }
 
-    let (secret_provider, secret_slot) = ResolvedAiConfig::secret_slot_for_provider(provider_name);
-    let provider_secret = match ctx
-        .services
-        .secrets
-        .get_decrypted_secret(secret_provider, secret_slot)
-        .await
-    {
-        Ok(sec) => sec,
-        Err(e) => {
-            warn!(
-                provider = %secret_provider,
-                slot = secret_slot,
-                error = %e,
-                "Failed to decrypt LLM provider secret from vault"
-            );
-            None
-        }
-    };
-    let resolved_config = ResolvedAiConfig::resolve(
-        ctx.config,
-        Some(&snapshot),
-        provider_secret.as_ref().map(|s| s.expose_secret()),
-        user_config.as_ref(),
-    );
+    let resolved_config =
+        ResolvedAiConfig::resolve_effective(ctx.services, ctx.config, user_config.as_ref()).await;
 
     let conversation = if let Some(conv_id) = conversation_id_override {
         llm_repo::get_conversation(ctx.pool, conv_id, ctx.owner_id)

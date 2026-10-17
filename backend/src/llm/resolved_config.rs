@@ -67,6 +67,41 @@ impl ResolvedAiConfig {
         Self::resolve(ai, None, None, user_config)
     }
 
+    /// Resolves the effective runtime AI configuration by pulling the dynamic
+    /// runtime settings snapshot from `AppConfigService` and decrypting the
+    /// active LLM provider's secret from `SecretService`, falling back to `AiEnvConfig`.
+    pub async fn resolve_effective(
+        services: &crate::application::AppServices,
+        ai_env: &crate::config::AiEnvConfig,
+        user_config: Option<&AiUserConfig>,
+    ) -> Self {
+        let snapshot = services.app_config.snapshot();
+        let provider_name = snapshot.llm_default_provider();
+        let (secret_provider, secret_slot) = Self::secret_slot_for_provider(provider_name);
+        let provider_secret = match services
+            .secrets
+            .get_decrypted_secret(secret_provider, secret_slot)
+            .await
+        {
+            Ok(sec) => sec,
+            Err(e) => {
+                tracing::warn!(
+                    provider = %secret_provider,
+                    slot = secret_slot,
+                    error = %e,
+                    "Failed to decrypt LLM provider secret from vault"
+                );
+                None
+            }
+        };
+        Self::resolve(
+            ai_env,
+            Some(&snapshot),
+            provider_secret.as_ref().map(|s| s.expose_secret()),
+            user_config,
+        )
+    }
+
     /// Resolves active AI configuration enforcing precedence:
     /// User Config > Runtime Snapshot (when customized in `app_settings` + `provider_secrets`) > Environment (`AiEnvConfig`) > Defaults.
     ///

@@ -46,7 +46,7 @@ export const CoreMainView: React.FC<{ events?: SystemEvent[]; isConnected?: bool
             {health ? (health.checks.matrix_sync.ok ? 'synced' : 'stale') : 'checking...'}
           </div>
           <div className="text-xs text-neutral-500 dark:text-neutral-400 font-mono">
-            {lastSyncAt ? formatDateTimeInZone(lastSyncAt, settings.timezone) : 'never synced'}
+            {lastSyncAt ? formatDateTimeInZone(lastSyncAt, settings.timezone) || 'unknown' : 'never synced'}
           </div>
         </div>
 

@@ -97,8 +97,12 @@ impl JobHandler for AgentExecuteRunHandler {
             .get_user_config(&owner)
             .await
             .map_err(JobError::from)?;
-        let resolved_config =
-            ResolvedAiConfig::from_user_config(&self.ai_env_config, user_config.as_ref());
+        let resolved_config = ResolvedAiConfig::resolve_effective(
+            &self.services,
+            &self.ai_env_config,
+            user_config.as_ref(),
+        )
+        .await;
 
         let mut total_tokens = run.total_tokens;
 

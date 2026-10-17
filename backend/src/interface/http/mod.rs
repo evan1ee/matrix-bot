@@ -261,6 +261,10 @@ mod step_up_tests {
             "POST",
             "/api/v1/admin/secrets/00000000-0000-0000-0000-000000000000/test",
         ),
+        (
+            "POST",
+            "/api/v1/agent/approvals/00000000-0000-0000-0000-000000000000/approve",
+        ),
     ];
 
     /// Routes an ordinary, hours-old session must still be able to use.
@@ -280,6 +284,10 @@ mod step_up_tests {
         // it may be racing a 24-hour clock against a recovery they did not ask
         // for, and demanding a passkey would be exactly backwards.
         ("POST", "/api/v1/account/recovery/cancel"),
+        (
+            "POST",
+            "/api/v1/agent/approvals/00000000-0000-0000-0000-000000000000/reject",
+        ),
     ];
 
     async fn app_with_session(verified_minutes_ago: i64) -> (Router, String) {

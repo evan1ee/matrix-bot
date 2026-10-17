@@ -10,7 +10,7 @@ use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
 use crate::domain::agent::{AgentRunId, ApprovalId, TaskId};
-use crate::interface::http::auth::{ApiState, AuthUser};
+use crate::interface::http::auth::{ApiState, AuthUser, VerifiedUser};
 #[allow(
     unused_imports,
     reason = "named only inside #[utoipa::path] attributes, where it fixes the OpenAPI schema name; a path-qualified body would rename it"
@@ -320,13 +320,14 @@ pub async fn list_pending_approvals(
     path = "/api/v1/agent/approvals/{id}/approve",
     responses(
         (status = 200, description = "Action approved and execution resumed"),
+        (status = 401, description = "Unauthorized or step-up authentication required", body = ApiErrorResponse),
         (status = 404, description = "Approval not found", body = ApiErrorResponse)
     ),
     security(("session_cookie" = []))
 )]
 pub async fn approve_action(
     State(state): State<ApiState>,
-    user: AuthUser,
+    user: VerifiedUser,
     Path(id): Path<Uuid>,
 ) -> Result<StatusCode, ApiError> {
     let approval_id = ApprovalId::new(id);

@@ -106,6 +106,18 @@ impl AgentExecuteRunHandler {
                 .await?;
             return Ok(Resume::Stop);
         }
+
+        let allowed_tools = self.services.agent.tool_policy(run);
+        if !crate::llm::agent::sandbox::is_tool_allowed(&held_call.0, allowed_tools.as_deref()) {
+            let error = format!(
+                "Tool '{}' is not permitted by task whitelist; execution stopped.",
+                held_call.0
+            );
+            self.stop_run(run, payload, next, &error, total_tokens)
+                .await?;
+            return Ok(Resume::Stop);
+        }
+
         // One transaction locks the run, checks it is still active (a cancel
         // since this job was queued must stop the held action) and commits the
         // started step, so there is no gap between the check and the record.
@@ -120,7 +132,6 @@ impl AgentExecuteRunHandler {
             return Ok(Resume::Stop);
         }
 
-        let allowed_tools = self.services.agent.tool_policy(run);
         let step_ctx = StepContext {
             account_id: owner,
             room_id: payload

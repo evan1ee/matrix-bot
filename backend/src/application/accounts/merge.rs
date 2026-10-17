@@ -101,12 +101,45 @@ impl MergeService {
                 .await?
         {
             if absorbed.role == crate::domain::accounts::AccountRole::Admin {
-                crate::infrastructure::postgres::repositories::accounts::core::update_role(
-                    &mut **tx,
-                    into,
-                    crate::domain::accounts::AccountRole::Admin,
-                )
-                .await?;
+                let surviving =
+                    crate::infrastructure::postgres::repositories::accounts::core::find(
+                        &mut **tx, into,
+                    )
+                    .await?;
+                let previous_role = surviving
+                    .as_ref()
+                    .map(|a| a.role)
+                    .unwrap_or(crate::domain::accounts::AccountRole::User);
+                if previous_role != crate::domain::accounts::AccountRole::Admin {
+                    crate::infrastructure::postgres::repositories::accounts::core::update_role(
+                        &mut **tx,
+                        into,
+                        crate::domain::accounts::AccountRole::Admin,
+                    )
+                    .await?;
+                    let entry = crate::domain::config::ConfigAuditEntry::new(
+                        None,
+                        crate::domain::config::ConfigAuditAction::AdminGranted,
+                        crate::domain::config::ConfigAuditTarget::Account(*into),
+                        crate::domain::config::ConfigAuditOutcome::Success,
+                        Some(serde_json::json!({
+                            "reason": "account_merge",
+                            "absorbed_account": from.to_string(),
+                            "previous_role": previous_role.as_str(),
+                            "new_role": "admin",
+                        })),
+                    );
+                    crate::infrastructure::postgres::repositories::config_audit::insert_audit_entry(
+                        &mut **tx,
+                        entry.actor_id.as_ref(),
+                        entry.action.as_str(),
+                        &entry.target_type,
+                        &entry.target_key,
+                        entry.outcome.as_str(),
+                        entry.detail.as_ref(),
+                    )
+                    .await?;
+                }
             }
         }
 
@@ -986,6 +1019,12 @@ mod tests {
             .unwrap();
         let entry = audits.iter().find(|e| e.id == audit_id).unwrap();
         assert_eq!(entry.actor_id, Some(into.uuid()));
+
+        let grant_entry = audits
+            .iter()
+            .find(|e| e.action == "admin_granted" && e.target_key == into.to_string())
+            .expect("merge must audit admin role grant");
+        assert_eq!(grant_entry.actor_id, None);
     }
 
     #[tokio::test]

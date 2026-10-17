@@ -113,13 +113,20 @@ impl TtsModule {
             } else {
                 None
             };
-        let api_key = services
+        let api_key = match services
             .secrets
             .get_decrypted_secret(crate::domain::secrets::SecretProvider::Tts, "default")
             .await
-            .ok()
-            .flatten()
-            .map(|s| s.expose_secret().to_string());
+        {
+            Ok(sec) => sec.map(|s| s.expose_secret().to_string()),
+            Err(e) => {
+                warn!(
+                    error = %e,
+                    "Failed to decrypt TTS secret from vault; falling back to default"
+                );
+                None
+            }
+        };
 
         let effective_tts = self.tts.with_overrides(base_url, api_key, model, dialect);
 

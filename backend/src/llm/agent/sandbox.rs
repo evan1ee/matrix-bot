@@ -105,7 +105,13 @@ mod tests {
             .map(|t| t.function.name)
             .collect();
         for task in crate::domain::agent::ScheduledTaskRegistry::with_builtins().list() {
-            for tool in task.allowed_tools().unwrap_or_default() {
+            let tools = task.allowed_tools();
+            assert!(
+                tools.is_some(),
+                "task {} must define a tool whitelist",
+                task.task_id()
+            );
+            for tool in tools.unwrap() {
                 assert!(
                     registered.contains(&tool),
                     "task {} whitelists unknown tool {tool}",

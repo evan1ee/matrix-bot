@@ -86,9 +86,11 @@ pub trait ScheduledAgentTask: Send + Sync {
     fn default_cron(&self) -> &'static str;
 
     /// Whitelist of tool names this task is permitted to invoke.
-    /// Returning `None` permits all safe tools.
+    ///
+    /// Defaults to `Some(Vec::new())` (fail-closed: no tools permitted unless
+    /// explicitly whitelisted by the task implementation).
     fn allowed_tools(&self) -> Option<Vec<String>> {
-        None
+        Some(Vec::new())
     }
 
     /// Formulates the agent goal prompt given user-supplied JSON configuration.
@@ -424,6 +426,32 @@ mod tests {
         );
         assert_eq!(
             registry.tool_policy(&run_for("Not A Valid Id!", true)),
+            Some(Vec::new())
+        );
+    }
+
+    struct MinimalTask;
+    impl ScheduledAgentTask for MinimalTask {
+        fn task_id(&self) -> TaskId {
+            TaskId::new("minimal_task").unwrap()
+        }
+        fn title(&self) -> &'static str {
+            "Minimal Task"
+        }
+        fn default_cron(&self) -> &'static str {
+            "0 0 * * *"
+        }
+        fn formulate_goal(&self, _config: &serde_json::Value) -> String {
+            "Do nothing".to_string()
+        }
+    }
+
+    #[test]
+    fn task_without_custom_whitelist_defaults_to_empty_whitelist() {
+        let mut registry = ScheduledTaskRegistry::new();
+        registry.register(Arc::new(MinimalTask));
+        assert_eq!(
+            registry.tool_policy(&run_for("minimal_task", true)),
             Some(Vec::new())
         );
     }

@@ -25,7 +25,7 @@
 //! through `SettingsService::modify` (`llm/tools/settings.rs`) — never
 //! straight from unvalidated model output.
 
-use chrono::{DateTime, NaiveDate, Timelike, Utc};
+use chrono::{DateTime, NaiveDate, Utc};
 use chrono_tz::Tz;
 use serde::Serialize;
 
@@ -229,12 +229,10 @@ pub fn parse_max_history_turns(turns: i64) -> Result<i64, SettingsError> {
 }
 
 /// The local date a briefing is due for at `now`, or None: enabled, local
-/// time within [briefing_time, briefing_time + 5 min) of the same hour, and
-/// not already sent that local day. Unparseable time -> 07:00 (frozen).
-///
-/// Frozen quirk kept from the old loop: the window is compared on the minute
-/// only, so it does not wrap past the hour (a 07:58 briefing is due at
-/// 07:58-07:59, not 08:00-08:02).
+/// time within [briefing_time, briefing_time + 5 min), and not already
+/// sent that local day. Handles wrap-around across hour boundaries
+/// (e.g. a 07:58 briefing is due at 07:58-08:02) and across midnight.
+/// Unparseable time -> 07:00 (fallback default).
 pub fn briefing_due_date(
     settings: &UserSettings,
     now: DateTime<Utc>,
@@ -245,12 +243,32 @@ pub fn briefing_due_date(
     }
     let (hour, minute) = parse_briefing_time(&settings.briefing_time).unwrap_or((7, 0));
     let local = now.with_timezone(&settings.tz());
+    let local_naive = local.naive_local();
     let today = local.date_naive();
-    if last_sent == Some(today.format("%Y-%m-%d").to_string().as_str()) {
-        return None;
+
+    // Check today's briefing window [target, target + 5 min)
+    if let Some(target) = today.and_hms_opt(hour, minute, 0) {
+        if local_naive >= target && local_naive < target + chrono::Duration::minutes(5) {
+            let today_str = today.format("%Y-%m-%d").to_string();
+            if last_sent != Some(today_str.as_str()) {
+                return Some(today);
+            }
+        }
     }
-    let in_window = local.hour() == hour && local.minute() >= minute && local.minute() < minute + 5;
-    in_window.then_some(today)
+
+    // Check if yesterday's late briefing window wrapped past midnight into early today
+    if let Some(yesterday) = today.pred_opt() {
+        if let Some(target) = yesterday.and_hms_opt(hour, minute, 0) {
+            if local_naive >= target && local_naive < target + chrono::Duration::minutes(5) {
+                let yesterday_str = yesterday.format("%Y-%m-%d").to_string();
+                if last_sent != Some(yesterday_str.as_str()) {
+                    return Some(yesterday);
+                }
+            }
+        }
+    }
+
+    None
 }
 
 /// Validates and parses a 24-hour time string "HH:MM" -> (hour, minute).
@@ -539,13 +557,35 @@ mod tests {
         assert_eq!(briefing_due_date(&s, now, None), Some(day()));
     }
 
-    /// Frozen: the window does not wrap past the hour (07:58 -> only :58-:59).
+    /// The briefing window wraps cleanly across hour boundaries and midnight.
     #[test]
-    fn the_window_does_not_wrap_the_hour() {
-        assert_eq!(briefing_due_date(&enabled("07:58"), at(8, 1), None), None);
+    fn the_window_wraps_across_the_hour_and_midnight() {
+        // 07:58 briefing is due in [07:58, 08:03)
+        assert_eq!(briefing_due_date(&enabled("07:58"), at(7, 57), None), None);
         assert_eq!(
             briefing_due_date(&enabled("07:58"), at(7, 59), None),
             Some(day())
+        );
+        assert_eq!(
+            briefing_due_date(&enabled("07:58"), at(8, 1), None),
+            Some(day())
+        );
+        assert_eq!(
+            briefing_due_date(&enabled("07:58"), at(8, 2), None),
+            Some(day())
+        );
+        assert_eq!(briefing_due_date(&enabled("07:58"), at(8, 3), None), None);
+
+        // 23:58 briefing on 2026-09-28 is due in [23:58, 00:03 on 2026-09-29)
+        let sep29_0001 = chrono::TimeZone::with_ymd_and_hms(&Utc, 2026, 9, 29, 0, 1, 0).unwrap();
+        let sep28 = NaiveDate::from_ymd_opt(2026, 9, 28).unwrap();
+        assert_eq!(
+            briefing_due_date(&enabled("23:58"), sep29_0001, None),
+            Some(sep28)
+        );
+        assert_eq!(
+            briefing_due_date(&enabled("23:58"), sep29_0001, Some("2026-09-28")),
+            None
         );
     }
 

@@ -1461,6 +1461,16 @@
           "200": {
             "description": "Action approved and execution resumed"
           },
+          "401": {
+            "description": "Unauthorized or step-up authentication required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "Approval not found",
             "content": {

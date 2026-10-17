@@ -12,6 +12,8 @@ use crate::infrastructure::inference::embedding::EmbeddingProvider;
 /// How long a query waits for the embedder before search degrades to keywords.
 const DEFAULT_EMBED_TIMEOUT: Duration = Duration::from_secs(3);
 
+type EmbedderCache = Arc<std::sync::RwLock<Option<(String, String, Arc<dyn EmbeddingProvider>)>>>;
+
 /// Service executing cross-domain hybrid semantic and keyword searches and
 /// keeping the embeddings behind them current.
 #[derive(Clone)]
@@ -23,6 +25,7 @@ pub struct SearchService {
     pub(super) model: String,
     pub(super) embed_timeout: Duration,
     pub(super) app_config: Option<crate::application::config::AppConfigService>,
+    pub(super) custom_embedder_cache: EmbedderCache,
 }
 
 impl SearchService {
@@ -33,6 +36,7 @@ impl SearchService {
             model: DEFAULT_EMBEDDING_MODEL.to_string(),
             embed_timeout: DEFAULT_EMBED_TIMEOUT,
             app_config: None,
+            custom_embedder_cache: Arc::new(std::sync::RwLock::new(None)),
         }
     }
 
@@ -69,12 +73,28 @@ impl SearchService {
             let snap = cfg.snapshot();
             if snap.is_customized(crate::domain::config::SettingKey::InferenceEmbeddingBaseUrl) {
                 let url = snap.inference_embedding_base_url().trim();
-                return Arc::new(
-                    crate::infrastructure::inference::embedding::LocalOnnxEmbeddingClient::new(
-                        (!url.is_empty()).then(|| url.to_string()),
-                        Some(self.model.clone()),
-                    ),
-                );
+                if let Ok(cache) = self.custom_embedder_cache.read() {
+                    if let Some((cached_url, cached_model, client)) = cache.as_ref() {
+                        if cached_url == url && cached_model == &self.model {
+                            return client.clone();
+                        }
+                    }
+                }
+                if let Ok(mut cache) = self.custom_embedder_cache.write() {
+                    if let Some((cached_url, cached_model, client)) = cache.as_ref() {
+                        if cached_url == url && cached_model == &self.model {
+                            return client.clone();
+                        }
+                    }
+                    let client: Arc<dyn EmbeddingProvider> = Arc::new(
+                        crate::infrastructure::inference::embedding::LocalOnnxEmbeddingClient::new(
+                            (!url.is_empty()).then(|| url.to_string()),
+                            Some(self.model.clone()),
+                        ),
+                    );
+                    *cache = Some((url.to_string(), self.model.clone(), client.clone()));
+                    return client;
+                }
             }
         }
         self.embedder.clone()

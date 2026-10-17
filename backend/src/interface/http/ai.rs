@@ -174,7 +174,7 @@ pub async fn get_ai_config(
     State(state): State<ApiState>,
     user: AuthUser,
 ) -> Result<Json<AiUserConfig>, ApiError> {
-    let resolved = ResolvedAiConfig::from_user_config(&state.ai, None);
+    let resolved = ResolvedAiConfig::resolve_effective(&state.services, &state.ai, None).await;
     let settings = state
         .services
         .settings

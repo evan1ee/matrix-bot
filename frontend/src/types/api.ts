@@ -5072,6 +5072,15 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Unauthorized or step-up authentication required */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
             /** @description Approval not found */
             404: {
                 headers: {

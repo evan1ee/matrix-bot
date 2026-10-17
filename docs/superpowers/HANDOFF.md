@@ -85,18 +85,18 @@ Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in sequence:
 4. **WebAuthn Conditional UI (Passkey Autofill):**
    - Implement passkey autofill on the web sign-in form using the WebAuthn Conditional UI standard (`mediation: 'conditional'`) for seamless page-load sign-in.
 
-5. **Minor Deferred Edge Cases:**
-   - `SyncHealth`: Add fallback handling if Matrix sync timestamp string fails to parse.
-   - Morning briefing window: Wrap-around logic for target briefing windows close to the hour boundary (`:58`–`:02`).
+5. **Minor Deferred Edge Cases (Fixed):**
+   - `SyncHealth`: Fallback handling added (`|| 'unknown'`) when formatting last sync timestamp in web UI.
+   - Morning briefing window: Implemented wrap-around logic for target briefing windows across hour boundaries (`:58`–`:02`) and across midnight.
 
-6. **Review follow-ups left open by the tech-debt pass:**
-   - A vault key is attached to the env endpoint when `llm.default_provider` is not customized, even if the key belongs to another vendor than the endpoint (`llm/resolved_config.rs`, `resolve`). Decide whether to gate it by the provider's canonical URL; the existing precedence test encodes the current behaviour.
-   - The agent job, `chat/llm.rs` and `http/ai.rs` resolve with `from_user_config` (env only), so agent runs ignore the admin console's provider, model and vault key while chat honours them.
-   - `ScheduledAgentTask::allowed_tools()` defaults to `None`, which means every tool; make the default `Some(vec![])` and assert `is_some()` in `every_builtin_whitelist_names_registered_tools`.
-   - `resume.rs` checks the whitelist after `begin_approved_execution` has committed its "started" marker; check `tool_policy` first.
-   - `grant_admin`/`revoke_admin` audit the target account as the actor; account merges that carry over the admin role write no audit row.
-   - `application/knowledge/search.rs` builds a new embedding HTTP client per call while the base URL is customized; `resolve_runtime_stt` drops decrypt errors without a warning.
-   - Agent approvals (`POST /agent/approvals/:id/approve|reject`, `interface/http/agent.rs`) take `AuthUser`, not `VerifiedUser`, and are not in `SENSITIVE`; earlier notes of this file claimed step-up for them. Decide whether approving a sensitive AI action needs a fresh passkey (and whether an MCP token may approve at all); if so, add `VerifiedUser` and the `SENSITIVE` entries together.
+6. **Review follow-ups left open by the tech-debt pass (Fixed):**
+   - `ScheduledAgentTask::allowed_tools()` defaults to `Some(Vec::new())` (fail-closed) and asserted `is_some()` in `every_builtin_whitelist_names_registered_tools`.
+   - `resume.rs` checks `tool_policy` before `begin_approved_execution` commits the "started" marker.
+   - Agent execution job handler, `chat/llm.rs` (`handle_show_config`), and `http/ai.rs` (`get_ai_config`) resolve via `ResolvedAiConfig::resolve_effective(...)` honoring the dynamic snapshot and credential vault.
+   - `grant_admin`/`revoke_admin` audit the CLI/system operator as actor (`None`); account merges that carry over the admin role record an `AdminGranted` audit entry with `reason: account_merge`.
+   - `SearchService` caches and reuses the dynamic embedding HTTP client while the custom base URL and model remain unchanged.
+   - `resolve_runtime_stt` and `resolve_runtime_tts` log warnings on vault decrypt errors instead of silently dropping them.
+   - `POST /agent/approvals/:id/approve` requires `VerifiedUser` (enforcing step-up within 5 minutes) and is registered in `SENSITIVE`.
 
 ---
 
@@ -126,6 +126,12 @@ Format: `Ruling: <decision> — <why> — <cost if wrong>`. New rulings go here 
 
 - *Ruling: `MATRIX_USERNAME` and `MATRIX_PASSWORD` are optional at boot (`Config::matrix_enabled()`); `SyncHealth::mark_disabled()` marks `/health/ready`'s `matrix_sync` check vacuous (`ok: true`, `last_sync_at: None`) when Matrix is unconfigured — allows the server to run with 0, 1, or any combination of social channels (`Matrix`, `Telegram`, `Discord`, `Email`, or Web-only) without altering `ReadyResponse` in `openapi.json` — cost if wrong: partial Matrix config (`MATRIX_USERNAME` without `MATRIX_PASSWORD`) still fails closed in `Config::validate()`.*
 - *Ruling: `RoomService::default_room`, `RoomService::resolve_target_room`, `GET /api/v1/rooms`, and job delivery handlers filter destinations by `Config::configured_channels()` (`Outbound::is_configured`) so linked identities on disabled channels fall back to `web` instead of deferring forever; `CheckAlertsHandler` checks per-owner readiness (at least one linked identity on a connected channel, or no linked identities on any configured channel) before marking alerts triggered; and browser notifications (`Notification` API) request permission only from user clicks in Settings and deduplicate across tabs via `tag` — ensures non-Matrix and Web-only accounts receive reminders, morning briefings, and price alerts without losing alerts during partial channel outages — cost if wrong: none, unowned or unconfigured cross-channel addresses resolve to `web`.*
+
+### Rulings (2026-10-15 — Tech-Debt & Security/Config Hardening)
+
+- *Ruling: Agent approval endpoint `POST /api/v1/agent/approvals/:id/approve` requires `VerifiedUser` and is registered in `SENSITIVE` — aligns the backend with the frontend's `useSensitiveAction` so sensitive AI actions cannot be approved by stale sessions or MCP tokens without a fresh passkey within 5 minutes — cost if wrong: approving an action prompts for passkey verification if the session was verified over 5 minutes ago.*
+- *Ruling: `ScheduledAgentTask::allowed_tools()` defaults to `Some(Vec::new())` (fail-closed) — ensures custom or incomplete task plugins cannot execute unapproved tools in unattended background jobs, and `resume.rs` evaluates tool authorization before committing the started execution marker — cost if wrong: custom tasks must explicitly implement `allowed_tools` if they require tool access.*
+- *Ruling: `ResolvedAiConfig::resolve_effective(...)` is the shared runtime entry point across chat, agent jobs, and API — ensures autonomous agents and UI reflect the admin console's active provider, model, and encrypted vault secrets rather than falling back strictly to environment variables — cost if wrong: none.*
 
 ---
 

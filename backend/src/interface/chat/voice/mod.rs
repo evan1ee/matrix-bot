@@ -51,13 +51,20 @@ pub async fn resolve_runtime_stt(
     } else {
         None
     };
-    let api_key = services
+    let api_key = match services
         .secrets
         .get_decrypted_secret(SecretProvider::Stt, "default")
         .await
-        .ok()
-        .flatten()
-        .map(|s| s.expose_secret().to_string());
+    {
+        Ok(sec) => sec.map(|s| s.expose_secret().to_string()),
+        Err(e) => {
+            tracing::warn!(
+                error = %e,
+                "Failed to decrypt STT secret from vault; falling back to default"
+            );
+            None
+        }
+    };
 
     let effective_config = VoiceConfig { enabled, language };
     let effective_client = fallback_client.with_overrides(base_url, api_key, model);

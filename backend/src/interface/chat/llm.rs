@@ -262,12 +262,12 @@ pub async fn handle_ai_subcommand(
         return Some(handle_reset(services, owner_id, room_id).await);
     }
     if trimmed.eq_ignore_ascii_case("config") {
-        return Some(handle_show_config(pool, settings, ai, owner_id).await);
+        return Some(handle_show_config(pool, services, ai, owner_id).await);
     }
     if let Some(rest) = trimmed.strip_prefix("model") {
         let model_arg = rest.trim();
         if model_arg.is_empty() {
-            return Some(handle_show_config(pool, settings, ai, owner_id).await);
+            return Some(handle_show_config(pool, services, ai, owner_id).await);
         }
         if model_arg.len() > 500 {
             return Some(format_error(
@@ -282,7 +282,7 @@ pub async fn handle_ai_subcommand(
     {
         let num_arg = rest.trim();
         if num_arg.is_empty() {
-            return Some(handle_show_config(pool, settings, ai, owner_id).await);
+            return Some(handle_show_config(pool, services, ai, owner_id).await);
         }
         return Some(handle_set_history(settings, owner_id, num_arg).await);
     }
@@ -291,15 +291,15 @@ pub async fn handle_ai_subcommand(
 
 pub async fn handle_show_config(
     pool: &DbPool,
-    settings: &SettingsService,
+    services: &crate::application::AppServices,
     ai: &crate::config::AiEnvConfig,
     owner_id: &AccountId,
 ) -> String {
     let user_config = llm_repo::get_user_config(pool, owner_id)
         .await
         .unwrap_or(None);
-    let resolved = ResolvedAiConfig::from_user_config(ai, user_config.as_ref());
-    let settings = settings.get_or_default(owner_id).await;
+    let resolved = ResolvedAiConfig::resolve_effective(services, ai, user_config.as_ref()).await;
+    let settings = services.settings.get_or_default(owner_id).await;
 
     let key_status = if resolved.api_key.is_some() {
         "Configured (Hidden)"

@@ -134,7 +134,7 @@ impl AccountService {
         )
         .await?;
         let entry = crate::domain::config::ConfigAuditEntry::new(
-            Some(*account_id),
+            None,
             crate::domain::config::ConfigAuditAction::AdminGranted,
             crate::domain::config::ConfigAuditTarget::Account(*account_id),
             crate::domain::config::ConfigAuditOutcome::Success,
@@ -177,7 +177,7 @@ impl AccountService {
         .await?;
         sessions::revoke_all_for_account(&mut *tx, account_id, None).await?;
         let entry = crate::domain::config::ConfigAuditEntry::new(
-            Some(*account_id),
+            None,
             crate::domain::config::ConfigAuditAction::AdminRevoked,
             crate::domain::config::ConfigAuditTarget::Account(*account_id),
             crate::domain::config::ConfigAuditOutcome::Success,
