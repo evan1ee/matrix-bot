@@ -1,4 +1,9 @@
+use std::sync::Arc;
+
 use sqlx::PgPool;
+
+pub mod authentic_replies;
+pub use authentic_replies::AiReplyTracker;
 
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
@@ -10,11 +15,41 @@ use crate::infrastructure::postgres::repositories::outbox;
 #[derive(Clone)]
 pub struct LlmService {
     pool: PgPool,
+    pub authentic_replies: Arc<AiReplyTracker>,
 }
 
 impl LlmService {
     pub fn new(pool: PgPool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            authentic_replies: Arc::new(AiReplyTracker::default()),
+        }
+    }
+
+    pub fn with_authentic_replies(mut self, tracker: Arc<AiReplyTracker>) -> Self {
+        self.authentic_replies = tracker;
+        self
+    }
+
+    /// Records an authentic assistant reply event ID to prevent quote taint.
+    pub fn record_authentic_reply(
+        &self,
+        room_key: &str,
+        event_id: &str,
+        owner_id: &AccountId,
+    ) {
+        self.authentic_replies.record(room_key, event_id, *owner_id);
+    }
+
+    /// Checks if a quoted event ID corresponds to an authentic assistant reply.
+    pub fn is_authentic_reply(
+        &self,
+        room_key: &str,
+        event_id: &str,
+        owner_id: &AccountId,
+    ) -> bool {
+        self.authentic_replies
+            .is_authentic(room_key, event_id, owner_id)
     }
 
     pub async fn get_user_config(
@@ -233,4 +268,17 @@ mod tests {
             vec!["AiConfigUpdated"]
         );
     }
+
+    #[tokio::test]
+    async fn test_llm_service_authentic_replies_delegation() {
+        let pool = sqlx::PgPool::connect_lazy("postgres://localhost/dummy").unwrap();
+        let service = LlmService::new(pool);
+        let owner = AccountId::generate();
+
+        assert!(!service.is_authentic_reply("!r:x", "$ev1", &owner));
+        service.record_authentic_reply("!r:x", "$ev1", &owner);
+        assert!(service.is_authentic_reply("!r:x", "$ev1", &owner));
+        assert!(!service.is_authentic_reply("!r:x", "$ev2", &owner));
+    }
 }
+
