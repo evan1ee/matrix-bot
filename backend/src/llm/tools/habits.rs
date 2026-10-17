@@ -276,7 +276,11 @@ mod tests {
             .iter()
             .find(|d| d.function.name == "evaluate_habit_consistency")
             .expect("evaluate_habit_consistency tool definition must exist");
-        let props = consistency_def.function.parameters.get("properties").unwrap();
+        let props = consistency_def
+            .function
+            .parameters
+            .get("properties")
+            .unwrap();
         assert!(props.as_object().unwrap().is_empty());
     }
 
@@ -289,7 +293,14 @@ mod tests {
 
         let habit = services
             .habits
-            .create_habit(&alice, "Daily Meditation", None, Some("daily"), None, Some(7))
+            .create_habit(
+                &alice,
+                "Daily Meditation",
+                None,
+                Some("daily"),
+                None,
+                Some(7),
+            )
             .await
             .unwrap();
 

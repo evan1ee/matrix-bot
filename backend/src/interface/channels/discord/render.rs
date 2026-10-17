@@ -84,8 +84,7 @@ pub fn posts(content: &Content) -> Result<Vec<Post>, ChannelError> {
         .collect();
     if chunks.is_empty() {
         chunks.push(
-            (content.attachments.is_empty() && buttons.is_empty())
-                .then(|| NO_REPLY.to_owned()),
+            (content.attachments.is_empty() && buttons.is_empty()).then(|| NO_REPLY.to_owned()),
         );
     }
     let last = chunks.len() - 1;
@@ -291,7 +290,10 @@ mod tests {
             command: "todo done 1".into(),
         }];
         let rendered = posts(&content).unwrap();
-        assert_eq!(rendered[0].buttons, vec![("Done #1".into(), "todo done 1".into())]);
+        assert_eq!(
+            rendered[0].buttons,
+            vec![("Done #1".into(), "todo done 1".into())]
+        );
     }
 
     #[test]

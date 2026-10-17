@@ -83,8 +83,9 @@ pub fn evaluate_monthly_audit(
         .map(|b| b.amount_minor)
         .sum();
 
-    let discretionary_spending_minor =
-        total_spending_minor.saturating_sub(recurring_bills_total_minor).max(0);
+    let discretionary_spending_minor = total_spending_minor
+        .saturating_sub(recurring_bills_total_minor)
+        .max(0);
 
     MonthlyAuditReport {
         total_spending_minor,
@@ -98,9 +99,9 @@ pub fn evaluate_monthly_audit(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Utc;
     use crate::domain::accounts::AccountId;
     use crate::domain::finance::Direction;
+    use chrono::Utc;
 
     fn sample_transaction(
         direction: Direction,
@@ -168,12 +169,20 @@ mod tests {
         assert_eq!(report.recurring_bills_total_minor, 0);
         assert_eq!(report.discretionary_spending_minor, 10_000);
 
-        let groceries = report.categories.iter().find(|c| c.category == "Groceries").unwrap();
+        let groceries = report
+            .categories
+            .iter()
+            .find(|c| c.category == "Groceries")
+            .unwrap();
         assert_eq!(groceries.total_minor, 8_000);
         assert_eq!(groceries.transaction_count, 2);
         assert!((groceries.percentage_of_total - 80.0).abs() < 1e-4);
 
-        let utilities = report.categories.iter().find(|c| c.category == "Utilities").unwrap();
+        let utilities = report
+            .categories
+            .iter()
+            .find(|c| c.category == "Utilities")
+            .unwrap();
         assert_eq!(utilities.total_minor, 2_000);
         assert_eq!(utilities.transaction_count, 1);
         assert!((utilities.percentage_of_total - 20.0).abs() < 1e-4);
@@ -181,9 +190,11 @@ mod tests {
 
     #[test]
     fn test_recurring_bills_deduction() {
-        let transactions = vec![
-            sample_transaction(Direction::Expense, 50_000, Some("General")),
-        ];
+        let transactions = vec![sample_transaction(
+            Direction::Expense,
+            50_000,
+            Some("General"),
+        )];
         let recurring_bills = vec![
             sample_bill(20_000, "active"),
             sample_bill(10_000, "paused"), // paused bill should NOT be counted
@@ -197,12 +208,12 @@ mod tests {
 
     #[test]
     fn test_discretionary_spending_saturation() {
-        let transactions = vec![
-            sample_transaction(Direction::Expense, 10_000, Some("General")),
-        ];
-        let recurring_bills = vec![
-            sample_bill(25_000, "active"),
-        ];
+        let transactions = vec![sample_transaction(
+            Direction::Expense,
+            10_000,
+            Some("General"),
+        )];
+        let recurring_bills = vec![sample_bill(25_000, "active")];
 
         let report = evaluate_monthly_audit(&transactions, &recurring_bills, 50.0);
         assert_eq!(report.total_spending_minor, 10_000);
@@ -219,10 +230,18 @@ mod tests {
         let recurring_bills = vec![];
 
         let report = evaluate_monthly_audit(&transactions, &recurring_bills, 50.0);
-        let rent = report.categories.iter().find(|c| c.category == "Rent").unwrap();
+        let rent = report
+            .categories
+            .iter()
+            .find(|c| c.category == "Rent")
+            .unwrap();
         assert!(rent.is_spike);
 
-        let dining = report.categories.iter().find(|c| c.category == "Dining").unwrap();
+        let dining = report
+            .categories
+            .iter()
+            .find(|c| c.category == "Dining")
+            .unwrap();
         assert!(!dining.is_spike);
 
         assert_eq!(report.flagged_spikes, vec!["Rent".to_string()]);

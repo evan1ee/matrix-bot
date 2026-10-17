@@ -206,11 +206,8 @@ async fn handle(work: Work, inbound: &Inbound, http: &Arc<Http>) {
                 return;
             }
 
-            let download_result = tokio::time::timeout(
-                Duration::from_secs(15),
-                attachment.download(),
-            )
-            .await;
+            let download_result =
+                tokio::time::timeout(Duration::from_secs(15), attachment.download()).await;
 
             let bytes = match download_result {
                 Ok(Ok(bytes)) => bytes,
@@ -231,7 +228,9 @@ async fn handle(work: Work, inbound: &Inbound, http: &Arc<Http>) {
                         http,
                         channel,
                         message,
-                        Reply::html("⚠️ Downloading the attached image timed out. Please try again."),
+                        Reply::html(
+                            "⚠️ Downloading the attached image timed out. Please try again.",
+                        ),
                     )
                     .await;
                     return;
@@ -255,11 +254,7 @@ async fn handle(work: Work, inbound: &Inbound, http: &Arc<Http>) {
             if let Err(err) = inbound
                 .services()
                 .storage
-                .put(
-                    &storage_key,
-                    bytes::Bytes::from(bytes),
-                    content_type,
-                )
+                .put(&storage_key, bytes::Bytes::from(bytes), content_type)
                 .await
             {
                 warn!(error = %err, "could not store receipt image from Discord");
@@ -280,9 +275,11 @@ async fn handle(work: Work, inbound: &Inbound, http: &Arc<Http>) {
                 caption,
             );
 
-            if let Err(err) =
-                crate::infrastructure::postgres::repositories::jobs::enqueue(&inbound.db().pool, &job)
-                    .await
+            if let Err(err) = crate::infrastructure::postgres::repositories::jobs::enqueue(
+                &inbound.db().pool,
+                &job,
+            )
+            .await
             {
                 warn!(error = %err, "could not enqueue media.process_receipt job from Discord");
                 reply_dm(

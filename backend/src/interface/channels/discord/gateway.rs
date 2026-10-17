@@ -68,7 +68,8 @@ impl EventHandler for Gateway {
                                 .content(refusal.reply_text())
                                 .ephemeral(true),
                         );
-                        if let Err(err) = bounded(command.create_response(&ctx.http, answer)).await {
+                        if let Err(err) = bounded(command.create_response(&ctx.http, answer)).await
+                        {
                             warn!(error = %err, "Could not refuse a Discord command");
                         }
                         return;

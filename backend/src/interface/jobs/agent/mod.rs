@@ -319,15 +319,14 @@ impl JobHandler for AgentExecuteRunHandler {
                     let cleaned_answer = audio::strip_audio_script(&final_answer);
                     let attachment = if let Some(script) = &audio_script {
                         let task_voice = if let Some(task_uuid) = run.scheduled_task_id {
-                            if let Ok(tasks) = self.services.agent.list_scheduled_tasks(&owner).await {
-                                tasks
-                                    .into_iter()
-                                    .find(|t| t.id == task_uuid)
-                                    .and_then(|t| {
-                                        t.config
-                                            .get("voice")
-                                            .and_then(|v| v.as_str().map(|s| s.to_string()))
-                                    })
+                            if let Ok(tasks) =
+                                self.services.agent.list_scheduled_tasks(&owner).await
+                            {
+                                tasks.into_iter().find(|t| t.id == task_uuid).and_then(|t| {
+                                    t.config
+                                        .get("voice")
+                                        .and_then(|v| v.as_str().map(|s| s.to_string()))
+                                })
                             } else {
                                 None
                             }
@@ -1107,9 +1106,12 @@ mod tests {
             })
             .unwrap_or_default();
         assert!(
-            offered
-                .iter()
-                .all(|n| ["get_my_habits", "get_daily_log", "evaluate_habit_consistency"].contains(n)),
+            offered.iter().all(|n| [
+                "get_my_habits",
+                "get_daily_log",
+                "evaluate_habit_consistency"
+            ]
+            .contains(n)),
             "only whitelisted tools are offered: {offered:?}"
         );
     }
@@ -1245,7 +1247,10 @@ mod tests {
         assert!(msg.content.plain.contains("Weekly Digest Summary:"));
         assert!(msg.content.plain.contains("Hope you enjoyed!"));
         assert!(!msg.content.plain.contains("<audio_script>"));
-        assert!(!msg.content.plain.contains("Welcome to your audio podcast briefing!"));
+        assert!(!msg
+            .content
+            .plain
+            .contains("Welcome to your audio podcast briefing!"));
 
         // Attachment must be attached
         assert_eq!(msg.content.attachments.len(), 1);
@@ -1268,7 +1273,8 @@ mod tests {
         crate::db::pool::seed_account(&pool, &owner).await;
 
         let outbound = FakeOutbound::connected();
-        let final_text = "Here is the news:\n\n<audio_script>Voice digest.</audio_script>\n\nEnd of news.";
+        let final_text =
+            "Here is the news:\n\n<audio_script>Voice digest.</audio_script>\n\nEnd of news.";
         let (url, _seen) = scripted_replies(vec![text_reply(final_text)]).await;
         let handler = AgentExecuteRunHandler::new(
             services.clone(),

@@ -7,6 +7,7 @@ pub enum BillUrgency {
     DueToday,
     DueWithin3Days,
     DueWithin14Days,
+    Later,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -65,8 +66,10 @@ pub fn evaluate_bill_cash_adequacy(
             BillUrgency::DueToday
         } else if due_date <= today + chrono::Duration::days(3) {
             BillUrgency::DueWithin3Days
-        } else {
+        } else if due_date <= today + chrono::Duration::days(14) {
             BillUrgency::DueWithin14Days
+        } else {
+            BillUrgency::Later
         };
 
         total_due_minor += b.amount_minor;
@@ -81,7 +84,11 @@ pub fn evaluate_bill_cash_adequacy(
         });
     }
 
-    analyzed_bills.sort_by(|a, b| a.due_date.cmp(&b.due_date).then_with(|| a.bill_id.cmp(&b.bill_id)));
+    analyzed_bills.sort_by(|a, b| {
+        a.due_date
+            .cmp(&b.due_date)
+            .then_with(|| a.bill_id.cmp(&b.bill_id))
+    });
 
     let projected_shortfall_minor = total_due_minor.saturating_sub(available_cash_minor).max(0);
     let has_shortfall = projected_shortfall_minor > 0;
@@ -98,8 +105,8 @@ pub fn evaluate_bill_cash_adequacy(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::NaiveDate;
     use crate::domain::accounts::AccountId;
+    use chrono::NaiveDate;
 
     fn sample_bill(id: i64, name: &str, due: &str, amount: i64, status: &str) -> RecurringBill {
         RecurringBill {
@@ -135,10 +142,11 @@ mod tests {
             sample_bill(2, "Bill 2 Days", "2026-10-20", 2_000, "active"),
             sample_bill(3, "Bill 3 Days", "2026-10-21 12:00:00", 3_000, "active"),
             sample_bill(4, "Bill 7 Days", "2026-10-25", 4_000, "active"),
+            sample_bill(5, "Bill 20 Days", "2026-11-07", 5_000, "active"),
         ];
 
-        let report = evaluate_bill_cash_adequacy(&bills, 50_000, today, 14);
-        assert_eq!(report.bills.len(), 4);
+        let report = evaluate_bill_cash_adequacy(&bills, 50_000, today, 30);
+        assert_eq!(report.bills.len(), 5);
 
         let b1 = report.bills.iter().find(|b| b.bill_id == 1).unwrap();
         assert_eq!(b1.urgency, BillUrgency::DueToday);
@@ -151,6 +159,9 @@ mod tests {
 
         let b4 = report.bills.iter().find(|b| b.bill_id == 4).unwrap();
         assert_eq!(b4.urgency, BillUrgency::DueWithin14Days);
+
+        let b5 = report.bills.iter().find(|b| b.bill_id == 5).unwrap();
+        assert_eq!(b5.urgency, BillUrgency::Later);
     }
 
     #[test]
@@ -188,9 +199,7 @@ mod tests {
     #[test]
     fn test_sufficient_cash() {
         let today = NaiveDate::from_ymd_opt(2026, 10, 18).unwrap();
-        let bills = vec![
-            sample_bill(1, "Bill A", "2026-10-19", 10_000, "active"),
-        ];
+        let bills = vec![sample_bill(1, "Bill A", "2026-10-19", 10_000, "active")];
 
         // Total due: 10,000 minor ($100). Available: 20,000 minor ($200).
         let report = evaluate_bill_cash_adequacy(&bills, 20_000, today, 14);

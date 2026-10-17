@@ -93,7 +93,8 @@ pub async fn compile_audio_digest(
     custom_voice: Option<&str>,
 ) -> Option<Attachment> {
     let snapshot = services.app_config.snapshot();
-    if snapshot.is_customized(SettingKey::InferenceTtsEnabled) && !snapshot.inference_tts_enabled() {
+    if snapshot.is_customized(SettingKey::InferenceTtsEnabled) && !snapshot.inference_tts_enabled()
+    {
         return None;
     }
 
@@ -134,7 +135,8 @@ pub async fn compile_audio_digest(
 
     let settings = services.settings.get_or_default(owner).await;
     let custom_voice = custom_voice.filter(|v| !v.trim().is_empty());
-    let voice = custom_voice.unwrap_or_else(|| settings.tts_voice.as_deref().unwrap_or(house_voice));
+    let voice =
+        custom_voice.unwrap_or_else(|| settings.tts_voice.as_deref().unwrap_or(house_voice));
 
     let speakable = crate::interface::chat::tts::text::speakable(script);
     if speakable.is_empty() {
@@ -177,7 +179,8 @@ mod tests {
             Some("Welcome to your weekly podcast briefing!".to_string())
         );
 
-        let multiline = "<audio_script>\n  Line 1 of podcast.\n  Line 2 of podcast.\n</audio_script>";
+        let multiline =
+            "<audio_script>\n  Line 1 of podcast.\n  Line 2 of podcast.\n</audio_script>";
         assert_eq!(
             extract_audio_script(multiline),
             Some("Line 1 of podcast.\n  Line 2 of podcast.".to_string())
@@ -207,24 +210,15 @@ mod tests {
             extract_audio_script("<audio_script>   \n\t   </audio_script>"),
             None
         );
-        assert_eq!(
-            extract_audio_script("<audio_script>Unclosed script"),
-            None
-        );
-        assert_eq!(
-            extract_audio_script("Unopened script</audio_script>"),
-            None
-        );
+        assert_eq!(extract_audio_script("<audio_script>Unclosed script"), None);
+        assert_eq!(extract_audio_script("Unopened script</audio_script>"), None);
     }
 
     #[test]
     fn test_strip_audio_script_removes_block_cleanly() {
         let text = "Here is the digest:\n\n<audio_script>Secret audio script</audio_script>\n\nHope you enjoyed.";
         let stripped = strip_audio_script(text);
-        assert_eq!(
-            stripped,
-            "Here is the digest:\n\nHope you enjoyed."
-        );
+        assert_eq!(stripped, "Here is the digest:\n\nHope you enjoyed.");
     }
 
     #[test]
@@ -374,9 +368,7 @@ mod tests {
         use crate::domain::config::SettingValue;
         let app = Router::new().route(
             "/audio/speech",
-            post(|| async {
-                (StatusCode::INTERNAL_SERVER_ERROR, "TTS engine crashed")
-            }),
+            post(|| async { (StatusCode::INTERNAL_SERVER_ERROR, "TTS engine crashed") }),
         );
         let base_url = spawn_server(app).await;
 
@@ -396,14 +388,12 @@ mod tests {
             .await
             .unwrap();
 
-        let result = compile_audio_digest(
-            &services,
-            &owner,
-            "This will fail TTS synthesis",
-            None,
-        )
-        .await;
+        let result =
+            compile_audio_digest(&services, &owner, "This will fail TTS synthesis", None).await;
 
-        assert!(result.is_none(), "should fail-open and return None on upstream error");
+        assert!(
+            result.is_none(),
+            "should fail-open and return None on upstream error"
+        );
     }
 }

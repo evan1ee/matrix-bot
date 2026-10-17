@@ -345,7 +345,7 @@ impl ScheduledAgentTask for BillDueDigestTask {
 
         format!(
             "Run evaluate_bill_due_adequacy with days_ahead: {days_ahead}. \
-             Group upcoming bills by urgency (DueToday, DueWithin3Days, DueWithin14Days). \
+             Group upcoming bills by urgency (DueToday, DueWithin3Days, DueWithin14Days, Later). \
              Compare total bill commitments against available cash balances and clearly flag any projected cash shortfall."
         )
     }
@@ -376,15 +376,12 @@ impl ScheduledAgentTask for HabitConsistencyReviewTask {
         ])
     }
 
-    fn formulate_goal(&self, config: &serde_json::Value) -> String {
-        let days = config.get("days").and_then(|v| v.as_i64()).unwrap_or(7);
-
-        format!(
-            "Run evaluate_habit_consistency to analyze habit performance over the past {days} days. \
-             Highlight top streaks and celebrate consistent habits. \
-             Identify slipping or at-risk habits (missed 2+ consecutive days or completion rate < 50%). \
-             Propose a tailored, lightweight improvement and recovery strategy."
-        )
+    fn formulate_goal(&self, _config: &serde_json::Value) -> String {
+        "Run evaluate_habit_consistency to analyze 7-day habit performance and consistency. \
+         Highlight top streaks and celebrate consistent habits. \
+         Identify slipping or at-risk habits (missed 2+ consecutive days or completion rate < 50%). \
+         Propose a tailored, lightweight improvement and recovery strategy."
+            .to_string()
     }
 }
 
@@ -548,7 +545,8 @@ mod tests {
             .unwrap();
         let default_goal = bookmark_task.formulate_goal(&serde_json::json!({}));
         assert!(default_goal.contains("Review the user's unread bookmarks (up to 10 items)"));
-        assert!(default_goal.contains("Synthesize a comprehensive markdown digest with bullet takeaways"));
+        assert!(default_goal
+            .contains("Synthesize a comprehensive markdown digest with bullet takeaways"));
         assert!(default_goal.contains("<audio_script>"));
         assert!(default_goal.contains("150-250 words"));
 
@@ -572,7 +570,8 @@ mod tests {
         assert!(default_fin.contains("recurring bills vs discretionary spend"));
         assert!(default_fin.contains("savings opportunities"));
 
-        let custom_fin = finance_task.formulate_goal(&serde_json::json!({"spike_threshold_pct": 35.5}));
+        let custom_fin =
+            finance_task.formulate_goal(&serde_json::json!({"spike_threshold_pct": 35.5}));
         assert!(custom_fin.contains("spike_threshold_pct: 35.5"));
 
         // 3. Portfolio Rebalance Alert
@@ -583,7 +582,9 @@ mod tests {
         assert!(default_port.contains("get_my_portfolio_summary"));
         assert!(default_port.contains("severe allocation concentrations"));
         assert!(default_port.contains("drift threshold: 5"));
-        assert!(default_port.contains("Do NOT execute any trades directly without explicit approval"));
+        assert!(
+            default_port.contains("Do NOT execute any trades directly without explicit approval")
+        );
 
         let custom_port = portfolio_task.formulate_goal(&serde_json::json!({
             "targets": {"AAPL": 50, "GOOGL": 50},
@@ -592,7 +593,9 @@ mod tests {
         assert!(custom_port.contains("evaluate_portfolio_rebalance"));
         assert!(custom_port.contains("drift_threshold_pct: 3"));
         assert!(custom_port.contains("AAPL"));
-        assert!(custom_port.contains("Do NOT execute any trades directly without explicit approval"));
+        assert!(
+            custom_port.contains("Do NOT execute any trades directly without explicit approval")
+        );
 
         // 4. Bill Due Digest
         let bill_task = registry
@@ -606,6 +609,7 @@ mod tests {
 
         let custom_bill = bill_task.formulate_goal(&serde_json::json!({"days_ahead": 7}));
         assert!(custom_bill.contains("days_ahead: 7"));
+        assert!(custom_bill.contains("DueToday, DueWithin3Days, DueWithin14Days, Later"));
 
         // 5. Habit Consistency Review
         let habit_task = registry
@@ -613,15 +617,12 @@ mod tests {
             .unwrap();
         let default_habit = habit_task.formulate_goal(&serde_json::json!({}));
         assert!(default_habit.contains("evaluate_habit_consistency"));
-        assert!(default_habit.contains("past 7 days"));
+        assert!(default_habit.contains("7-day habit performance"));
         assert!(default_habit.contains("top streaks"));
         assert!(default_habit.contains(
             "slipping or at-risk habits (missed 2+ consecutive days or completion rate < 50%)"
         ));
         assert!(default_habit.contains("tailored, lightweight improvement and recovery strategy"));
-
-        let custom_habit = habit_task.formulate_goal(&serde_json::json!({"days": 14}));
-        assert!(custom_habit.contains("past 14 days"));
     }
 
     #[test]

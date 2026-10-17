@@ -27,6 +27,7 @@ pub struct PortfolioDriftReport {
     pub allocations: Vec<AssetAllocationDrift>,
     pub max_drift_pct: f64,
     pub needs_rebalance: bool,
+    pub unpriced_symbols: Vec<String>,
 }
 
 pub fn evaluate_portfolio_drift(
@@ -102,11 +103,19 @@ pub fn evaluate_portfolio_drift(
         });
     }
 
+    let mut unpriced_symbols = Vec::new();
+    for h in holdings {
+        if h.market_value_minor().is_none() && !unpriced_symbols.contains(&h.symbol) {
+            unpriced_symbols.push(h.symbol.clone());
+        }
+    }
+
     PortfolioDriftReport {
         total_value_minor,
         allocations,
         max_drift_pct,
         needs_rebalance,
+        unpriced_symbols,
     }
 }
 
@@ -191,15 +200,33 @@ mod tests {
         assert_eq!(report.total_value_minor, 100_000);
         assert_eq!(report.allocations.len(), 2);
 
-        let aapl = report.allocations.iter().find(|a| a.symbol == "AAPL").unwrap();
+        let aapl = report
+            .allocations
+            .iter()
+            .find(|a| a.symbol == "AAPL")
+            .unwrap();
         assert!((aapl.current_weight_pct - 70.0).abs() < 1e-4);
         assert!((aapl.drift_pct - 20.0).abs() < 1e-4);
-        assert_eq!(aapl.rebalance_action, RebalanceAction::Sell { amount_minor: 20_000 });
+        assert_eq!(
+            aapl.rebalance_action,
+            RebalanceAction::Sell {
+                amount_minor: 20_000
+            }
+        );
 
-        let msft = report.allocations.iter().find(|a| a.symbol == "MSFT").unwrap();
+        let msft = report
+            .allocations
+            .iter()
+            .find(|a| a.symbol == "MSFT")
+            .unwrap();
         assert!((msft.current_weight_pct - 30.0).abs() < 1e-4);
         assert!((msft.drift_pct - (-20.0)).abs() < 1e-4);
-        assert_eq!(msft.rebalance_action, RebalanceAction::Buy { amount_minor: 20_000 });
+        assert_eq!(
+            msft.rebalance_action,
+            RebalanceAction::Buy {
+                amount_minor: 20_000
+            }
+        );
 
         assert!((report.max_drift_pct - 20.0).abs() < 1e-4);
         assert!(report.needs_rebalance);
@@ -219,7 +246,10 @@ mod tests {
         assert_eq!(alloc.current_value_minor, 0);
         assert_eq!(alloc.current_weight_pct, 0.0);
         assert_eq!(alloc.drift_pct, -100.0);
-        assert_eq!(alloc.rebalance_action, RebalanceAction::Buy { amount_minor: 0 });
+        assert_eq!(
+            alloc.rebalance_action,
+            RebalanceAction::Buy { amount_minor: 0 }
+        );
         assert_eq!(report.max_drift_pct, 100.0);
         assert!(report.needs_rebalance);
     }
@@ -235,17 +265,50 @@ mod tests {
         assert_eq!(report.total_value_minor, 100_000);
         assert_eq!(report.allocations.len(), 2);
 
-        let goog = report.allocations.iter().find(|a| a.symbol == "GOOG").unwrap();
+        let goog = report
+            .allocations
+            .iter()
+            .find(|a| a.symbol == "GOOG")
+            .unwrap();
         assert_eq!(goog.current_value_minor, 0);
         assert_eq!(goog.current_weight_pct, 0.0);
         assert_eq!(goog.target_weight_pct, 40.0);
         assert_eq!(goog.drift_pct, -40.0);
-        assert_eq!(goog.rebalance_action, RebalanceAction::Buy { amount_minor: 40_000 });
+        assert_eq!(
+            goog.rebalance_action,
+            RebalanceAction::Buy {
+                amount_minor: 40_000
+            }
+        );
 
-        let aapl = report.allocations.iter().find(|a| a.symbol == "AAPL").unwrap();
+        let aapl = report
+            .allocations
+            .iter()
+            .find(|a| a.symbol == "AAPL")
+            .unwrap();
         assert_eq!(aapl.current_weight_pct, 100.0);
         assert_eq!(aapl.target_weight_pct, 60.0);
         assert_eq!(aapl.drift_pct, 40.0);
-        assert_eq!(aapl.rebalance_action, RebalanceAction::Sell { amount_minor: 40_000 });
+        assert_eq!(
+            aapl.rebalance_action,
+            RebalanceAction::Sell {
+                amount_minor: 40_000
+            }
+        );
+        assert!(report.unpriced_symbols.is_empty());
+    }
+
+    #[test]
+    fn test_unpriced_holdings_reported() {
+        let mut unpriced = sample_holding("XYZ", 5, 1_000);
+        unpriced.current_price_minor = None;
+
+        let holdings = vec![sample_holding("AAPL", 10, 10_000), unpriced];
+        let mut targets = BTreeMap::new();
+        targets.insert("AAPL".to_string(), 50.0);
+        targets.insert("XYZ".to_string(), 50.0);
+
+        let report = evaluate_portfolio_drift(&holdings, &targets, 5.0);
+        assert_eq!(report.unpriced_symbols, vec!["XYZ".to_string()]);
     }
 }

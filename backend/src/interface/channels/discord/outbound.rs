@@ -279,8 +279,14 @@ mod tests {
         assert_eq!(message["components"][0]["type"], 1); // ActionRow
         assert_eq!(message["components"][0]["components"][0]["type"], 2); // Button
         assert_eq!(message["components"][0]["components"][0]["style"], 2); // Secondary
-        assert_eq!(message["components"][0]["components"][0]["label"], "Done #1");
-        assert_eq!(message["components"][0]["components"][0]["custom_id"], "todo done 1");
+        assert_eq!(
+            message["components"][0]["components"][0]["label"],
+            "Done #1"
+        );
+        assert_eq!(
+            message["components"][0]["components"][0]["custom_id"],
+            "todo done 1"
+        );
 
         let edit = serde_json::to_value(edit_response(Post {
             description: post.description.clone(),
@@ -288,15 +294,24 @@ mod tests {
             buttons: post.buttons.clone(),
         }))
         .unwrap();
-        assert_eq!(edit["components"][0]["components"][0]["custom_id"], "todo done 1");
+        assert_eq!(
+            edit["components"][0]["components"][0]["custom_id"],
+            "todo done 1"
+        );
 
-        let follow = serde_json::to_value(follow_up(Post {
-            description: post.description.clone(),
-            files: Vec::new(),
-            buttons: post.buttons.clone(),
-        }, false))
+        let follow = serde_json::to_value(follow_up(
+            Post {
+                description: post.description.clone(),
+                files: Vec::new(),
+                buttons: post.buttons.clone(),
+            },
+            false,
+        ))
         .unwrap();
-        assert_eq!(follow["components"][0]["components"][0]["custom_id"], "todo done 1");
+        assert_eq!(
+            follow["components"][0]["components"][0]["custom_id"],
+            "todo done 1"
+        );
     }
 
     #[tokio::test]

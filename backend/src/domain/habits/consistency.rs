@@ -35,11 +35,15 @@ pub fn evaluate_habit_consistency(habits: &[HabitWithStatus]) -> HabitConsistenc
     let mut total_rate_sum = 0.0_f64;
 
     for h in habits {
-        let completions = h.last_7_days.iter().filter(|d| d.completed).count();
-        let weekly_completion_rate_pct = (completions as f64 / 7.0) * 100.0;
+        let target_days = h.habit.target_days_per_week.clamp(1, 7);
+        let completions = h.last_7_days.iter().filter(|d| d.completed).count() as i64;
+        let weekly_completion_rate_pct =
+            ((completions as f64 / target_days as f64) * 100.0).min(100.0);
         total_rate_sum += weekly_completion_rate_pct;
 
-        let missing_last_2_days = if h.last_7_days.len() >= 2 {
+        // Only evaluate missing last 2 days for daily habits (target_days == 7).
+        // For non-daily routines (e.g. 3x/week), missing 2 days (rest/weekend) is expected.
+        let missing_last_2_days = if target_days == 7 && h.last_7_days.len() >= 2 {
             let mut sorted_days = h.last_7_days.clone();
             sorted_days.sort_by(|a, b| a.date.cmp(&b.date));
             let n = sorted_days.len();
@@ -199,7 +203,12 @@ mod tests {
             // 5/7 completions with last 2 days done -> Stable
             sample_habit(2, "Water", 2, &[false, false, true, true, true, true, true]),
             // 2/7 completions -> AtRisk
-            sample_habit(3, "Journal", 0, &[false, false, false, false, false, true, true]),
+            sample_habit(
+                3,
+                "Journal",
+                0,
+                &[false, false, false, false, false, true, true],
+            ),
         ];
 
         let report = evaluate_habit_consistency(&habits);
@@ -210,5 +219,24 @@ mod tests {
 
         assert_eq!(report.top_streaks, vec!["Workout".to_string()]);
         assert_eq!(report.slipping_habits, vec!["Journal".to_string()]);
+    }
+
+    #[test]
+    fn test_non_daily_habit_consistency_respects_target_days() {
+        let mut gym = sample_habit(
+            1,
+            "Gym 3x/Week",
+            3,
+            &[true, false, true, false, true, false, false], // completed 3 times, weekend off
+        );
+        gym.habit.target_days_per_week = 3;
+
+        let report = evaluate_habit_consistency(&[gym]);
+        assert_eq!(report.total_active, 1);
+        // 3 completions out of 3 target days = 100%
+        assert!((report.items[0].weekly_completion_rate_pct - 100.0).abs() < 1e-4);
+        assert_eq!(report.items[0].trend, HabitTrend::Improving);
+        // Missing the last 2 days on weekend should NOT flag a 3x/week habit as slipping
+        assert!(report.slipping_habits.is_empty());
     }
 }

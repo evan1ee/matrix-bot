@@ -20,17 +20,17 @@ pub struct Parsed {
 /// when it came from a DM; `is_mentioned` always (a slash command addresses
 /// the bot, B12).
 pub fn from_command(interaction: &CommandInteraction) -> Result<Parsed, CommandRefusal> {
-    let text = if let Some((sub_name, sub_opts)) = interaction
-        .data
-        .options
-        .iter()
-        .find_map(|option| match &option.value {
-            CommandDataOptionValue::SubCommand(sub_opts) => {
-                Some((option.name.as_str(), sub_opts.as_slice()))
-            }
-            _ => None,
-        })
-    {
+    let text = if let Some((sub_name, sub_opts)) =
+        interaction
+            .data
+            .options
+            .iter()
+            .find_map(|option| match &option.value {
+                CommandDataOptionValue::SubCommand(sub_opts) => {
+                    Some((option.name.as_str(), sub_opts.as_slice()))
+                }
+                _ => None,
+            }) {
         parse_subcommand(&interaction.data.name, sub_name, sub_opts)?
     } else {
         let value = interaction
@@ -172,7 +172,9 @@ fn parse_subcommand(
             }
             _ => Err(CommandRefusal::Unknown(format!("expense {sub_name}"))),
         },
-        _ => Err(CommandRefusal::Unknown(format!("{command_name} {sub_name}"))),
+        _ => Err(CommandRefusal::Unknown(format!(
+            "{command_name} {sub_name}"
+        ))),
     }
 }
 
@@ -649,7 +651,10 @@ mod tests {
                 }
             ]);
         }));
-        assert!(matches!(overlong_parsed, Err(CommandRefusal::TooLong { .. })));
+        assert!(matches!(
+            overlong_parsed,
+            Err(CommandRefusal::TooLong { .. })
+        ));
     }
 
     #[test]
