@@ -23,6 +23,19 @@ struct Edits {
     streamed: String,
 }
 
+impl Edits {
+    /// Appends a streamed delta and returns the text to show.
+    fn stream(&mut self, delta: &str) -> String {
+        self.streamed.push_str(delta);
+        tail(&self.streamed, EMBED_DESCRIPTION_MAX)
+    }
+
+    /// Ends the current segment, sent or not: the next delta starts from empty text.
+    fn end_segment(&mut self) {
+        self.streamed.clear();
+    }
+}
+
 /// Edits the deferred response while a turn runs; the final reply replaces it.
 /// Failures are logged at debug and ignored: a sink never fails the turn.
 pub struct InteractionProgress {
@@ -87,16 +100,20 @@ impl ProgressSink for InteractionProgress {
     }
 
     async fn push_delta(&self, delta: &str) {
-        self.edit_if_due(|state| {
-            state.streamed.push_str(delta);
-            Some(tail(&state.streamed, EMBED_DESCRIPTION_MAX))
-        })
-        .await;
+        self.edit_if_due(|state| Some(state.stream(delta))).await;
     }
 
     async fn flush(&self) {
         if let Ok(mut state) = self.state.lock() {
-            state.streamed.clear();
+            state.end_segment();
+        }
+    }
+
+    /// Drops the segment without an edit of its own; the fallback's text
+    /// replaces it on the next due edit.
+    async fn retract_segment(&self) {
+        if let Ok(mut state) = self.state.lock() {
+            state.end_segment();
         }
     }
 }
@@ -148,6 +165,17 @@ impl ProgressSink for TypingProgress {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_retracted_segment_is_not_carried_into_the_fallback_text() {
+        let mut edits = Edits {
+            throttle: Throttle::new(EDIT_GAP),
+            streamed: String::new(),
+        };
+        edits.stream("partial");
+        edits.end_segment();
+        assert_eq!(edits.stream("Full answer"), "Full answer");
+    }
 
     #[test]
     fn tail_keeps_the_newest_characters() {

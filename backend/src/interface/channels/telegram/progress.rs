@@ -192,6 +192,12 @@ impl ProgressSink for TelegramProgress {
     async fn flush(&self) {
         self.update(|s| s.streamed.clear());
     }
+
+    /// Drops the segment like `flush`, sending nothing: the fallback's text
+    /// replaces the partial one on the next due edit.
+    async fn retract_segment(&self) {
+        self.update(|s| s.streamed.clear());
+    }
 }
 
 #[cfg(test)]
@@ -259,6 +265,22 @@ mod tests {
         s.sent(MessageId(9));
         assert_eq!(s.take_status(), Some(MessageId(9)));
         assert_eq!(s.take_status(), None);
+    }
+
+    #[tokio::test]
+    async fn a_retracted_segment_is_not_carried_into_the_fallback_text() {
+        let progress = TelegramProgress::new(Bot::new("x"), ChatId(1));
+        // A status send in flight and a fresh typing pulse: no report below
+        // calls Telegram.
+        progress.update(|s| {
+            s.status = Status::Sending;
+            s.typing.ready(Instant::now());
+        });
+        progress.push_delta("partial").await;
+        progress.retract_segment().await;
+        progress.push_delta("Full answer").await;
+        let streamed = progress.state.lock().unwrap().streamed.clone();
+        assert_eq!(streamed, "Full answer");
     }
 
     #[test]

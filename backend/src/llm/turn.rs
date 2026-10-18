@@ -297,7 +297,7 @@ pub async fn run_turn(
                         tainted |= guard::returns_outside_content(&outcome.name);
 
                         // Persist tool result message
-                        let _ = llm_repo::add_tool_message(
+                        if let Err(e) = llm_repo::add_tool_message(
                             ctx.pool,
                             &conversation.id,
                             &outcome.call_id,
@@ -305,7 +305,16 @@ pub async fn run_turn(
                             &outcome.result,
                             ToolStepOutcome::from(&outcome),
                         )
-                        .await;
+                        .await
+                        {
+                            // No payload: a tool result can hold the user's data.
+                            warn!(
+                                conversation_id = %conversation.id,
+                                tool = %outcome.name,
+                                error = %e,
+                                "Failed to persist tool result message"
+                            );
+                        }
 
                         chat_messages.push(ChatCompletionMessage {
                             role: "tool".to_string(),

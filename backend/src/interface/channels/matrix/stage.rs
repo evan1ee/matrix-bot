@@ -176,6 +176,12 @@ impl crate::llm::progress::ProgressSink for StageReporter {
         self.stream.lock().await.take();
     }
 
+    /// Drops the segment like `flush`, sending nothing: the fallback's text
+    /// starts a fresh buffer and replaces the partial one on its next edit.
+    async fn retract_segment(&self) {
+        self.stream.lock().await.take();
+    }
+
     fn message_ref(&self) -> Option<String> {
         self.event_id.as_ref().map(|id| id.to_string())
     }
@@ -423,6 +429,29 @@ mod tests {
         sink.flush().await;
         assert!(reporter.stream.lock().await.is_none());
         assert_eq!(sink.message_ref(), None);
+    }
+
+    #[tokio::test]
+    async fn a_retracted_segment_is_not_carried_into_the_fallback_text() {
+        use crate::llm::progress::ProgressSink;
+        let reporter = StageReporter::noop();
+        let sink: &dyn ProgressSink = &reporter;
+        sink.push_delta("partial").await;
+        sink.retract_segment().await;
+        sink.push_delta("Full answer").await;
+        assert_eq!(
+            reporter
+                .stream
+                .lock()
+                .await
+                .as_ref()
+                .map(|t| t.accumulated().to_string()),
+            Some("Full answer".to_string())
+        );
+        assert_eq!(
+            reporter.reports.load(std::sync::atomic::Ordering::Relaxed),
+            0
+        );
     }
 
     #[tokio::test]
