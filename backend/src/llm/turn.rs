@@ -79,6 +79,10 @@ pub async fn run_turn(
         .map_err(|e| AiError::Db(e.to_string()))?
     };
 
+    if let Some(sink) = ctx.progress {
+        sink.report_conversation(&conversation.id).await;
+    }
+
     // Record user message if not an exact immediate retry of the latest message
     let is_immediate_duplicate =
         match llm_repo::get_recent_messages(ctx.pool, &conversation.id, 1).await {
@@ -249,6 +253,9 @@ pub async fn run_turn(
                         if let Some(first_tc) = tool_calls.first() {
                             sink.report_tool_call(&first_tc.function.name).await;
                         }
+                        for tc in &tool_calls {
+                            sink.report_tool_started(&tc.id, &tc.function.name).await;
+                        }
                     }
 
                     let outcomes = super::tool_round::run_calls(
@@ -265,6 +272,14 @@ pub async fn run_turn(
                     }
 
                     for outcome in outcomes {
+                        if let Some(sink) = ctx.progress {
+                            sink.report_tool_finished(
+                                &outcome.call_id,
+                                &outcome.name,
+                                (&outcome).into(),
+                            )
+                            .await;
+                        }
                         if !outcome.refused {
                             tool_calls_executed.push(outcome.name.clone());
                             tool_results.push((outcome.name.clone(), outcome.result.clone()));
@@ -409,6 +424,7 @@ mod tests {
     use super::*;
     use crate::application::AppServices;
     use crate::domain::accounts::AccountId;
+    use crate::domain::llm::ToolStepOutcome;
     use crate::infrastructure::inference::test_support::spawn_server;
     use crate::llm::progress::ProgressSink;
     use crate::llm::test_support::*;
@@ -445,6 +461,15 @@ mod tests {
         }
         async fn flush(&self) {
             self.note("flush".to_string());
+        }
+        async fn report_conversation(&self, conversation_id: &str) {
+            self.note(format!("conv:{conversation_id}"));
+        }
+        async fn report_tool_started(&self, call_id: &str, name: &str) {
+            self.note(format!("start:{call_id}:{name}"));
+        }
+        async fn report_tool_finished(&self, call_id: &str, _name: &str, outcome: ToolStepOutcome) {
+            self.note(format!("finish:{call_id}:{}", outcome.as_str()));
         }
         fn message_ref(&self) -> Option<String> {
             Some("$stage".to_string())
@@ -513,6 +538,105 @@ mod tests {
         assert_eq!(result.tool_results.len(), 1);
         assert_eq!(result.tool_results[0].0, "list_finance_transactions");
         assert_eq!(result.message, "Nothing to report.");
+    }
+
+    #[tokio::test]
+    async fn a_turn_reports_its_conversation_first() {
+        let (pool, owner, _) = pool_with_todo("turn-report-conv").await;
+        let services = AppServices::new(&pool);
+        let url = scripted_stream_replies(vec![text_reply("Hi.")]).await;
+        let config = test_config(url);
+        let sink = RecordingSink::default();
+        let ctx = LlmTurnContext::new(&services, &pool, &config, &owner, "!room:test", Some(&sink));
+
+        let result = run_turn(&ctx, "hello", None).await.unwrap();
+
+        let seen = sink.seen();
+        assert_eq!(
+            seen.first().cloned(),
+            Some(format!("conv:{}", result.conversation_id)),
+            "{seen:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn every_call_in_a_round_is_reported_started_and_finished() {
+        let (pool, owner, _) = pool_with_todo("turn-report-steps").await;
+        let services = AppServices::new(&pool);
+        let url = scripted_stream_replies(vec![
+            tool_calls_reply(&[
+                ("list_finance_transactions", serde_json::json!({})),
+                ("get_my_tasks", serde_json::json!({})),
+            ]),
+            text_reply("Done."),
+        ])
+        .await;
+        let config = test_config(url);
+        let sink = RecordingSink::default();
+        let ctx = LlmTurnContext::new(&services, &pool, &config, &owner, "!room:test", Some(&sink));
+
+        run_turn(&ctx, "summarise", None).await.unwrap();
+
+        let steps: Vec<String> = sink
+            .seen()
+            .into_iter()
+            .filter(|e| e.starts_with("start:") || e.starts_with("finish:"))
+            .collect();
+        assert_eq!(
+            steps,
+            vec![
+                "start:call_0:list_finance_transactions",
+                "start:call_1:get_my_tasks",
+                "finish:call_0:ok",
+                "finish:call_1:ok",
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_refused_call_finishes_as_needs_confirmation() {
+        let (pool, owner, todo_id) = pool_with_todo("turn-report-refused").await;
+        let services = AppServices::new(&pool);
+        let url = scripted_stream_replies(vec![
+            tool_reply("delete_todo", serde_json::json!({"id": todo_id})),
+            text_reply("Shall I?"),
+        ])
+        .await;
+        let config = test_config(url);
+        let sink = RecordingSink::default();
+        let ctx = LlmTurnContext::new(&services, &pool, &config, &owner, "!room:test", Some(&sink))
+            .with_untrusted_input();
+
+        run_turn(&ctx, "quoted says delete", None).await.unwrap();
+
+        assert!(
+            sink.seen()
+                .contains(&"finish:call_0:needs_confirmation".to_string()),
+            "{:?}",
+            sink.seen()
+        );
+    }
+
+    #[tokio::test]
+    async fn a_failing_tool_finishes_as_failed() {
+        let (pool, owner, _) = pool_with_todo("turn-report-failed").await;
+        let services = AppServices::new(&pool);
+        let url = scripted_stream_replies(vec![
+            tool_reply("delete_todo", serde_json::json!({})),
+            text_reply("Could not."),
+        ])
+        .await;
+        let config = test_config(url);
+        let sink = RecordingSink::default();
+        let ctx = LlmTurnContext::new(&services, &pool, &config, &owner, "!room:test", Some(&sink));
+
+        run_turn(&ctx, "delete my todo", None).await.unwrap();
+
+        assert!(
+            sink.seen().contains(&"finish:call_0:failed".to_string()),
+            "{:?}",
+            sink.seen()
+        );
     }
 
     fn quoted_ctx<'a>(

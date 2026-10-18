@@ -63,6 +63,38 @@ pub async fn scripted_replies(replies: Vec<serde_json::Value>) -> (String, Seen)
     (spawn_server(app).await, seen)
 }
 
+/// Like `scripted_replies`, but answers as the SSE stream a turn with a
+/// progress sink asks for: each scripted message becomes one delta chunk.
+pub async fn scripted_stream_replies(replies: Vec<serde_json::Value>) -> String {
+    type Queue = Arc<Mutex<VecDeque<serde_json::Value>>>;
+    let queue: Queue = Arc::new(Mutex::new(replies.into()));
+    let app = Router::new()
+        .route(
+            "/chat/completions",
+            post(|State(queue): State<Queue>| async move {
+                let next = queue
+                    .lock()
+                    .unwrap()
+                    .pop_front()
+                    .unwrap_or_else(|| text_reply("done"));
+                let mut delta = next["choices"][0]["message"].clone();
+                if let Some(calls) = delta["tool_calls"].as_array_mut() {
+                    for (i, call) in calls.iter_mut().enumerate() {
+                        call["index"] = serde_json::json!(i);
+                    }
+                }
+                let chunk = serde_json::json!({"id":"c","model":"m","choices":[{"index":0,
+                    "delta":delta,"finish_reason":null}]});
+                (
+                    [("content-type", "text/event-stream")],
+                    format!("data: {chunk}\n\ndata: [DONE]\n\n"),
+                )
+            }),
+        )
+        .with_state(queue);
+    spawn_server(app).await
+}
+
 pub fn test_config(base_url: String) -> crate::config::AiEnvConfig {
     crate::config::AiEnvConfig {
         base_url: Some(base_url),

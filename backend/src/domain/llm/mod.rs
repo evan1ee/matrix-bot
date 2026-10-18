@@ -281,9 +281,49 @@ pub struct AiConversationWithMessages {
     pub messages: Vec<AiMessage>,
 }
 
+/// How one tool call of a turn ended, as shown to a watching client.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ToolStepOutcome {
+    Ok,
+    Failed,
+    NeedsConfirmation,
+}
+
+impl ToolStepOutcome {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Failed => "failed",
+            Self::NeedsConfirmation => "needs_confirmation",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "ok" => Some(Self::Ok),
+            "failed" => Some(Self::Failed),
+            "needs_confirmation" => Some(Self::NeedsConfirmation),
+            _ => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tool_step_outcome_round_trips_through_its_string_form() {
+        for outcome in [
+            ToolStepOutcome::Ok,
+            ToolStepOutcome::Failed,
+            ToolStepOutcome::NeedsConfirmation,
+        ] {
+            assert_eq!(ToolStepOutcome::parse(outcome.as_str()), Some(outcome));
+        }
+        assert_eq!(ToolStepOutcome::parse("x"), None);
+    }
 
     #[test]
     fn test_validate_api_base_url() {

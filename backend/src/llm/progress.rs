@@ -4,6 +4,8 @@
 //! to a `ProgressSink`, and each adapter decides how to show them (Matrix edits
 //! one message in place; a channel that cannot edit ignores most of it).
 
+use crate::domain::llm::ToolStepOutcome;
+
 /// Receives a turn's progress. Every method is best-effort: a sink must never
 /// fail the turn, so none returns an error.
 #[async_trait::async_trait]
@@ -19,6 +21,15 @@ pub trait ProgressSink: Send + Sync {
     fn message_ref(&self) -> Option<String> {
         None
     }
+    /// The conversation this turn belongs to, reported once it is resolved.
+    async fn report_conversation(&self, _conversation_id: &str) {}
+    /// One tool call of a round is about to run.
+    async fn report_tool_started(&self, _call_id: &str, _name: &str) {}
+    /// That call has ended.
+    async fn report_tool_finished(&self, _call_id: &str, _name: &str, _outcome: ToolStepOutcome) {}
+    /// Discards the text streamed since the last flush (the model went on to
+    /// call tools, so the text was a preamble, not the answer).
+    async fn retract_segment(&self) {}
 }
 
 /// A turn nobody watches.

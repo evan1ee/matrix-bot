@@ -6,6 +6,7 @@ use tracing::info;
 use super::context::LlmTurnContext;
 use super::guard;
 use super::tools::ToolRegistry;
+use crate::domain::llm::ToolStepOutcome;
 use crate::infrastructure::inference::llm::ToolCall;
 
 /// What running one tool call produced.
@@ -18,6 +19,18 @@ pub struct ToolOutcome {
     pub succeeded: bool,
     /// Not run: a sensitive tool in a tainted turn.
     pub refused: bool,
+}
+
+impl From<&ToolOutcome> for ToolStepOutcome {
+    fn from(outcome: &ToolOutcome) -> Self {
+        if outcome.refused {
+            Self::NeedsConfirmation
+        } else if outcome.succeeded {
+            Self::Ok
+        } else {
+            Self::Failed
+        }
+    }
 }
 
 /// Runs every call of one round concurrently, in the model's order.
