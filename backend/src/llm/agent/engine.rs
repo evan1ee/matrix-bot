@@ -375,7 +375,7 @@ mod tests {
         }
         let todos = AppServices::new(&pool)
             .todos
-            .list(&account, None, None, 10, 0)
+            .list(&account, None, None, None, 10, 0)
             .await
             .unwrap();
         assert!(todos.is_empty(), "nothing may run on unparseable arguments");
@@ -420,7 +420,7 @@ mod tests {
         );
         let todos = AppServices::new(&pool)
             .todos
-            .list(&account, None, None, 10, 0)
+            .list(&account, None, None, None, 10, 0)
             .await
             .unwrap();
         assert_eq!(todos.len(), 1);

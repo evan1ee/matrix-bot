@@ -161,6 +161,7 @@ pub async fn list_todos(
             &user.account_id,
             query.room_id.as_deref(),
             query.completed,
+            None,
             limit,
             offset,
         )
@@ -169,7 +170,12 @@ pub async fn list_todos(
     let total = state
         .services
         .todos
-        .count(&user.account_id, query.room_id.as_deref(), query.completed)
+        .count(
+            &user.account_id,
+            query.room_id.as_deref(),
+            query.completed,
+            None,
+        )
         .await?;
 
     let items = domain_items.into_iter().map(TodoItem::from).collect();
@@ -222,6 +228,9 @@ pub async fn create_todo(
         due_at: payload.due_at,
         remind_before_minutes: payload.remind_before_minutes,
         remind_room_id,
+        tags: vec![],
+        recurrence: crate::domain::reminders::RecurrencePattern::None,
+        recurrence_anchor: None,
     };
 
     let (item, _) = state.services.todos.create(&user.account_id, input).await?;
@@ -265,6 +274,9 @@ pub async fn update_todo(
         due_at: payload.due_at,
         remind_before_minutes: payload.remind_before_minutes,
         remind_room_id,
+        tags: None,
+        recurrence: None,
+        recurrence_anchor: None,
     };
 
     let (item, _) = state

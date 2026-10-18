@@ -6,9 +6,17 @@ use crate::application::reminders::ReminderService;
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
 use crate::domain::events::SystemEvent;
+use crate::domain::reminders::RecurrencePattern;
 use crate::domain::reminders::{ReminderPlan, ReminderSource, SyncOutcome};
-use crate::domain::todos::{wanted_trigger, NewTodo, TodoItem, TodoPatch};
+use crate::domain::tags::Tag;
+use crate::domain::todos::{wanted_trigger, NewTodo, TodoError, TodoItem, TodoPatch};
 use crate::infrastructure::postgres::repositories::{self, outbox};
+
+impl From<TodoError> for AppError {
+    fn from(err: TodoError) -> Self {
+        AppError::Validation(err.to_string())
+    }
+}
 
 #[derive(Clone)]
 pub struct TodoService {
@@ -27,6 +35,13 @@ impl TodoService {
         input: NewTodo,
     ) -> Result<(TodoItem, SyncOutcome), AppError> {
         input.validate()?;
+        // A recurring series is anchored to the due date it starts from.
+        let input = NewTodo {
+            recurrence_anchor: (input.recurrence != RecurrencePattern::None)
+                .then_some(input.due_at)
+                .flatten(),
+            ..input
+        };
 
         let remind_room = input.remind_room_id.clone();
         let mut tx = self.pool.begin().await?;
@@ -60,6 +75,7 @@ impl TodoService {
 
         let remind_room = patch.remind_room_id.clone();
         let mut tx = self.pool.begin().await?;
+        let patch = Self::with_anchor(&mut tx, owner_id, id, patch).await?;
         let updated = repositories::todos::update(&mut *tx, owner_id, id, &patch)
             .await?
             .ok_or_else(|| {
@@ -73,6 +89,36 @@ impl TodoService {
             .await?;
 
         Ok((updated, sync_outcome))
+    }
+
+    /// Derives the series anchor a patch implies: recurrence turned on from none
+    /// or a changed due date of a recurring todo re-anchors to the new due date;
+    /// recurrence set to none clears it.
+    async fn with_anchor(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        owner_id: &AccountId,
+        id: i64,
+        patch: TodoPatch,
+    ) -> Result<TodoPatch, AppError> {
+        if patch.recurrence.is_none() && patch.due_at.is_none() {
+            return Ok(patch);
+        }
+        let Some(current) = repositories::todos::find_owned(&mut **tx, owner_id, id).await? else {
+            return Ok(patch);
+        };
+        let recurrence = patch.recurrence.unwrap_or(current.recurrence);
+        let due_at = patch.due_at.unwrap_or(current.due_at);
+        let anchor = if recurrence == RecurrencePattern::None {
+            Some(None)
+        } else if current.recurrence == RecurrencePattern::None || due_at != current.due_at {
+            Some(due_at)
+        } else {
+            None
+        };
+        Ok(TodoPatch {
+            recurrence_anchor: anchor,
+            ..patch
+        })
     }
 
     pub async fn set_completed(
@@ -188,16 +234,18 @@ impl TodoService {
         owner_id: &AccountId,
         room_id: Option<&str>,
         completed: Option<bool>,
+        tag: Option<&Tag>,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<TodoItem>, AppError> {
+        let tag = tag.map(Tag::as_str);
         let items = if let Some(room) = room_id {
             repositories::todos::list_room_user(
-                &self.pool, room, owner_id, completed, limit, offset,
+                &self.pool, room, owner_id, completed, tag, limit, offset,
             )
             .await?
         } else {
-            repositories::todos::list_all_user(&self.pool, owner_id, completed, limit, offset)
+            repositories::todos::list_all_user(&self.pool, owner_id, completed, tag, limit, offset)
                 .await?
         };
 
@@ -209,11 +257,13 @@ impl TodoService {
         owner_id: &AccountId,
         room_id: Option<&str>,
         completed: Option<bool>,
+        tag: Option<&Tag>,
     ) -> Result<i64, AppError> {
+        let tag = tag.map(Tag::as_str);
         let count = if let Some(room) = room_id {
-            repositories::todos::count_room_user(&self.pool, room, owner_id, completed).await?
+            repositories::todos::count_room_user(&self.pool, room, owner_id, completed, tag).await?
         } else {
-            repositories::todos::count_all_user(&self.pool, owner_id, completed).await?
+            repositories::todos::count_all_user(&self.pool, owner_id, completed, tag).await?
         };
 
         Ok(count)
@@ -286,7 +336,8 @@ impl TodoService {
 mod tests {
     use crate::application::AppServices;
     use crate::domain::accounts::AccountId;
-    use crate::domain::todos::{NewTodo, TodoPriority};
+    use crate::domain::reminders::RecurrencePattern;
+    use crate::domain::todos::{NewTodo, TodoPatch, TodoPriority};
     use crate::infrastructure::postgres::repositories;
 
     fn new_todo(text: &str) -> NewTodo {
@@ -298,6 +349,9 @@ mod tests {
             due_at: None,
             remind_before_minutes: None,
             remind_room_id: None,
+            tags: vec![],
+            recurrence: crate::domain::reminders::RecurrencePattern::None,
+            recurrence_anchor: None,
         }
     }
 
@@ -342,7 +396,14 @@ mod tests {
             .await
             .is_err());
 
-        assert_eq!(services.todos.count(&owner, None, None).await.unwrap(), 0);
+        assert_eq!(
+            services
+                .todos
+                .count(&owner, None, None, None)
+                .await
+                .unwrap(),
+            0
+        );
         assert!(repositories::outbox::event_types_for(&pool, &owner)
             .await
             .unwrap()
@@ -369,5 +430,73 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(types.iter().filter(|t| *t == "TodoDeleted").count(), 2);
+    }
+
+    /// Given recurrence and a due date, When the todo is created, Then the series is anchored to it.
+    #[tokio::test]
+    async fn create_anchors_a_recurring_todo_to_its_due_date() {
+        let (_pool, services, owner) = setup("todo_anchor_create").await;
+        let due = crate::utils::time::now_at_storage_precision();
+        let input = NewTodo {
+            due_at: Some(due),
+            recurrence: RecurrencePattern::Monthly,
+            ..new_todo("rent")
+        };
+        let (item, _) = services.todos.create(&owner, input).await.unwrap();
+        assert_eq!(item.recurrence_anchor, Some(due));
+
+        let (plain, _) = services
+            .todos
+            .create(&owner, new_todo("plain"))
+            .await
+            .unwrap();
+        assert_eq!(plain.recurrence_anchor, None);
+    }
+
+    /// Given a todo, When recurrence is turned on, the due date moved, or recurrence
+    /// cleared, Then the anchor follows the rule (and ignores unrelated edits).
+    #[tokio::test]
+    async fn update_maintains_the_recurrence_anchor() {
+        let (_pool, services, owner) = setup("todo_anchor_update").await;
+        let due = crate::utils::time::now_at_storage_precision();
+        let later = due + chrono::Duration::days(3);
+        let input = NewTodo {
+            due_at: Some(due),
+            ..new_todo("rent")
+        };
+        let (item, _) = services.todos.create(&owner, input).await.unwrap();
+        assert_eq!(item.recurrence_anchor, None);
+
+        let on = TodoPatch {
+            recurrence: Some(RecurrencePattern::Weekly),
+            ..Default::default()
+        };
+        let (item, _) = services.todos.update(&owner, item.id, on).await.unwrap();
+        assert_eq!(item.recurrence_anchor, Some(due));
+
+        let rename = TodoPatch {
+            text: Some("rent!".to_string()),
+            ..Default::default()
+        };
+        let (item, _) = services
+            .todos
+            .update(&owner, item.id, rename)
+            .await
+            .unwrap();
+        assert_eq!(item.recurrence_anchor, Some(due));
+
+        let moved = TodoPatch {
+            due_at: Some(Some(later)),
+            ..Default::default()
+        };
+        let (item, _) = services.todos.update(&owner, item.id, moved).await.unwrap();
+        assert_eq!(item.recurrence_anchor, Some(later));
+
+        let off = TodoPatch {
+            recurrence: Some(RecurrencePattern::None),
+            ..Default::default()
+        };
+        let (item, _) = services.todos.update(&owner, item.id, off).await.unwrap();
+        assert_eq!(item.recurrence_anchor, None);
     }
 }

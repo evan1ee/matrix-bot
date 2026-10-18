@@ -35,7 +35,7 @@ pub async fn handle_todo_command(
 
     if bare {
         let items = todos
-            .list(owner_id, None, None, PAGE_SIZE, 0)
+            .list(owner_id, None, None, None, PAGE_SIZE, 0)
             .await
             .unwrap_or_default();
         return Some(list_reply(

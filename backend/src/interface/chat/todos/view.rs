@@ -73,7 +73,10 @@ pub async fn handle_list_user(
     let page: i64 = rest.parse().unwrap_or(1).max(1);
     let offset = (page - 1) * PAGE_SIZE;
 
-    match todos.list(owner_id, None, None, PAGE_SIZE, offset).await {
+    match todos
+        .list(owner_id, None, None, None, PAGE_SIZE, offset)
+        .await
+    {
         Ok(items) => Some(list_reply(
             owner_id,
             &format!("Your Tasks ({})", html_escape(sender_name)),
@@ -166,6 +169,10 @@ mod tests {
             remind_before_minutes: None,
             completed: false,
             created_at: None,
+            tags: vec![],
+            recurrence: crate::domain::reminders::RecurrencePattern::None,
+            recurrence_anchor: None,
+            next_todo_id: None,
         }
     }
 

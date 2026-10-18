@@ -484,6 +484,10 @@ mod tests {
             remind_before_minutes: None,
             completed: false,
             created_at: None,
+            tags: vec![],
+            recurrence: crate::domain::reminders::RecurrencePattern::None,
+            recurrence_anchor: None,
+            next_todo_id: None,
         }
     }
 

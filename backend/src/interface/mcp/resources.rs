@@ -55,7 +55,7 @@ pub async fn read_resource(
 ) -> Result<ReadResourceResult, String> {
     match uri {
         "matrixbot://todos/pending" => {
-            let todos = todos_repo::list_all_user(pool, owner_id, Some(false), 50, 0)
+            let todos = todos_repo::list_all_user(pool, owner_id, Some(false), None, 50, 0)
                 .await
                 .map_err(|e| e.to_string())?;
             let json = serde_json::to_string_pretty(&todos).map_err(|e| e.to_string())?;

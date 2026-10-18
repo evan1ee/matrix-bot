@@ -204,7 +204,7 @@ mod tests {
         let evan = link(&pool, EVAN, "evan").await;
         link(&pool, DANA, "dana").await;
         answer(&inbound, &private("/todo add buy milk")).await;
-        let item = todos::list_all_user(&pool, &evan, None, 10, 0)
+        let item = todos::list_all_user(&pool, &evan, None, None, 10, 0)
             .await
             .unwrap()
             .remove(0);
@@ -228,7 +228,7 @@ mod tests {
         let (inbound, pool, _reg) = pipeline().await;
         let evan = link(&pool, EVAN, "evan").await;
         answer(&inbound, &private("/todo add buy milk")).await;
-        let item = todos::list_all_user(&pool, &evan, None, 10, 0)
+        let item = todos::list_all_user(&pool, &evan, None, None, 10, 0)
             .await
             .unwrap()
             .remove(0);

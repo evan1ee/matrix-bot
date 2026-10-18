@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT t AS \"tag!\", COUNT(*) AS \"count!\"\n        FROM todos, unnest(tags) t\n        WHERE owner_id = $1 AND NOT completed\n        GROUP BY t\n        ORDER BY t\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tag!",
+        "type_info": "Text",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "count!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "e42dd49053d5ad3328fdd61abfea6c00d432f866a229225ad2cd659367ac01fe"
+}

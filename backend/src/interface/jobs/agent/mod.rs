@@ -1004,7 +1004,7 @@ mod tests {
         assert_eq!(finished.status, RunStatus::Completed);
         let todos = services
             .todos
-            .list(&owner, None, None, 10, 0)
+            .list(&owner, None, None, None, 10, 0)
             .await
             .unwrap();
         assert!(todos.is_empty(), "the broken call never ran");
@@ -1081,7 +1081,7 @@ mod tests {
 
         let todos = services
             .todos
-            .list(&owner, None, None, 10, 0)
+            .list(&owner, None, None, None, 10, 0)
             .await
             .unwrap();
         assert!(todos.is_empty(), "the call outside the whitelist never ran");

@@ -137,7 +137,7 @@ mod tests {
             let pool = db.pool.clone();
             async move {
                 crate::infrastructure::postgres::repositories::todos::list_all_user(
-                    &pool, &owner, None, 50, 0,
+                    &pool, &owner, None, None, 50, 0,
                 )
                 .await
                 .unwrap()

@@ -41,7 +41,7 @@ pub async fn execute_tool(
                 let completed = args.get("completed").and_then(|v| v.as_bool());
                 let items = services
                     .todos
-                    .list(&acct, None, completed, 50, 0)
+                    .list(&acct, None, completed, None, 50, 0)
                     .await
                     .map_err(|e| e.to_string())?;
                 serde_json::to_string(&items).map_err(|e| e.to_string())
@@ -103,6 +103,9 @@ pub async fn execute_tool(
                             due_at,
                             remind_before_minutes: remind_before,
                             remind_room_id: None,
+                            tags: vec![],
+                            recurrence: crate::domain::reminders::RecurrencePattern::None,
+                            recurrence_anchor: None,
                         },
                     )
                     .await
@@ -126,7 +129,7 @@ pub async fn execute_tool(
                 {
                     let active_tasks = services
                         .todos
-                        .list(&acct, None, Some(false), 50, 0)
+                        .list(&acct, None, Some(false), None, 50, 0)
                         .await
                         .map_err(|e| e.to_string())?;
                     let matched = active_tasks

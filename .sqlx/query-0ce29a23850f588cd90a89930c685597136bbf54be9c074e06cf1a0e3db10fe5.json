@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        UPDATE todos\n        SET\n            text = COALESCE($1, text),\n            priority = COALESCE($2, priority),\n            completed = COALESCE($3, completed),\n            due_at = CASE WHEN $4 THEN $5 ELSE due_at END,\n            remind_before_minutes = CASE WHEN $6 THEN $7 ELSE remind_before_minutes END\n        WHERE id = $8 AND owner_id = $9\n        RETURNING id, room_id, owner_id, sender_name, text, priority, due_at, remind_before_minutes, completed, created_at\n        ",
+  "query": "\n        SELECT id, room_id, owner_id, sender_name, text, priority, due_at, remind_before_minutes, completed, created_at,\n               tags, recurrence, recurrence_anchor, next_todo_id\n        FROM todos\n        WHERE room_id = $1 AND completed = TRUE\n        ",
   "describe": {
     "columns": [
       {
@@ -112,19 +112,55 @@
             "name": "created_at"
           }
         }
+      },
+      {
+        "ordinal": 10,
+        "name": "tags",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "tags"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "recurrence",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "recurrence"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "recurrence_anchor",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "recurrence_anchor"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "next_todo_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "next_todo_id"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Text",
-        "Bool",
-        "Bool",
-        "Timestamptz",
-        "Bool",
-        "Int8",
-        "Int8",
-        "Uuid"
+        "Text"
       ]
     },
     "nullable": [
@@ -137,8 +173,12 @@
       true,
       true,
       false,
+      true,
+      false,
+      false,
+      true,
       true
     ]
   },
-  "hash": "2030ec5fd63f9fc2b5dbfa93f168a010ba4a6053e9ac0b3753cfec8f00bc99bc"
+  "hash": "0ce29a23850f588cd90a89930c685597136bbf54be9c074e06cf1a0e3db10fe5"
 }

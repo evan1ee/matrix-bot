@@ -166,6 +166,7 @@ pub const STATUS_UNCLAIMED: &str = "unclaimed";
 /// Every table that carries an `owner_id` and whose rows follow a merge.
 pub const OWNED_TABLES: &[&str] = &[
     "todos",
+    "todo_steps",
     "reminders",
     "transactions",
     "recurring_bills",

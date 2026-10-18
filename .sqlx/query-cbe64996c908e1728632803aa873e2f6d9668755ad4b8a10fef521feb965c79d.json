@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, room_id, owner_id, sender_name, text, priority, due_at, remind_before_minutes, completed, created_at\n        FROM todos\n        WHERE id = $1\n        ",
+  "query": "\n        UPDATE todos\n        SET\n            text = COALESCE($1, text),\n            priority = COALESCE($2, priority),\n            completed = COALESCE($3, completed),\n            due_at = CASE WHEN $4 THEN $5 ELSE due_at END,\n            remind_before_minutes = CASE WHEN $6 THEN $7 ELSE remind_before_minutes END,\n            tags = CASE WHEN $8 THEN $9 ELSE tags END,\n            recurrence = COALESCE($10, recurrence),\n            recurrence_anchor = CASE WHEN $11 THEN $12 ELSE recurrence_anchor END\n        WHERE id = $13 AND owner_id = $14\n        RETURNING id, room_id, owner_id, sender_name, text, priority, due_at, remind_before_minutes, completed, created_at,\n               tags, recurrence, recurrence_anchor, next_todo_id\n        ",
   "describe": {
     "columns": [
       {
@@ -112,11 +112,68 @@
             "name": "created_at"
           }
         }
+      },
+      {
+        "ordinal": 10,
+        "name": "tags",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "tags"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "recurrence",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "recurrence"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "recurrence_anchor",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "recurrence_anchor"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "next_todo_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "next_todo_id"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Int8"
+        "Text",
+        "Text",
+        "Bool",
+        "Bool",
+        "Timestamptz",
+        "Bool",
+        "Int8",
+        "Bool",
+        "TextArray",
+        "Text",
+        "Bool",
+        "Timestamptz",
+        "Int8",
+        "Uuid"
       ]
     },
     "nullable": [
@@ -129,8 +186,12 @@
       true,
       true,
       false,
+      true,
+      false,
+      false,
+      true,
       true
     ]
   },
-  "hash": "4684b9b6dd0b8a651e08bdf4209bb1f83d855b85649257ac8cdbede118fda924"
+  "hash": "cbe64996c908e1728632803aa873e2f6d9668755ad4b8a10fef521feb965c79d"
 }

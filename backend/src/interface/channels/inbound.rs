@@ -613,6 +613,9 @@ mod tests {
                     due_at: None,
                     remind_before_minutes: None,
                     remind_room_id: None,
+                    tags: vec![],
+                    recurrence: crate::domain::reminders::RecurrencePattern::None,
+                    recurrence_anchor: None,
                 },
             )
             .await

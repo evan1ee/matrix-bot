@@ -86,6 +86,9 @@ pub async fn pool_with_todo(seed: &str) -> (DbPool, AccountId, i64) {
         due_at: None,
         remind_before_minutes: None,
         remind_room_id: None,
+        tags: vec![],
+        recurrence: crate::domain::reminders::RecurrencePattern::None,
+        recurrence_anchor: None,
     };
     let (item, _) = AppServices::new(&pool)
         .todos

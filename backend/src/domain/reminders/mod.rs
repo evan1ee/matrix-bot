@@ -15,9 +15,10 @@ pub const MAX_MESSAGE_LEN: usize = 500;
 pub const MAX_LEAD_MINUTES: i64 = 60 * 24 * 30;
 
 /// Pattern for recurring reminders.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum RecurrencePattern {
+    #[default]
     None,
     Daily,
     Weekly,

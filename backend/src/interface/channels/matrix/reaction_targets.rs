@@ -318,7 +318,7 @@ pub async fn resolve_untracked_target(
     // 3. Todo task detection
     if lower.contains("task") || lower.contains("todo") || lower.contains("待办") {
         if let Ok(mut todos) = crate::infrastructure::postgres::repositories::todos::list_all_user(
-            pool, owner_id, None, 15, 0,
+            pool, owner_id, None, None, 15, 0,
         )
         .await
         {

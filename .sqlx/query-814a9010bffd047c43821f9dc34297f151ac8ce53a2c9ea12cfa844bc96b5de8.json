@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COUNT(*)\n        FROM todos\n        WHERE room_id = $1 AND owner_id = $2\n          AND ($3::boolean IS NULL OR completed = $3)\n          AND ($4::text IS NULL OR tags @> ARRAY[$4::text])\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Bool",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "814a9010bffd047c43821f9dc34297f151ac8ce53a2c9ea12cfa844bc96b5de8"
+}
