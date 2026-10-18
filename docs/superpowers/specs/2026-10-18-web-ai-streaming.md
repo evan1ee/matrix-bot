@@ -51,7 +51,7 @@ Each SSE message is an unnamed `data:` line holding one JSON object, `#[serde(ta
 | `started` | `conversation_id` | The conversation this turn writes to. `run_turn` may create it or reuse the room's recent one (`SESSION_TTL_SECONDS`), so this is the only way the client learns which. Always first. |
 | `delta` | `text` | Appended text for the current text segment. |
 | `segment_end` | — | The current text segment is finished (maps to `ProgressSink::flush`). The next `delta` starts a new segment. |
-| `segment_retracted` | — | Throw away the text of the segment that just ended. Sent when `llm::guard` rejects a reply that claims an unrecorded success (`turn.rs` correction round / `UNRECORDED_NOTICE`), and when streaming fails mid-reply and `stream.rs` falls back to a non-streamed completion (the fallback text then arrives as fresh `delta`s plus `segment_end`). |
+| `segment_retracted` | — | Throw away the current text segment: the open one if text is still arriving, otherwise the one that just ended. Sent when `llm::guard` rejects a reply that claims an unrecorded success (`turn.rs` correction round / `UNRECORDED_NOTICE`), and when streaming fails mid-reply and `stream.rs` falls back to a non-streamed completion (the fallback text then arrives as fresh `delta`s plus `segment_end`). |
 | `tool_started` | `call_id`, `name` | A tool call began. |
 | `tool_finished` | `call_id`, `name`, `outcome`: `ok` \| `failed` \| `needs_confirmation` | A tool call ended. `needs_confirmation` is the `llm::guard` refusal. |
 | `done` | `conversation_id`, `message`, `model_used`, `tool_calls_executed` | Final reply, the same fields as `AiChatResponse`. Always last on success. |

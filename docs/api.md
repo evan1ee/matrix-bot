@@ -48,7 +48,7 @@ Each SSE message is an unnamed `data:` line with one JSON object tagged `type` (
 | `started` | `conversation_id` | Always first; the conversation may be new or the room's recent one. |
 | `delta` | `text` | Text appended to the current segment. |
 | `segment_end` | | The current segment is finished; the next `delta` starts a new one. |
-| `segment_retracted` | | Discard the segment that just ended (guard rejection, or a failed stream replaced by a fallback). |
+| `segment_retracted` | | Discard the current text segment: the open one if text is still arriving (a failed stream replaced by a fallback), otherwise the one that just ended (guard rejection). |
 | `tool_started` | `call_id`, `name` | One per call of a round, before the round runs. |
 | `tool_finished` | `call_id`, `name`, `outcome` | `ok`, `failed` or `needs_confirmation`. |
 | `done` | `conversation_id`, `message`, `model_used`, `tool_calls_executed` | Last on success; the `/ai/chat` response fields. |

@@ -27,8 +27,9 @@ pub trait ProgressSink: Send + Sync {
     async fn report_tool_started(&self, _call_id: &str, _name: &str) {}
     /// That call has ended.
     async fn report_tool_finished(&self, _call_id: &str, _name: &str, _outcome: ToolStepOutcome) {}
-    /// Discards the text just flushed: the guard rejected the reply, or a
-    /// stream that had shown text failed and a fallback re-answers in full.
+    /// Discards the current text segment: the open one if text is still
+    /// arriving (a stream that failed mid-reply, before a fallback re-answers
+    /// in full), otherwise the one that just ended (the guard rejected it).
     async fn retract_segment(&self) {}
 }
 

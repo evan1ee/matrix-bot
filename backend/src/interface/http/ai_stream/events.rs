@@ -20,7 +20,8 @@ pub enum AiStreamEvent {
     },
     /// The current text segment is finished.
     SegmentEnd,
-    /// Throw away the text of the segment that just ended.
+    /// Throw away the current text segment: the open one if text is still
+    /// arriving, otherwise the one that just ended.
     SegmentRetracted,
     ToolStarted {
         call_id: String,
