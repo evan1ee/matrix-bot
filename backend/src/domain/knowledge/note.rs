@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use super::error::KnowledgeError;
 use crate::domain::accounts::AccountId;
+use crate::domain::tags::{normalize_tags_lenient, Tag};
 
 pub const MAX_TITLE_LEN: usize = 200;
 /// Largest accepted note body in characters. Without a cap one request could
@@ -234,40 +235,16 @@ pub fn validate_content(content: &str) -> Result<String, KnowledgeError> {
 }
 
 pub fn normalize_tag(tag: &str) -> Result<String, KnowledgeError> {
-    let raw = tag.trim().trim_start_matches('#').to_ascii_lowercase();
-    if raw.is_empty() {
-        return Err(KnowledgeError::InvalidTag(
-            "tag cannot be empty".to_string(),
-        ));
-    }
-    if raw.len() > 50 {
-        return Err(KnowledgeError::InvalidTag(
-            "tag cannot exceed 50 characters".to_string(),
-        ));
-    }
-    if !raw
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-    {
-        return Err(KnowledgeError::InvalidTag(format!(
-            "tag contains invalid characters: '{}'",
-            raw
-        )));
-    }
-    Ok(raw)
+    Tag::parse(tag)
+        .map(String::from)
+        .map_err(|err| KnowledgeError::InvalidTag(err.to_string()))
 }
 
 pub fn normalize_tags(tags: &[String]) -> Vec<String> {
-    let mut normalized = Vec::new();
-    for t in tags {
-        if let Ok(clean) = normalize_tag(t) {
-            if !normalized.contains(&clean) {
-                normalized.push(clean);
-            }
-        }
-    }
-    normalized.sort();
-    normalized
+    normalize_tags_lenient(tags)
+        .into_iter()
+        .map(String::from)
+        .collect()
 }
 
 #[cfg(test)]
