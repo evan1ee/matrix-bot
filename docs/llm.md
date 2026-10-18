@@ -117,6 +117,47 @@ The marker and started steps name no tool, so the native message builder renders
 
 An agent may reason about a task, select tools, call several, iterate on results and coordinate capabilities. It must not bypass application boundaries. Every loop has explicit limits: iterations (`MAX_TOOL_ROUNDS` for chat, `max_steps` for agent runs), a timeout, a bound on concurrent tool calls, error handling and cancellation. Do not introduce an agent framework where a controlled loop suffices, and keep agent orchestration out of domain services. Long research requests need the generous router timeout (`TimeoutLayer` ≥ 180 s).
 
+### Scheduled agent tasks and deep procedural pipelines
+
+`ScheduledTaskRegistry` (`domain/agent/task.rs`) pre-loads 5 built-in recurring task plugins. Each plugin binds a cron schedule, an analytical tool whitelist, and a goal formulation template with configurable thresholds:
+
+1. **`weekly_bookmark_digest` (`WeeklyBookmarkDigestTask`):**
+   - *Default cron:* `0 9 * * 1` (Mondays at 09:00 UTC).
+   - *Whitelist:* `get_my_bookmarks`, `toggle_bookmark_favorite`, `knowledge_search`.
+   - *Config:* `{ "limit": 10, "tag": "", "audio": true, "voice": "alloy" }`.
+   - *Procedure:* Gathers bookmarks, prioritizes unread/favorited items, categorizes takeaways, and appends a conversational spoken podcast script wrapped in `<audio_script>...</audio_script>` for multi-modal audio compilation.
+2. **`monthly_financial_audit` (`MonthlyFinancialAuditTask`):**
+   - *Default cron:* `0 18 1 * *` (1st of each month at 18:00 UTC).
+   - *Whitelist:* `audit_monthly_finances`, `list_finance_transactions`, `get_my_recurring_bills`.
+   - *Config:* `{ "spike_threshold_pct": 20.0 }`.
+   - *Procedure:* Runs `audit_monthly_finances` to evaluate category spending, flag anomalies exceeding `spike_threshold_pct`, split fixed vs discretionary expenses, and propose concrete savings opportunities.
+3. **`portfolio_rebalance_check` (`PortfolioRebalanceAlertTask`):**
+   - *Default cron:* `0 21 * * *` (Daily at 21:00 UTC, US market close).
+   - *Whitelist:* `evaluate_portfolio_rebalance`, `get_my_portfolio_summary`, `get_portfolio_holding`, `get_portfolio_price_alerts`.
+   - *Config:* `{ "targets": { "AAPL": 50.0, "BTC": 50.0 }, "drift_threshold_pct": 5.0 }`.
+   - *Procedure:* Computes mathematical allocation drift against target weights. **Trade safety invariant:** The agent analyzes and explains proposed buy/sell amounts, but the tool policy strictly omits direct trade execution tools (`buy_portfolio_holding`, `sell_portfolio_holding`) to prevent unauthorized financial mutations without explicit human approval.
+4. **`bill_due_digest` (`BillDueDigestTask`):**
+   - *Default cron:* `0 10 * * 5` (Fridays at 10:00 UTC).
+   - *Whitelist:* `evaluate_bill_due_adequacy`, `get_my_recurring_bills`, `list_finance_transactions`.
+   - *Config:* `{ "days_ahead": 14 }`.
+   - *Procedure:* Runs `evaluate_bill_due_adequacy` to group bills by urgency (`DueToday`, `DueWithin3Days`, `DueWithin14Days`, `Later`) and reconcile upcoming commitments against liquid cash account balances, proactively flagging projected shortfalls.
+5. **`habit_consistency_review` (`HabitConsistencyReviewTask`):**
+   - *Default cron:* `0 20 * * 0` (Sundays at 20:00 UTC).
+   - *Whitelist:* `evaluate_habit_consistency`, `get_my_habits`, `get_daily_log`.
+   - *Procedure:* Runs `evaluate_habit_consistency` to compute 7-day completion rates normalized against each habit's `target_days_per_week`, celebrate active streaks, detect slipping or at-risk habits, and propose habit recovery adjustments.
+
+### Multi-modal Kokoro TTS audio digest compilation
+
+Autonomous agent runs can compile multi-modal audio attachments alongside text summaries (`interface/jobs/agent/audio.rs`):
+
+- **Script extraction and cleaning:** When an agent run completes (`StepOutcome::Completed`), `audio::extract_audio_script` case-insensitively extracts text enclosed in `<audio_script>...</audio_script>`, while `audio::strip_audio_script` removes the tags and script block from the delivered plain text and HTML so message bubbles remain clean.
+- **Voice resolution hierarchy:** If an audio script is present, the voice is resolved with fallback priority:
+  1. Scheduled task configuration (`task.config["voice"]`).
+  2. Account preference (`settings.tts_voice`).
+  3. System default (`snapshot.inference_tts_voice()`, fallback `"alloy"`).
+- **Phonemisation & synthesis:** Text is cleaned via `tts::text::speakable` (stripping emojis, markdown, and unspeakable unicode glyphs) and synthesized into an Ogg Opus clip using `TtsClient::with_overrides`.
+- **Delivery with fail-open safety:** The synthesized clip is attached to `OutgoingMessage` as `AttachmentKind::Audio` (`audio/ogg`, filename `"weekly-digest.ogg"`). If TTS is disabled, unconfigured, or upstream synthesis fails, a warning is logged and the text summary is delivered cleanly without aborting the agent run or failing the job.
+
 ## Tools
 
 Define tools with the standard OpenAI `type: "function"` schema (`ToolDefinition`), never a provider-specific tool variant. Each domain file exports `pub fn tool_definitions() -> Vec<ToolDefinition>` beside its executor, and `definitions.rs::all_tool_definitions()` only concatenates them. The same registry serves the Matrix/web assistant **and** MCP, so a tool is written once.
@@ -131,6 +172,15 @@ Adding a tool:
 6. Test malformed arguments, an unknown tool name, tool failure and duplicate calls, and assert the owner scope.
 
 Well-formed model output is still not authoritative. Tool results are fed back as JSON, prompts state the boundaries, and nothing the model says grants access.
+
+### Analytical calculation tools
+
+`llm/tools/` exposes 4 deterministic calculation tools backed by pure domain math modules (`domain/<f>/`):
+
+- **`evaluate_portfolio_rebalance { targets, threshold_pct? }`** (`llm/tools/portfolio/rebalance.rs`): Calls `portfolio::rebalance::evaluate_portfolio_drift`. Computes asset allocation drift percentages against target weights and derives rebalancing actions (`Buy { amount_minor }`, `Sell { amount_minor }`, `InBand`), surfacing unpriced holdings. Operates strictly in integer minor units. Does not execute trades.
+- **`audit_monthly_finances { spike_threshold_pct? }`** (`llm/tools/finance.rs`): Calls `finance::audit::evaluate_monthly_audit`. Reconciles transactions over the past 30 days against active recurring bills, isolates fixed vs discretionary spending, computes category percentage distributions, and flags spikes.
+- **`evaluate_bill_due_adequacy { days_ahead? }`** (`llm/tools/bills.rs`): Calls `recurring_bills::due::evaluate_bill_cash_adequacy`. Groups recurring bills into urgency buckets (`DueToday`, `DueWithin3Days`, `DueWithin14Days`, `Later`) and evaluates cash reserve adequacy against liquid account balances.
+- **`evaluate_habit_consistency`** (`llm/tools/habits.rs`): Calls `habits::consistency::evaluate_habit_consistency`. Calculates completion rates normalized against each habit's `target_days_per_week` (clamped 1..=7), classifies trends (`Improving`, `Stable`, `AtRisk`), and detects slipping routines without false positives on non-daily/weekday habits.
 
 ### Knowledge tools
 

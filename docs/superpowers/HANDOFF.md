@@ -2,7 +2,7 @@
 
 **Read this before touching code.** [`AGENTS.md`](../../AGENTS.md) holds the rules; this file holds the state: what is done, what an operator must still do, what is open, and the rulings that settled each disagreement. Design rationale lives in [`docs/architecture.md`](../architecture.md) and its sibling documents, not here.
 
-> **Status (2026-10):** every architectural phase is implemented: the PostgreSQL foundation, omnichannel adapters, object storage, the autonomous agent runtime, the web console, the notes and knowledge base (pgvector hybrid search), and dynamic configuration with the encrypted credential vault. What remains is operator cutover (Track 1) and the follow-ups in Track 2.
+> **Status (2026-10):** every architectural phase and all Track 2 post-cutover enhancements are implemented: the PostgreSQL foundation, omnichannel adapters, object storage, the autonomous agent runtime with deep procedural pipelines and Kokoro TTS audio compilation, the web console with WebAuthn conditional UI autofill, the notes and knowledge base (pgvector hybrid search), and dynamic configuration with the encrypted credential vault. What remains is operator cutover (Track 1).
 
 ---
 
