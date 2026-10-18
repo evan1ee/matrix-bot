@@ -6,13 +6,14 @@ import {
   Send, RefreshCw, Settings, Trash2, Bot, User,
   Wrench, AlertCircle, Clock, ChevronRight, Calendar
 } from 'lucide-react';
-import type { AiConversation, AiMessage, AiChatResponse, AiUserConfig } from './types';
+import type { AiConversation, AiMessage, AiUserConfig } from './types';
 import { AiSettingsModal } from './SettingsModal';
 import { RetrospectiveModal } from './RetrospectiveModal';
 import { MarkdownRenderer } from '../../components/MarkdownRenderer';
 import { VoiceDictateButton } from '../../components/VoiceDictateButton';
 import { useSettings, formatShortTimeInZone, browserTimezone } from '../../core/settings';
 import { registerAiPromptListener } from './aiPromptBus';
+import { useAiTurn } from './useAiTurn';
 
 const SUGGESTIONS = [
   'Spent $16.50 on lunch at Shake Shack, check off my workout habit, and remind me to call mom at 7pm',
@@ -34,8 +35,10 @@ export const AiAssistantView: React.FC<{
   const [prompt, setPrompt] = useState('');
 
   const cachedConvs = queryClient.getQueryData<AiConversation[]>(['ai-conversations']);
+  const { turn, startTurn } = useAiTurn();
+  const turnActive = turn?.phase === 'running' || turn?.phase === 'stopping';
   const [activeConversationId, setActiveConversationId] = useState<string | null>(
-    () => (cachedConvs && cachedConvs.length > 0 ? cachedConvs[0].id : null)
+    () => turn?.conversationId ?? (cachedConvs && cachedConvs.length > 0 ? cachedConvs[0].id : null)
   );
 
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -73,71 +76,27 @@ export const AiAssistantView: React.FC<{
   const effectiveConvId =
     activeConversationId || (conversations.length > 0 ? conversations[0].id : null);
 
-  // Mutations
-  const chatMutation = useMutation({
-    mutationFn: (text: string) =>
-      fetchApi<AiChatResponse>('/ai/chat', {
-        method: 'POST',
-        timeoutMs: 180_000,
-        body: JSON.stringify({
-          prompt: text,
-          conversation_id: effectiveConvId || undefined,
-          room_id: defaultRoom || undefined,
-        }),
-      }),
-    onSuccess: (data, variables) => {
-      setActiveConversationId(data.conversation_id);
-      queryClient.setQueryData<AiConversation[]>(['ai-conversations'], (old = []) => {
-        const existing = old.find((c) => c.id === data.conversation_id);
-        const updated: AiConversation = existing
-          ? { ...existing, updated_at: new Date().toISOString() }
-          : {
-              id: data.conversation_id,
-              owner_id: '',
-              room_id: defaultRoom || '',
-              created_at: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-            };
-        return [updated, ...old.filter((c) => c.id !== data.conversation_id)];
-      });
-      queryClient.setQueryData<AiMessage[]>(['ai-messages', data.conversation_id], (old = []) => {
-        if (old.some((m) => m.role === 'user' && m.content === variables)) return old;
-        return [
-          ...old,
-          {
-            id: `temp_user_${Date.now()}`,
-            conversation_id: data.conversation_id,
-            role: 'user',
-            content: variables,
-            created_at: new Date().toISOString(),
-          },
-          {
-            id: `temp_assistant_${Date.now()}`,
-            conversation_id: data.conversation_id,
-            role: 'assistant',
-            content: data.message,
-            created_at: new Date().toISOString(),
-          },
-        ];
-      });
-      queryClient.invalidateQueries({ queryKey: ['ai-conversations'] });
-      queryClient.invalidateQueries({ queryKey: ['ai-messages', data.conversation_id] });
-      setPrompt('');
-    },
-    onError: (_error, variables) => {
-      setPrompt((prev) => (prev ? prev : variables));
-    },
-  });
+  // The turn's conversation becomes the active one as soon as the server names it.
+  const liveConversationId = turn?.conversationId ?? null;
+  useEffect(() => {
+    if (liveConversationId) setActiveConversationId(liveConversationId);
+  }, [liveConversationId]);
+
+  // A turn that fails puts its prompt back, unless the user already typed something new.
+  const failedPrompt = turn?.phase === 'error' ? turn.prompt : null;
+  useEffect(() => {
+    if (failedPrompt) setPrompt((prev) => (prev ? prev : failedPrompt));
+  }, [failedPrompt]);
 
   useEffect(() => {
     if (conversations.length === 0) {
-      if (activeConversationId !== null && !chatMutation.isPending) {
+      if (activeConversationId !== null && !turnActive) {
         setActiveConversationId(null);
       }
     } else if (!activeConversationId) {
       setActiveConversationId(conversations[0].id);
     }
-  }, [conversations, activeConversationId, chatMutation.isPending]);
+  }, [conversations, activeConversationId, turnActive]);
 
   const { data: messages = [], isLoading: isLoadingMessages } = useQuery({
     queryKey: ['ai-messages', effectiveConvId],
@@ -178,21 +137,26 @@ export const AiAssistantView: React.FC<{
   }, [messages, effectiveConvId]);
 
   useEffect(() => {
-    if (chatMutation.isPending && containerRef.current) {
+    if (turn && containerRef.current) {
       containerRef.current.scrollTo({
         top: containerRef.current.scrollHeight,
         behavior: 'smooth',
       });
     }
-  }, [chatMutation.isPending]);
+  }, [turn?.parts, turn?.phase]);
+
+  const runPrompt = (trimmed: string) => {
+    setPrompt('');
+    // One live turn per tab; a prompt that arrives meanwhile waits in the input.
+    if (!startTurn(trimmed, effectiveConvId, defaultRoom)) setPrompt(trimmed);
+  };
 
   useEffect(() => {
     const unregister = registerAiPromptListener((text: string, execute: boolean) => {
       const trimmed = text.trim();
       if (!trimmed || trimmed.length > 4000) return;
       if (execute) {
-        setPrompt('');
-        chatMutation.mutate(trimmed);
+        runPrompt(trimmed);
       } else {
         setPrompt(trimmed);
         setTimeout(() => inputRef.current?.focus(), 50);
@@ -206,8 +170,7 @@ export const AiAssistantView: React.FC<{
         const trimmed = text.trim();
         if (!trimmed || trimmed.length > 4000) return;
         if (detail.execute !== false) {
-          setPrompt('');
-          chatMutation.mutate(trimmed);
+          runPrompt(trimmed);
         } else {
           setPrompt(trimmed);
           setTimeout(() => inputRef.current?.focus(), 50);
@@ -222,7 +185,7 @@ export const AiAssistantView: React.FC<{
       unregister();
       window.removeEventListener('app:ai-prompt', handleCustomEvent);
     };
-  }, [chatMutation]);
+  });
 
   const resetMutation = useMutation({
     mutationFn: (convId: string) =>
@@ -253,9 +216,8 @@ export const AiAssistantView: React.FC<{
 
   const sendChat = (text: string) => {
     const trimmed = text.trim();
-    if (!trimmed || trimmed.length > 4000 || chatMutation.isPending) return;
-    setPrompt('');
-    chatMutation.mutate(trimmed);
+    if (!trimmed || trimmed.length > 4000 || turnActive) return;
+    runPrompt(trimmed);
   };
 
   const handleSend = (e?: React.FormEvent) => {
@@ -321,9 +283,9 @@ export const AiAssistantView: React.FC<{
         ref={containerRef}
         className="flex-1 overflow-y-auto rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50/40 dark:bg-neutral-900/30 p-4 sm:p-6 space-y-5"
       >
-        {isLoadingMessages && messages.length === 0 && !chatMutation.isPending ? (
+        {isLoadingMessages && messages.length === 0 && !turn ? (
           <div className="py-20 text-center text-xs font-mono text-neutral-500 dark:text-neutral-400">Loading conversation...</div>
-        ) : messages.length === 0 && !chatMutation.isPending ? (
+        ) : messages.length === 0 && !turn ? (
           <div className="py-16 text-center max-w-lg mx-auto space-y-6">
             <div className="w-10 h-10 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 flex items-center justify-center mx-auto">
               <Bot className="w-5 h-5" />
@@ -411,40 +373,54 @@ export const AiAssistantView: React.FC<{
             ))
         )}
 
-        {chatMutation.isPending && chatMutation.variables && !messages.some((m) => m.role === 'user' && m.content === chatMutation.variables) && (
-          <div className="flex gap-3 max-w-3xl ml-auto justify-end animate-in fade-in-0">
-            <div className="p-3.5 rounded-lg text-sm leading-relaxed space-y-2 max-w-2xl font-sans bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 shadow-xs">
-              <MarkdownRenderer content={chatMutation.variables} />
-              <div className="text-[10px] font-mono flex items-center gap-1 pt-1 text-neutral-300 dark:text-neutral-600 justify-end">
-                <Clock className="w-2.5 h-2.5" />
-                <span>{formatShortTimeInZone(new Date().toISOString(), effectiveTimezone)}</span>
+        {turn && (
+          <>
+            <div className="flex gap-3 max-w-3xl ml-auto justify-end animate-in fade-in-0">
+              <div className="p-3.5 rounded-lg text-sm leading-relaxed space-y-2 max-w-2xl font-sans bg-neutral-900 text-white dark:bg-neutral-100 dark:text-neutral-900 shadow-xs">
+                <MarkdownRenderer content={turn.prompt} />
+              </div>
+              <div className="w-7 h-7 rounded-full bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 flex items-center justify-center shrink-0 mt-0.5 font-mono text-[11px]">
+                <User className="w-3.5 h-3.5" />
               </div>
             </div>
-            <div className="w-7 h-7 rounded-full bg-neutral-200 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 flex items-center justify-center shrink-0 mt-0.5 font-mono text-[11px]">
-              <User className="w-3.5 h-3.5" />
-            </div>
-          </div>
-        )}
 
-        {chatMutation.isPending && (
-          <div className="flex gap-3 max-w-3xl mr-auto justify-start animate-in fade-in-0">
-            <div className="w-7 h-7 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 flex items-center justify-center shrink-0 mt-0.5">
-              <Bot className="w-3.5 h-3.5" />
-            </div>
-            <div className="p-3.5 rounded-lg text-sm bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100 shadow-2xs flex items-center gap-2">
-              <RefreshCw className="w-3.5 h-3.5 animate-spin text-neutral-500" />
-              <span className="text-xs text-neutral-500 font-sans">Thinking and executing tools...</span>
-            </div>
-          </div>
-        )}
+            {turn.parts.some((p) => p.kind === 'text') ? (
+              <div className="flex gap-3 max-w-3xl mr-auto justify-start">
+                <div className="w-7 h-7 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 flex items-center justify-center shrink-0 mt-0.5">
+                  <Bot className="w-3.5 h-3.5" />
+                </div>
+                <div
+                  data-testid="live-turn"
+                  className="p-3.5 rounded-lg text-sm leading-relaxed space-y-2 max-w-2xl font-sans bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100 shadow-xs"
+                >
+                  {turn.parts.map((part, i) =>
+                    part.kind === 'text' ? <MarkdownRenderer key={i} content={part.text} /> : null
+                  )}
+                </div>
+              </div>
+            ) : (
+              turnActive && (
+                <div className="flex gap-3 max-w-3xl mr-auto justify-start animate-in fade-in-0">
+                  <div className="w-7 h-7 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 flex items-center justify-center shrink-0 mt-0.5">
+                    <Bot className="w-3.5 h-3.5" />
+                  </div>
+                  <div className="p-3.5 rounded-lg text-sm bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100 shadow-2xs flex items-center gap-2">
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-neutral-500" />
+                    <span className="text-xs text-neutral-500 font-sans">Thinking and executing tools...</span>
+                  </div>
+                </div>
+              )
+            )}
 
-        {chatMutation.error && (
-          <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-md text-red-600 dark:text-red-400 text-xs flex items-start gap-2 max-w-2xl mx-auto font-sans">
-            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-            <div>
-              <strong>Generation failed:</strong> {(chatMutation.error as Error).message}
-            </div>
-          </div>
+            {turn.phase === 'error' && (
+              <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-md text-red-600 dark:text-red-400 text-xs flex items-start gap-2 max-w-2xl mx-auto font-sans">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <div>
+                  <strong>Generation failed:</strong> {turn.error}
+                </div>
+              </div>
+            )}
+          </>
         )}
 
         <div ref={messagesEndRef} />
@@ -466,11 +442,11 @@ export const AiAssistantView: React.FC<{
             onTranscript={(text) =>
               setPrompt((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text))
             }
-            disabled={chatMutation.isPending}
+            disabled={turnActive}
           />
           <button
             type="submit"
-            disabled={!prompt.trim() || chatMutation.isPending}
+            disabled={!prompt.trim() || turnActive}
             className="p-1.5 bg-neutral-900 dark:bg-neutral-100 text-white dark:text-neutral-900 rounded hover:bg-neutral-800 dark:hover:bg-neutral-200 transition disabled:opacity-40 cursor-pointer"
             title="Send message"
           >

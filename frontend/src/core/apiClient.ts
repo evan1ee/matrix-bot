@@ -27,6 +27,19 @@ type ApiRequestOptions = RequestInit & {
   timeoutMs?: number;
 };
 
+/** Sends the HttpOnly session cookie with every request. */
+const SESSION_CREDENTIALS: RequestCredentials = 'include';
+
+/**
+ * Headers every API call carries. A multipart body needs the browser to write
+ * its own Content-Type, boundary included; forcing JSON here would make the
+ * server reject the upload.
+ */
+function buildHeaders(body: BodyInit | null | undefined, extra?: HeadersInit): Record<string, string> {
+  const defaults: Record<string, string> = body instanceof FormData ? {} : { 'Content-Type': 'application/json' };
+  return { ...defaults, ...(extra as Record<string, string> | undefined) };
+}
+
 /**
  * Sends the request with the session cookie attached and returns the raw
  * response.
@@ -50,20 +63,13 @@ async function sendRequest(endpoint: string, options: ApiRequestOptions): Promis
     }
   }
 
-  // A multipart body needs the browser to write its own Content-Type, boundary
-  // included; forcing JSON here would make the server reject the upload.
-  const defaultHeaders: Record<string, string> =
-    fetchOptions.body instanceof FormData ? {} : { 'Content-Type': 'application/json' };
-  const headers: Record<string, string> = {
-    ...defaultHeaders,
-    ...(fetchOptions.headers as Record<string, string>),
-  };
+  const headers = buildHeaders(fetchOptions.body, fetchOptions.headers);
 
   try {
     return await fetch(`${API_BASE}${endpoint}`, {
       ...fetchOptions,
       headers,
-      credentials: 'include',
+      credentials: SESSION_CREDENTIALS,
       signal: controller.signal,
     });
   } catch (err: any) {
@@ -137,4 +143,62 @@ export async function fetchApi<T>(
   options: Parameters<typeof fetchApiResponse>[1] = {}
 ): Promise<T> {
   return (await fetchApiResponse<T>(endpoint, options)).data;
+}
+
+/**
+ * POSTs `body` and reads the `text/event-stream` answer, calling `onEvent`
+ * with each `data:` line parsed as JSON. Resolves when the server ends the
+ * stream, which can happen without a terminal event; the caller decides what
+ * that means.
+ *
+ * There is no timeout: the server bounds a turn and keeps the connection alive
+ * with comment lines. A caller's abort rejects with the browser's own
+ * `AbortError`, unchanged, so Stop can be told apart from a failure.
+ */
+export async function streamApi<E>(
+  endpoint: string,
+  body: unknown,
+  opts: { signal: AbortSignal; onEvent: (event: E) => void }
+): Promise<void> {
+  const payload = JSON.stringify(body);
+  const response = await fetch(`${API_BASE}${endpoint}`, {
+    method: 'POST',
+    headers: buildHeaders(payload),
+    body: payload,
+    credentials: SESSION_CREDENTIALS,
+    signal: opts.signal,
+  });
+  if (!response.ok) rejectFailed(response, await readBody(response), {});
+  if (!response.body) throw new Error('This browser cannot read a streamed response');
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  const handleLine = (raw: string) => {
+    const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw;
+    // Blank lines separate frames and `:` lines are keep-alive comments.
+    if (!line || line.startsWith(':') || !line.startsWith('data:')) return;
+    const value = line.slice(5).replace(/^ /, '');
+    try {
+      opts.onEvent(JSON.parse(value) as E);
+    } catch (err) {
+      if (err instanceof SyntaxError) throw new Error('Malformed event from the server');
+      throw err;
+    }
+  };
+
+  for (;;) {
+    const { done, value } = await reader.read();
+    // `stream: true` keeps a multibyte character split across chunks intact.
+    buffer += decoder.decode(value, { stream: !done });
+    let newline = buffer.indexOf('\n');
+    while (newline >= 0) {
+      handleLine(buffer.slice(0, newline));
+      buffer = buffer.slice(newline + 1);
+      newline = buffer.indexOf('\n');
+    }
+    if (done) break;
+  }
+  handleLine(buffer);
 }

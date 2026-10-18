@@ -8,6 +8,7 @@ import {
   type FakeSecret,
   type FakeSetting,
 } from './admin-fixtures';
+import { installAiStreamStub, type StreamScript } from './ai-stream-stub';
 
 /**
  * An in-memory stand-in for `/api/v1`, installed as a Playwright route so the
@@ -1041,7 +1042,40 @@ export class FakeApi {
     this.pendingEvents.push({ type, payload });
   }
 
+  /** The page `install` was called with; streamed AI turns are driven through it. */
+  private streamPage: Page | null = null;
+
+  /**
+   * Queues a script for the next `POST /ai/chat/stream` and returns handles to
+   * keep driving it. A script with `hold` stays open until `send`/`end`.
+   */
+  async scriptStream(script: StreamScript) {
+    const page = this.streamPage;
+    if (!page) throw new Error('scriptStream needs install(page) first');
+    await page.evaluate((s) => window.__aiStream.scripts.push(s), script);
+    return {
+      /** Sends one more `AiStreamEvent` on the held stream. */
+      send: (event: Record<string, unknown>) => page.evaluate((e) => window.__aiStream.send(e), event),
+      /** Ends the held stream without a terminal event. */
+      end: () => page.evaluate(() => window.__aiStream.end()),
+    };
+  }
+
+  /** How many scripted streams the page aborted (Stop, or a cleared turn). */
+  streamAborts(): Promise<number> {
+    if (!this.streamPage) throw new Error('streamAborts needs install(page) first');
+    return this.streamPage.evaluate(() => window.__aiStream.aborts);
+  }
+
+  /** The request bodies the scripted streams received, in order. */
+  streamRequests(): Promise<unknown[]> {
+    if (!this.streamPage) throw new Error('streamRequests needs install(page) first');
+    return this.streamPage.evaluate(() => window.__aiStream.bodies);
+  }
+
   async install(page: Page) {
+    this.streamPage = page;
+    await page.addInitScript(installAiStreamStub);
     // Liveness/readiness are infrastructure surface, not application API: they
     // are mounted outside `/api/v1`, so they need their own route rather than
     // falling under the `/api/v1/**` interception below.
