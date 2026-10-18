@@ -25,6 +25,13 @@ pub struct TodoWithSteps {
     pub steps: Vec<TodoStep>,
 }
 
+impl TodoWithSteps {
+    /// The step shown at 1-based `position`, as chat and AI callers address it.
+    pub fn step_at(&self, position: usize) -> Option<&TodoStep> {
+        position.checked_sub(1).and_then(|i| self.steps.get(i))
+    }
+}
+
 /// Trims `text` and checks it is non-empty and at most `MAX_STEP_TEXT_LEN`
 /// characters (counted as `char`s, so CJK text is not penalised).
 pub fn validate_step_text(text: &str) -> Result<String, TodoError> {

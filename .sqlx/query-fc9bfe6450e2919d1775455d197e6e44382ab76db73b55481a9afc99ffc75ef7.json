@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "UPDATE todo_steps SET position = -position WHERE todo_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fc9bfe6450e2919d1775455d197e6e44382ab76db73b55481a9afc99ffc75ef7"
+}
