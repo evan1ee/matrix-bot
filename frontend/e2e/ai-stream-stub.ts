@@ -25,6 +25,8 @@ export type StreamStep = {
 
 export type StreamScript = {
   /** A non-2xx answer: sent as JSON instead of a stream. */
+  /** Fail at the network level, as a refused connection does. */
+  networkError?: boolean;
   status?: number;
   errorBody?: unknown;
   steps?: StreamStep[];
@@ -110,6 +112,7 @@ export function installAiStreamStub() {
     if (!script) return replayPlainChat(input, init);
 
     state.bodies.push(JSON.parse(String(init.body ?? 'null')));
+    if (script.networkError) throw new TypeError('Failed to fetch');
     if (script.status && script.status >= 400) {
       return new Response(JSON.stringify(script.errorBody ?? { error: 'failed', code: script.status }), {
         status: script.status,

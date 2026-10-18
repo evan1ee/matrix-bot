@@ -167,26 +167,34 @@ function handleEvent(id: number, event: AiStreamEvent) {
 }
 
 async function run(id: number, body: unknown, signal: AbortSignal) {
+  // `turn.conversationId` is seeded by the caller, so it cannot tell whether
+  // the server ever accepted the turn; only a received `started` can.
+  let started = false;
+  const fail = (message: string) => updateTurn((t) => ({ ...t, phase: 'error', error: message }));
   try {
     await streamApi<AiStreamEvent>('/ai/chat/stream', body, {
       signal,
-      onEvent: (event) => handleEvent(id, event),
+      onEvent: (event) => {
+        if (event.type === 'started') started = true;
+        handleEvent(id, event);
+      },
     });
   } catch (err) {
     if (id !== runId || turn?.phase !== 'running') return; // Stop already took over
-    const aborted = err instanceof DOMException && err.name === 'AbortError';
-    if (aborted) return;
-    // A rejected start (validation, rate limit) failed before any turn began.
-    // Any other break after `started` leaves the turn running on the server.
-    if (!(err instanceof ApiHttpError) && turn.conversationId) {
+    if (err instanceof DOMException && err.name === 'AbortError') return;
+    // Before `started` nothing runs on the server, so the request simply
+    // failed (rejected start, refused connection). After it, the turn may
+    // still be running there and only its stored result will tell.
+    if (started && !(err instanceof ApiHttpError)) {
       beginTail(id);
       return;
     }
-    const message = err instanceof Error ? err.message : 'The request failed';
-    updateTurn((t) => ({ ...t, phase: 'error', error: message }));
+    fail(err instanceof Error ? err.message : 'The request failed');
     return;
   }
-  if (id === runId && turn?.phase === 'running') beginTail(id);
+  if (id !== runId || turn?.phase !== 'running') return;
+  if (started) beginTail(id);
+  else fail('The server closed the connection before replying');
 }
 
 /**

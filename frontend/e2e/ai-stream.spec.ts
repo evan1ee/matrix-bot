@@ -120,3 +120,17 @@ test('a stream that ends without done waits for the conversation update, then sh
   await expect(app.getByText('Stored after the cut.')).toBeVisible({ timeout: 20_000 });
   await expect(app.getByTestId('live-turn')).toHaveCount(0);
 });
+
+test('a network failure before started shows an error and frees the input', async ({ app, api }) => {
+  seedStoredTurn(api, 'Earlier question', 'Earlier answer.');
+  await gotoApp(app);
+  await app.getByRole('button', { name: TAB.ai, exact: true }).click();
+  await expect(app.getByText('Earlier answer.')).toBeVisible();
+  await api.scriptStream({ networkError: true });
+
+  await send(app, 'Follow-up while offline');
+  await expect(app.getByText(/Generation failed/)).toBeVisible();
+  const input = app.getByPlaceholder(/Ask AI assistant/i);
+  await expect(input).toHaveValue('Follow-up while offline');
+  await expect(app.locator('form button[type="submit"]')).toBeEnabled();
+});
