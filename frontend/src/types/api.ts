@@ -5414,7 +5414,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description One JSON `AiStreamEvent` per SSE `data:` line, `started` first, then `done` or `error` last */
+            /** @description One JSON `AiStreamEvent` per SSE `data:` line: `started` first once the turn has resolved its conversation (a turn that fails before that sends only `error`), then `done` or `error` last */
             200: {
                 headers: {
                     [name: string]: unknown;

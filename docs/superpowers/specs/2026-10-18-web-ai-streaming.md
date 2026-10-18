@@ -48,7 +48,7 @@ Each SSE message is an unnamed `data:` line holding one JSON object, `#[serde(ta
 
 | `type` | Fields | Meaning |
 |---|---|---|
-| `started` | `conversation_id` | The conversation this turn writes to. `run_turn` may create it or reuse the room's recent one (`SESSION_TTL_SECONDS`), so this is the only way the client learns which. Always first. |
+| `started` | `conversation_id` | The conversation this turn writes to. `run_turn` may create it or reuse the room's recent one (`SESSION_TTL_SECONDS`), so this is the only way the client learns which. First whenever it is sent; a turn that fails before resolving its conversation sends only `error`. |
 | `delta` | `text` | Appended text for the current text segment. |
 | `segment_end` | — | The current text segment is finished (maps to `ProgressSink::flush`). The next `delta` starts a new segment. |
 | `segment_retracted` | — | Throw away the current text segment: the open one if text is still arriving, otherwise the one that just ended. Sent when `llm::guard` rejects a reply that claims an unrecorded success (`turn.rs` correction round / `UNRECORDED_NOTICE`), and when streaming fails mid-reply and `stream.rs` falls back to a non-streamed completion (the fallback text then arrives as fresh `delta`s plus `segment_end`). |

@@ -62,7 +62,7 @@ struct TurnJob {
     path = "/api/v1/ai/chat/stream",
     request_body = AiChatRequest,
     responses(
-        (status = 200, description = "One JSON `AiStreamEvent` per SSE `data:` line, `started` first, then `done` or `error` last", content_type = "text/event-stream", body = AiStreamEvent),
+        (status = 200, description = "One JSON `AiStreamEvent` per SSE `data:` line: `started` first once the turn has resolved its conversation (a turn that fails before that sends only `error`), then `done` or `error` last", content_type = "text/event-stream", body = AiStreamEvent),
         (status = 400, description = "Empty or too-long prompt", body = ApiErrorResponse),
         (status = 404, description = "Unknown or foreign conversation", body = ApiErrorResponse),
         (status = 429, description = "The account already runs its maximum of streaming turns", body = ApiErrorResponse)

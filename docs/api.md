@@ -45,7 +45,7 @@ Each SSE message is an unnamed `data:` line with one JSON object tagged `type` (
 
 | `type` | Fields | Meaning |
 |---|---|---|
-| `started` | `conversation_id` | Always first; the conversation may be new or the room's recent one. |
+| `started` | `conversation_id` | First once the turn has resolved its conversation, which may be new or the room's recent one. A turn that fails before that (its AI settings cannot be read or are invalid, or the conversation lookup fails) sends `error` with no `started`. |
 | `delta` | `text` | Text appended to the current segment. |
 | `segment_end` | | The current segment is finished; the next `delta` starts a new one. |
 | `segment_retracted` | | Discard the current text segment: the open one if text is still arriving (a failed stream replaced by a fallback), otherwise the one that just ended (guard rejection). |
