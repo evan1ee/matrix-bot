@@ -14,13 +14,23 @@ export type AiToolOutcome = components['schemas']['AiToolOutcome'];
 
 export type LivePart =
   | { kind: 'text'; text: string; closed: boolean }
-  | { kind: 'tool'; callId: string; name: string; outcome: 'running' | AiToolOutcome };
+  // `null`: the turn failed before the step reported an outcome.
+  | { kind: 'tool'; callId: string; name: string; outcome: 'running' | AiToolOutcome | null };
 
 export type LiveTurn = {
   prompt: string;
   conversationId: string | null;
+  /**
+   * Ids of the stored messages the view already had for the turn's
+   * conversation when the turn began. The server stores the prompt and tool
+   * rows while the turn runs, and the live bubble already shows them, so
+   * while a turn exists the view shows only these.
+   */
+  baseline: readonly string[];
   parts: LivePart[];
   phase: 'running' | 'stopping' | 'done' | 'error';
+  /** Set in `stopping`: the user pressed Stop, rather than the stream ending on its own. */
+  stopRequested?: boolean;
   error?: string;
 };
 
@@ -34,6 +44,8 @@ const TAIL_TIMEOUT_MS = 180_000;
 let turn: LiveTurn | null = null;
 /** Bumped for every turn, so a late callback from an earlier one is ignored. */
 let runId = 0;
+/** The run whose `started` arrived: the server accepted that turn. */
+let startedRunId = 0;
 let controller: AbortController | null = null;
 let tailTimer: ReturnType<typeof setTimeout> | null = null;
 let queryClient: QueryClient | null = null;
@@ -71,13 +83,27 @@ function cancelTail() {
   }
 }
 
+/** Names the turn's conversation; the baseline belongs to the one the view had, so another one has none. */
+function inConversation(current: LiveTurn, conversationId: string): LiveTurn {
+  const baseline = conversationId === current.conversationId ? current.baseline : [];
+  return { ...current, conversationId, baseline };
+}
+
+/** A failed turn's steps that never finished: no spinner stays next to the error. */
+function failed(current: LiveTurn, message: string): LiveTurn {
+  const parts = current.parts.map(
+    (p): LivePart => (p.kind === 'tool' && p.outcome === 'running' ? { ...p, outcome: null } : p)
+  );
+  return { ...current, parts, phase: 'error', error: message };
+}
+
 /** Pure reducer for one stream event; `done` and `error` are handled by the caller. */
 function applyEvent(current: LiveTurn, event: AiStreamEvent): LiveTurn {
   const parts = current.parts;
   const last = parts[parts.length - 1];
   switch (event.type) {
     case 'started':
-      return { ...current, conversationId: event.conversation_id };
+      return inConversation(current, event.conversation_id);
     case 'delta':
       if (last?.kind === 'text' && !last.closed) {
         return { ...current, parts: [...parts.slice(0, -1), { ...last, text: last.text + event.text }] };
@@ -143,10 +169,10 @@ async function finish(id: number, conversationId: string | null) {
 }
 
 /** The stream is over without `done`/`error`: wait for the server's update event, or give up. */
-function beginTail(id: number) {
+function beginTail(id: number, stopRequested: boolean) {
   if (id !== runId || !turn) return;
   cancelTail();
-  updateTurn((t) => ({ ...t, phase: 'stopping' }));
+  updateTurn((t) => ({ ...t, phase: 'stopping', stopRequested }));
   tailTimer = setTimeout(() => void finish(id, turn?.conversationId ?? null), TAIL_TIMEOUT_MS);
 }
 
@@ -155,8 +181,7 @@ function handleEvent(id: number, event: AiStreamEvent) {
   if (event.type === 'done') {
     const hasText = turn.parts.some((p) => p.kind === 'text');
     updateTurn((t) => ({
-      ...t,
-      conversationId: event.conversation_id,
+      ...inConversation(t, event.conversation_id),
       phase: 'done',
       parts:
         hasText || !event.message
@@ -165,7 +190,7 @@ function handleEvent(id: number, event: AiStreamEvent) {
     }));
     void finish(id, event.conversation_id);
   } else if (event.type === 'error') {
-    updateTurn((t) => ({ ...t, phase: 'error', error: event.message }));
+    updateTurn((t) => failed(t, event.message));
   } else {
     updateTurn((t) => applyEvent(t, event));
   }
@@ -174,13 +199,13 @@ function handleEvent(id: number, event: AiStreamEvent) {
 async function run(id: number, body: unknown, signal: AbortSignal) {
   // `turn.conversationId` is seeded by the caller, so it cannot tell whether
   // the server ever accepted the turn; only a received `started` can.
-  let started = false;
-  const fail = (message: string) => updateTurn((t) => ({ ...t, phase: 'error', error: message }));
+  const started = () => startedRunId === id;
+  const fail = (message: string) => updateTurn((t) => failed(t, message));
   try {
     await streamApi<AiStreamEvent>('/ai/chat/stream', body, {
       signal,
       onEvent: (event) => {
-        if (event.type === 'started') started = true;
+        if (event.type === 'started' && id === runId) startedRunId = id;
         handleEvent(id, event);
       },
     });
@@ -190,15 +215,15 @@ async function run(id: number, body: unknown, signal: AbortSignal) {
     // Before `started` nothing runs on the server, so the request simply
     // failed (rejected start, refused connection). After it, the turn may
     // still be running there and only its stored result will tell.
-    if (started && !(err instanceof ApiHttpError)) {
-      beginTail(id);
+    if (started() && !(err instanceof ApiHttpError)) {
+      beginTail(id, false);
       return;
     }
     fail(err instanceof Error ? err.message : 'The request failed');
     return;
   }
   if (id !== runId || turn?.phase !== 'running') return;
-  if (started) beginTail(id);
+  if (started()) beginTail(id, false);
   else fail('The server closed the connection before replying');
 }
 
@@ -211,7 +236,14 @@ export function startTurn(prompt: string, conversationId?: string | null, roomId
   cancelTail();
   runId += 1;
   controller = new AbortController();
-  setTurn({ prompt, conversationId: conversationId ?? null, parts: [], phase: 'running' });
+  const stored = conversationId ? queryClient?.getQueryData<AiMessage[]>(['ai-messages', conversationId]) : undefined;
+  setTurn({
+    prompt,
+    conversationId: conversationId ?? null,
+    baseline: (stored ?? []).map((m) => m.id),
+    parts: [],
+    phase: 'running',
+  });
   void run(
     runId,
     { prompt, conversation_id: conversationId ?? undefined, room_id: roomId ?? undefined },
@@ -220,17 +252,26 @@ export function startTurn(prompt: string, conversationId?: string | null, roomId
   return true;
 }
 
-/** Aborts the stream. The server finishes its safe point and stores the turn; we wait for that. */
+/**
+ * Aborts the stream. After `started` the server finishes its safe point and
+ * stores the turn, and we wait for that. Before it there is nothing to wait
+ * for here: the turn goes at once, and if the server had begun after all, its
+ * stopped marker arrives with the usual `AiConversationUpdated` refetch.
+ */
 export function stopTurn() {
   if (!turn || turn.phase !== 'running') return;
+  if (startedRunId !== runId) {
+    clearTurn();
+    return;
+  }
   controller?.abort();
-  beginTail(runId);
+  beginTail(runId, true);
 }
 
 /** The server stored a conversation update; ends a stopping turn that waits for it. */
 export function notifyConversationUpdated(conversationId: string) {
-  if (turn?.phase !== 'stopping') return;
-  if (turn.conversationId !== null && turn.conversationId !== conversationId) return;
+  // A stopping turn has had its `started`, so it knows its conversation.
+  if (turn?.phase !== 'stopping' || turn.conversationId !== conversationId) return;
   void finish(runId, conversationId);
 }
 

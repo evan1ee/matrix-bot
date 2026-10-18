@@ -54,7 +54,11 @@ export const Composer: React.FC<{
         {running ? (
           <button
             type="button"
-            onClick={onStop}
+            onClick={() => {
+              onStop();
+              // The button goes away with the running turn; keep focus in the input.
+              inputRef.current?.focus();
+            }}
             aria-label="Stop"
             title="Stop (Esc)"
             className="inline-flex items-center gap-1.5 px-2 py-1.5 text-xs font-medium border border-neutral-300 dark:border-neutral-700 text-neutral-800 dark:text-neutral-200 rounded hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors duration-150 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-neutral-500"

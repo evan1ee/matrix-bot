@@ -1,5 +1,5 @@
 import { test, expect, gotoApp, TAB } from './fixtures';
-import type { FakeApi } from './fake-api';
+import type { FakeAiMessage, FakeApi } from './fake-api';
 
 const CONV = 'conv_stream';
 
@@ -186,6 +186,7 @@ test('stop shows stopping and then the stored stopped reply', async ({ app, api 
   await expect(app.getByTestId('live-turn')).toHaveText('Half an answer');
   await app.getByRole('button', { name: 'Stop' }).click();
   await expect(app.getByText('Stopping…')).toBeVisible();
+  await expect(app.getByPlaceholder(/Ask AI assistant/i)).toBeFocused();
   expect(await api.streamAborts()).toBe(1);
 
   api.aiMessages.push(stored);
@@ -217,12 +218,14 @@ test('a dropped stream falls back to stored history', async ({ app, api }) => {
   await api.scriptStream({ steps: [{ event: started }] }); // closes without done or error
 
   await send(app, 'Dropped');
-  await expect(app.getByText('Stopping…')).toBeVisible();
+  // Nobody pressed Stop: the turn may still be finishing on the server.
+  await expect(app.getByText('Waiting for the result…')).toBeVisible();
+  await expect(app.getByText('Stopping…')).toHaveCount(0);
 
   api.aiMessages.push(stored);
   api.pushEvent('AiConversationUpdated', { id: CONV, owner_id: 'owner' });
   await expect(app.getByText('Stored after the drop.')).toBeVisible({ timeout: 20_000 });
-  await expect(app.getByText('Stopping…')).toHaveCount(0);
+  await expect(app.getByText('Waiting for the result…')).toHaveCount(0);
 });
 
 test('stored tool rows render as collapsed steps', async ({ app, api }) => {
@@ -303,4 +306,159 @@ test('a retraction of the open segment keeps the earlier text and drops the part
   await expect(live).toContainText('full answer');
   await expect(live).toContainText('Before tool');
   await expect(live).not.toContainText('partial');
+});
+
+/** A row the server stores while the turn runs, as `run_turn` does. */
+function storeRow(api: FakeApi, conversationId: string, id: string, role: FakeAiMessage['role'], content: string, extra: Partial<FakeAiMessage> = {}) {
+  api.aiMessages.push({
+    id,
+    conversation_id: conversationId,
+    role,
+    content,
+    tool_call_id: null,
+    tool_name: null,
+    created_at: new Date().toISOString(),
+    ...extra,
+  });
+}
+
+const doneIn = (conversationId: string, message: string) => ({ ...done(message), conversation_id: conversationId });
+
+const historyOf = (app: import('@playwright/test').Page, conversationId: string) =>
+  app.waitForResponse((r) => r.url().includes(`/ai/conversations/${conversationId}/messages`), { timeout: 20_000 });
+
+/** Lets a fetched history render before counting: a count can only be wrong after it has. */
+async function expectOnce(app: import('@playwright/test').Page, text: string) {
+  await app.waitForTimeout(500);
+  await expect(app.getByText(text, { exact: true })).toHaveCount(1);
+}
+
+test('a new conversation shows the prompt once while the server stores the turn', async ({ app, api }) => {
+  const LIVE = 'conv_live';
+  const prompt = 'Remember the milk';
+  await gotoApp(app);
+  await app.getByRole('button', { name: TAB.ai, exact: true }).click();
+  const stream = await api.scriptStream({ hold: true });
+
+  await send(app, prompt);
+  // The server creates the conversation and stores the prompt right after `started`.
+  const now = new Date().toISOString();
+  api.aiConversations.push({ id: LIVE, owner_id: 'owner', room_id: '!room1:example.com', created_at: now, updated_at: now });
+  storeRow(api, LIVE, 'm_live_u', 'user', prompt);
+  const fetched = historyOf(app, LIVE);
+  await stream.send({ type: 'started', conversation_id: LIVE });
+  await fetched;
+  await expectOnce(app, prompt);
+
+  // A tool round is stored after it runs, and something refetches the history mid-turn.
+  await stream.send(toolStarted('add_todo'));
+  storeRow(api, LIVE, 'm_live_t', 'tool', '{"ok":true}', { tool_call_id: 'call_0', tool_name: 'add_todo', tool_outcome: 'ok' });
+  await stream.send(toolFinished('add_todo', 'ok'));
+  const refetched = historyOf(app, LIVE);
+  api.pushEvent('AiConversationUpdated', { id: LIVE, owner_id: 'owner' });
+  await refetched;
+  await expectOnce(app, prompt);
+  await expect(app.getByTestId('tool-step')).toHaveCount(1);
+
+  await stream.send({ type: 'delta', text: 'Added it.' });
+  await stream.send({ type: 'segment_end' });
+  await expect(app.getByTestId('live-turn')).toContainText('Added it.');
+  storeRow(api, LIVE, 'm_live_a', 'assistant', 'Added it.');
+  api.aiMessagesDelayMs = 500;
+  // Records whether the reply ever leaves the page once it was there.
+  await app.evaluate(() => {
+    const w = window as unknown as { __replyGap: boolean };
+    w.__replyGap = false;
+    let seen = false;
+    const tick = () => {
+      const shown = document.body.innerText.includes('Added it.');
+      if (shown) seen = true;
+      else if (seen) w.__replyGap = true;
+      requestAnimationFrame(tick);
+    };
+    tick();
+  });
+  await stream.send(doneIn(LIVE, 'Added it.'));
+  await stream.end();
+
+  await expect(app.getByTestId('live-turn')).toHaveCount(0);
+  await expectOnce(app, prompt);
+  await expect(app.getByText('Added it.', { exact: true })).toHaveCount(1);
+  await expect(app.getByTestId('tool-step')).toHaveCount(1);
+  expect(await app.evaluate(() => (window as unknown as { __replyGap: boolean }).__replyGap)).toBe(false);
+});
+
+test('returning to the page mid-turn shows the prompt and steps once', async ({ app, api }) => {
+  seedStoredTurn(api, 'Earlier question', 'Earlier answer.');
+  const prompt = 'Tidy my list';
+  await gotoApp(app);
+  await app.getByRole('button', { name: TAB.ai, exact: true }).click();
+  await expect(app.getByText('Earlier answer.')).toBeVisible();
+  const stream = await api.scriptStream({ hold: true });
+
+  await send(app, prompt);
+  storeRow(api, CONV, 'm_next_u', 'user', prompt);
+  await stream.send(started);
+  await stream.send(toolStarted('add_todo'));
+  storeRow(api, CONV, 'm_next_t', 'tool', '{"ok":true}', { tool_call_id: 'call_0', tool_name: 'add_todo', tool_outcome: 'ok' });
+  await stream.send(toolFinished('add_todo', 'ok'));
+  await expect(app.getByTestId('tool-step')).toHaveAttribute('data-outcome', 'ok');
+
+  // Away long enough for the history to go stale, so coming back refetches it.
+  await app.getByRole('button', { name: TAB.todo, exact: true }).click();
+  await app.waitForTimeout(5_500);
+  const refetched = historyOf(app, CONV);
+  await app.getByRole('button', { name: TAB.ai, exact: true }).click();
+  await refetched;
+  await expectOnce(app, prompt);
+  await expectOnce(app, 'Earlier question');
+  await expect(app.getByTestId('tool-step')).toHaveCount(1);
+  await expect(app.getByTestId('live-turn')).toBeVisible();
+
+  storeRow(api, CONV, 'm_next_a', 'assistant', 'Tidied.');
+  await stream.send({ type: 'delta', text: 'Tidied.' });
+  await stream.send({ type: 'segment_end' });
+  await stream.send(done('Tidied.'));
+  await stream.end();
+  await expect(app.getByTestId('live-turn')).toHaveCount(0);
+  await expectOnce(app, prompt);
+  await expect(app.getByText('Tidied.', { exact: true })).toHaveCount(1);
+});
+
+test('stop before started frees the composer at once', async ({ app, api }) => {
+  await gotoApp(app);
+  await app.getByRole('button', { name: TAB.ai, exact: true }).click();
+  await api.scriptStream({ hold: true });
+
+  await send(app, 'Never mind');
+  await app.getByRole('button', { name: 'Stop' }).click();
+  const input = app.getByPlaceholder(/Ask AI assistant/i);
+  await input.fill('Next question');
+  await expect(app.locator('form button[type="submit"]')).toBeEnabled();
+  await expect(app.getByText('Stopping…')).toHaveCount(0);
+  expect(await api.streamAborts()).toBe(1);
+});
+
+test('an error leaves no tool step spinning', async ({ app, api }) => {
+  await gotoApp(app);
+  await app.getByRole('button', { name: TAB.ai, exact: true }).click();
+  await api.scriptStream({
+    steps: [{ event: started }, { event: toolStarted('add_todo') }, { event: { type: 'error', message: 'The AI turn timed out' } }],
+    hold: true,
+  });
+
+  await send(app, 'Slow tool');
+  await expect(app.getByText(/Generation failed/)).toBeVisible();
+  const step = app.getByTestId('tool-step');
+  await expect(step).toHaveAttribute('data-outcome', 'none');
+  await expect(step).toHaveText('Add todo');
+});
+
+test('a malformed frame stops reading the stream', async ({ app, api }) => {
+  await gotoApp(app);
+  await app.getByRole('button', { name: TAB.ai, exact: true }).click();
+  await api.scriptStream({ steps: [{ event: started }, { raw: 'data: {not json\n\n' }], hold: true });
+
+  await send(app, 'Garbled');
+  await expect.poll(() => api.streamCancels()).toBe(1);
 });

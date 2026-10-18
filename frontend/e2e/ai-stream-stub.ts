@@ -43,6 +43,8 @@ type StubState = {
   scripts: StreamScript[];
   bodies: unknown[];
   aborts: number;
+  /** Streams the reader cancelled (it stopped reading without an abort). */
+  cancels: number;
   open: Controller | null;
   send: (frame: Record<string, unknown>) => void;
   end: () => void;
@@ -62,6 +64,7 @@ export function installAiStreamStub() {
     scripts: [],
     bodies: [],
     aborts: 0,
+    cancels: 0,
     open: null,
     send: (frame) => state.open?.enqueue(encoder.encode(`data: ${JSON.stringify(frame)}\n\n`)),
     end: () => {
@@ -153,6 +156,10 @@ export function installAiStreamStub() {
           } else if (!aborted) {
             controller.close();
           }
+        },
+        cancel() {
+          state.cancels += 1;
+          state.open = null;
         },
       })
     );

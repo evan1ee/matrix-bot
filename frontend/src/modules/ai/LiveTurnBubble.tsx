@@ -8,9 +8,13 @@ import { ToolStep } from './ToolStep';
 /** The turn in flight: the prompt, the reply as it arrives (text and tool steps), and its status. */
 export const LiveTurnBubble: React.FC<{ turn: LiveTurn }> = ({ turn }) => {
   const stepRunning = turn.parts.some((p) => p.kind === 'tool' && p.outcome === 'running');
+  // A stream that ended on its own (a dropped connection, a restart) was not
+  // stopped: its turn may still be finishing on the server.
   const status =
     turn.phase === 'stopping'
-      ? stepRunning
+      ? !turn.stopRequested
+        ? 'Waiting for the result…'
+        : stepRunning
         ? 'Stopping… finishing the current step'
         : 'Stopping…'
       : turn.phase === 'running' && turn.parts.length === 0

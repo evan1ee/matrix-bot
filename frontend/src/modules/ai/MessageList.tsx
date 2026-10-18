@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useEffect, useRef } from 'react';
+import React, { useLayoutEffect, useEffect, useMemo, useRef } from 'react';
 import { Bot, ChevronRight, Clock } from 'lucide-react';
 import { MarkdownRenderer } from '../../components/MarkdownRenderer';
 import { formatShortTimeInZone } from '../../core/settings';
@@ -53,31 +53,42 @@ export const MessageList: React.FC<{
   const prevLengthRef = useRef(0);
   const prevConvIdRef = useRef<string | null>(null);
 
+  // While a turn exists its live bubble shows the prompt and steps, which the
+  // server also stores as the turn runs; showing only the rows the view had
+  // when the turn began keeps them from appearing twice. Once the store drops
+  // the turn (after it fetched the stored reply) every row shows.
+  const baseline = turn?.baseline;
+  const shown = useMemo(() => {
+    if (!baseline) return messages;
+    const known = new Set(baseline);
+    return messages.filter((m) => known.has(m.id));
+  }, [messages, baseline]);
+
   // Jump to the bottom when messages load or the conversation changes, so the
   // smooth scroll never animates through the whole history.
   useLayoutEffect(() => {
     const el = containerRef.current;
-    if (!el || messages.length === 0) return;
+    if (!el || shown.length === 0) return;
 
     let raf: number | null = null;
     const isDifferentConv = prevConvIdRef.current !== conversationId;
-    const isInitialLoad = prevLengthRef.current === 0 && messages.length > 0;
+    const isInitialLoad = prevLengthRef.current === 0 && shown.length > 0;
 
     if (isDifferentConv || isInitialLoad) {
       el.scrollTop = el.scrollHeight;
       raf = requestAnimationFrame(() => {
         if (containerRef.current) containerRef.current.scrollTop = containerRef.current.scrollHeight;
       });
-    } else if (messages.length > prevLengthRef.current) {
+    } else if (shown.length > prevLengthRef.current) {
       el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
     }
 
-    prevLengthRef.current = messages.length;
+    prevLengthRef.current = shown.length;
     prevConvIdRef.current = conversationId;
     return () => {
       if (raf !== null) cancelAnimationFrame(raf);
     };
-  }, [messages, conversationId]);
+  }, [shown, conversationId]);
 
   useEffect(() => {
     if (turn && containerRef.current) {
@@ -85,15 +96,7 @@ export const MessageList: React.FC<{
     }
   }, [turn?.parts, turn?.phase]);
 
-  // When a finished turn's stored messages arrive, they replace its live
-  // bubble at once instead of both showing for the frames until the store
-  // drops the turn. The stored count while no turn runs is the baseline.
-  const idleCountRef = useRef<number | null>(null);
-  if (!turn) idleCountRef.current = messages.length;
-  const handedOver =
-    turn?.phase === 'done' && idleCountRef.current !== null && messages.length > idleCountRef.current;
-
-  const visible = messages.filter(
+  const visible = shown.filter(
     (m) => m.role !== 'system' && (m.role !== 'assistant' || m.content.trim().length > 0)
   );
 
@@ -102,9 +105,9 @@ export const MessageList: React.FC<{
       ref={containerRef}
       className="flex-1 overflow-y-auto rounded-lg border border-neutral-200 dark:border-neutral-800 bg-neutral-50/40 dark:bg-neutral-900/30 p-4 sm:p-6 space-y-5"
     >
-      {isLoading && messages.length === 0 && !turn ? (
+      {isLoading && shown.length === 0 && !turn ? (
         <div className="py-20 text-center text-xs font-mono text-neutral-500 dark:text-neutral-400">Loading conversation...</div>
-      ) : messages.length === 0 && !turn ? (
+      ) : shown.length === 0 && !turn ? (
         <div className="py-16 text-center max-w-lg mx-auto space-y-6">
           <div className="w-10 h-10 rounded-full bg-neutral-100 dark:bg-neutral-800 text-neutral-600 dark:text-neutral-400 flex items-center justify-center mx-auto">
             <Bot className="w-5 h-5" />
@@ -133,7 +136,7 @@ export const MessageList: React.FC<{
         visible.map((m) => <StoredMessage key={m.id} m={m} timezone={timezone} />)
       )}
 
-      {turn && !handedOver && <LiveTurnBubble turn={turn} />}
+      {turn && <LiveTurnBubble turn={turn} />}
     </div>
   );
 };

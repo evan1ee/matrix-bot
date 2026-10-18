@@ -386,6 +386,8 @@ export class FakeApi {
   };
   aiConversations: FakeAiConversation[] = [];
   aiMessages: FakeAiMessage[] = [];
+  /** Delays `GET /ai/conversations/:id/messages`, so a spec can watch the gap before history arrives. */
+  aiMessagesDelayMs = 0;
   nextWebhookId = 1;
   nextLogId = 1;
   nextAiConvId = 1;
@@ -1066,6 +1068,12 @@ export class FakeApi {
   streamAborts(): Promise<number> {
     if (!this.streamPage) throw new Error('streamAborts needs install(page) first');
     return this.streamPage.evaluate(() => window.__aiStream.aborts);
+  }
+
+  /** How many scripted streams the page cancelled while reading them. */
+  streamCancels(): Promise<number> {
+    if (!this.streamPage) throw new Error('streamCancels needs install(page) first');
+    return this.streamPage.evaluate(() => window.__aiStream.cancels);
   }
 
   /** The request bodies the scripted streams received, in order. */
@@ -2513,6 +2521,7 @@ export class FakeApi {
     if (aiMsgMatch && method === 'GET') {
       const id = aiMsgMatch[1];
       const msgs = this.aiMessages.filter((m) => m.conversation_id === id);
+      if (this.aiMessagesDelayMs > 0) await new Promise((resolve) => setTimeout(resolve, this.aiMessagesDelayMs));
       return json(route, 200, msgs);
     }
 

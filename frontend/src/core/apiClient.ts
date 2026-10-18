@@ -188,17 +188,26 @@ export async function streamApi<E>(
     }
   };
 
-  for (;;) {
-    const { done, value } = await reader.read();
-    // `stream: true` keeps a multibyte character split across chunks intact.
-    buffer += decoder.decode(value, { stream: !done });
-    let newline = buffer.indexOf('\n');
-    while (newline >= 0) {
-      handleLine(buffer.slice(0, newline));
-      buffer = buffer.slice(newline + 1);
-      newline = buffer.indexOf('\n');
+  let finished = false;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      // `stream: true` keeps a multibyte character split across chunks intact.
+      buffer += decoder.decode(value, { stream: !done });
+      let newline = buffer.indexOf('\n');
+      while (newline >= 0) {
+        handleLine(buffer.slice(0, newline));
+        buffer = buffer.slice(newline + 1);
+        newline = buffer.indexOf('\n');
+      }
+      if (done) break;
     }
-    if (done) break;
+    finished = true;
+    handleLine(buffer);
+  } finally {
+    // Leaving early (a malformed frame, a throwing handler) must not keep the
+    // response open. After an abort the stream is already errored, and
+    // cancelling it then rejects; there is nothing left to release.
+    if (!finished) reader.cancel().catch(() => undefined);
   }
-  handleLine(buffer);
 }
