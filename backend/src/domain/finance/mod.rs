@@ -5,6 +5,7 @@
 
 pub mod analytics;
 pub mod audit;
+pub mod budget;
 pub mod fx;
 pub mod money;
 pub mod net_worth;
@@ -206,6 +207,21 @@ pub enum FinanceError {
 
     #[error("Share token not found or disabled")]
     ShareNotFound,
+
+    #[error("You already have a budget for that category and currency")]
+    BudgetExists,
+
+    #[error("Budget not found or access denied")]
+    BudgetNotFound,
+
+    #[error("Budget limit must be greater than zero")]
+    BudgetLimitInvalid,
+
+    #[error("Month must look like 2026-10")]
+    BudgetMonthInvalid,
+
+    #[error("You have {scope} budgets in several currencies; name the currency")]
+    BudgetAmbiguous { scope: String },
 
     #[error("Invalid money format: {0}")]
     Money(#[from] money::MoneyError),
