@@ -1,7 +1,9 @@
 use uuid::Uuid;
 
 use crate::domain::accounts::AccountId;
-use crate::domain::llm::{AiConversation, AiMessage, AiUserConfig, UpdateAiConfigInput};
+use crate::domain::llm::{
+    AiConversation, AiMessage, AiUserConfig, ToolStepOutcome, UpdateAiConfigInput,
+};
 
 pub async fn get_user_config(
     conn: impl sqlx::PgExecutor<'_>,
@@ -249,6 +251,29 @@ pub async fn add_message(
     .await
 }
 
+/// Stores a tool result together with how the call ended, so a reloaded
+/// conversation shows the same step status the live turn did.
+pub async fn add_tool_message(
+    pool: &sqlx::PgPool,
+    conversation_id: &str,
+    call_id: &str,
+    tool_name: &str,
+    content: &str,
+    outcome: ToolStepOutcome,
+) -> Result<AiMessage, sqlx::Error> {
+    let mut conn = pool.acquire().await?;
+    insert_message_with_outcome(
+        &mut conn,
+        conversation_id,
+        "tool",
+        content,
+        Some(call_id),
+        Some(tool_name),
+        Some(outcome),
+    )
+    .await
+}
+
 /// Inserts a message and touches its conversation on one connection, so a
 /// service can run it inside a transaction.
 pub async fn insert_message(
@@ -259,18 +284,40 @@ pub async fn insert_message(
     tool_call_id: Option<&str>,
     tool_name: Option<&str>,
 ) -> Result<AiMessage, sqlx::Error> {
+    insert_message_with_outcome(
+        conn,
+        conversation_id,
+        role,
+        content,
+        tool_call_id,
+        tool_name,
+        None,
+    )
+    .await
+}
+
+async fn insert_message_with_outcome(
+    conn: &mut sqlx::PgConnection,
+    conversation_id: &str,
+    role: &str,
+    content: &str,
+    tool_call_id: Option<&str>,
+    tool_name: Option<&str>,
+    outcome: Option<ToolStepOutcome>,
+) -> Result<AiMessage, sqlx::Error> {
     let id = format!("msg_{}", Uuid::new_v4().simple());
     sqlx::query!(
         r#"
-        INSERT INTO ai_messages (id, conversation_id, role, content, tool_call_id, tool_name, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, CAST(CURRENT_TIMESTAMP AS TEXT))
+        INSERT INTO ai_messages (id, conversation_id, role, content, tool_call_id, tool_name, tool_outcome, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, CAST(CURRENT_TIMESTAMP AS TEXT))
         "#,
         id,
         conversation_id,
         role,
         content,
         tool_call_id,
-        tool_name
+        tool_name,
+        outcome.map(ToolStepOutcome::as_str)
     )
     .execute(&mut *conn)
     .await?;
@@ -279,7 +326,7 @@ pub async fn insert_message(
 
     let row = sqlx::query!(
         r#"
-        SELECT id, conversation_id, role, content, tool_call_id, tool_name, created_at
+        SELECT id, conversation_id, role, content, tool_call_id, tool_name, tool_outcome, created_at
         FROM ai_messages
         WHERE id = $1
         "#,
@@ -295,6 +342,7 @@ pub async fn insert_message(
         content: row.content,
         tool_call_id: row.tool_call_id,
         tool_name: row.tool_name,
+        tool_outcome: row.tool_outcome.as_deref().and_then(ToolStepOutcome::parse),
         created_at: row.created_at,
     })
 }
@@ -306,7 +354,7 @@ pub async fn get_recent_messages(
 ) -> Result<Vec<AiMessage>, sqlx::Error> {
     let mut rows = sqlx::query!(
         r#"
-        SELECT id, conversation_id, role, content, tool_call_id, tool_name, created_at
+        SELECT id, conversation_id, role, content, tool_call_id, tool_name, tool_outcome, created_at
         FROM ai_messages
         WHERE conversation_id = $1 AND (role != 'assistant' OR TRIM(content) != '')
         ORDER BY created_at DESC
@@ -329,6 +377,7 @@ pub async fn get_recent_messages(
             content: r.content,
             tool_call_id: r.tool_call_id,
             tool_name: r.tool_name,
+            tool_outcome: r.tool_outcome.as_deref().and_then(ToolStepOutcome::parse),
             created_at: r.created_at,
         })
         .collect())
@@ -525,5 +574,55 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(fetched.updated_at.ends_with('Z'));
+    }
+
+    #[tokio::test]
+    async fn tool_message_round_trips_its_outcome() {
+        use crate::domain::llm::ToolStepOutcome;
+
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let owner = AccountId::from_seed("tool-outcome");
+        crate::db::pool::seed_account(&pool, &owner).await;
+        let conv = get_or_create_conversation(&pool, &owner, "!room:test", 3600)
+            .await
+            .unwrap();
+
+        add_message(&pool, &conv.id, "user", "hi", None, None)
+            .await
+            .unwrap();
+        for (i, outcome) in [
+            ToolStepOutcome::Ok,
+            ToolStepOutcome::Failed,
+            ToolStepOutcome::NeedsConfirmation,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let stored = add_tool_message(
+                &pool,
+                &conv.id,
+                &format!("call_{i}"),
+                "get_my_tasks",
+                "result",
+                outcome,
+            )
+            .await
+            .unwrap();
+            assert_eq!(stored.tool_outcome, Some(outcome));
+        }
+
+        let recent = get_recent_messages(&pool, &conv.id, 10).await.unwrap();
+        let outcomes: Vec<Option<ToolStepOutcome>> =
+            recent.iter().map(|m| m.tool_outcome).collect();
+        assert_eq!(
+            outcomes,
+            vec![
+                None,
+                Some(ToolStepOutcome::Ok),
+                Some(ToolStepOutcome::Failed),
+                Some(ToolStepOutcome::NeedsConfirmation),
+            ]
+        );
     }
 }

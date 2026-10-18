@@ -150,7 +150,29 @@ pub struct AiMessage {
     pub content: String,
     pub tool_call_id: Option<String>,
     pub tool_name: Option<String>,
+    /// How a `tool` row's call ended; absent on other roles and older rows.
+    pub tool_outcome: Option<AiToolOutcome>,
     pub created_at: String,
+}
+
+/// How one tool call ended.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum AiToolOutcome {
+    Ok,
+    Failed,
+    NeedsConfirmation,
+}
+
+impl From<crate::domain::llm::ToolStepOutcome> for AiToolOutcome {
+    fn from(o: crate::domain::llm::ToolStepOutcome) -> Self {
+        use crate::domain::llm::ToolStepOutcome as O;
+        match o {
+            O::Ok => Self::Ok,
+            O::Failed => Self::Failed,
+            O::NeedsConfirmation => Self::NeedsConfirmation,
+        }
+    }
 }
 
 impl From<crate::domain::llm::AiMessage> for AiMessage {
@@ -162,6 +184,7 @@ impl From<crate::domain::llm::AiMessage> for AiMessage {
             content: m.content,
             tool_call_id: m.tool_call_id,
             tool_name: m.tool_name,
+            tool_outcome: m.tool_outcome.map(Into::into),
             created_at: m.created_at,
         }
     }

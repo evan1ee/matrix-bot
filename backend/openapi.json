@@ -8395,8 +8395,25 @@
           "tool_name": {
             "type": "string",
             "nullable": true
+          },
+          "tool_outcome": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/AiToolOutcome"
+              }
+            ],
+            "nullable": true
           }
         }
+      },
+      "AiToolOutcome": {
+        "type": "string",
+        "description": "How one tool call ended.",
+        "enum": [
+          "ok",
+          "failed",
+          "needs_confirmation"
+        ]
       },
       "AiUserConfig": {
         "type": "object",

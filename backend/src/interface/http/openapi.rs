@@ -334,6 +334,7 @@ use crate::interface::http::{
             crate::llm::models::VerifyAiKeyResponse,
             crate::llm::models::AiConversation,
             crate::llm::models::AiMessage,
+            crate::llm::models::AiToolOutcome,
             crate::llm::models::AiChatRequest,
             crate::llm::models::AiChatResponse,
             crate::llm::retrospective::WeeklyRetrospective,

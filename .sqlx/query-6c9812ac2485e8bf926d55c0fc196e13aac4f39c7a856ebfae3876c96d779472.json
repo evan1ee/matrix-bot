@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, conversation_id, role, content, tool_call_id, tool_name, created_at\n        FROM ai_messages\n        WHERE id = $1\n        ",
+  "query": "\n        SELECT id, conversation_id, role, content, tool_call_id, tool_name, tool_outcome, created_at\n        FROM ai_messages\n        WHERE id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -71,6 +71,17 @@
       },
       {
         "ordinal": 6,
+        "name": "tool_outcome",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_messages",
+            "name": "tool_outcome"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
         "name": "created_at",
         "type_info": "Text",
         "origin": {
@@ -93,8 +104,9 @@
       false,
       true,
       true,
+      true,
       false
     ]
   },
-  "hash": "e6985167bbb46ae8ba6da5c733055cc727a525a3b4ed3295cf4b90a54df0ded5"
+  "hash": "6c9812ac2485e8bf926d55c0fc196e13aac4f39c7a856ebfae3876c96d779472"
 }

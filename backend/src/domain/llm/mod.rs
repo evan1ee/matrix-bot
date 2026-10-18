@@ -257,6 +257,8 @@ pub struct AiMessage {
     pub content: String,
     pub tool_call_id: Option<String>,
     pub tool_name: Option<String>,
+    /// How the call ended; set on `tool` rows only.
+    pub tool_outcome: Option<ToolStepOutcome>,
     pub created_at: String,
 }
 

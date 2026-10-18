@@ -2260,7 +2260,13 @@ export interface components {
             role: string;
             tool_call_id?: string | null;
             tool_name?: string | null;
+            tool_outcome?: components["schemas"]["AiToolOutcome"] | null;
         };
+        /**
+         * @description How one tool call ended.
+         * @enum {string}
+         */
+        AiToolOutcome: "ok" | "failed" | "needs_confirmation";
         AiUserConfig: {
             api_base_url?: string | null;
             api_key?: string | null;

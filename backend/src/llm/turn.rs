@@ -5,6 +5,7 @@ use super::error::AiError;
 use super::guard;
 use super::resolved_config::ResolvedAiConfig;
 use super::tools::ToolRegistry;
+use crate::domain::llm::ToolStepOutcome;
 use crate::infrastructure::inference::llm::{ChatCompletionMessage, ChatCompletionRequest};
 use crate::infrastructure::postgres::repositories::llm as llm_repo;
 
@@ -290,13 +291,13 @@ pub async fn run_turn(
                         tainted |= guard::returns_outside_content(&outcome.name);
 
                         // Persist tool result message
-                        let _ = llm_repo::add_message(
+                        let _ = llm_repo::add_tool_message(
                             ctx.pool,
                             &conversation.id,
-                            "tool",
+                            &outcome.call_id,
+                            &outcome.name,
                             &outcome.result,
-                            Some(&outcome.call_id),
-                            Some(&outcome.name),
+                            ToolStepOutcome::from(&outcome),
                         )
                         .await;
 
@@ -430,7 +431,6 @@ mod tests {
     use super::*;
     use crate::application::AppServices;
     use crate::domain::accounts::AccountId;
-    use crate::domain::llm::ToolStepOutcome;
     use crate::infrastructure::inference::test_support::spawn_server;
     use crate::llm::progress::ProgressSink;
     use crate::llm::test_support::*;
@@ -600,6 +600,38 @@ mod tests {
                 "finish:call_1:ok",
             ]
         );
+    }
+
+    #[tokio::test]
+    async fn tool_rows_are_stored_with_their_outcome() {
+        let (pool, owner, _) = pool_with_todo("turn-stored-outcome").await;
+        let services = AppServices::new(&pool);
+        let url = scripted_stream_replies(vec![
+            tool_calls_reply(&[
+                ("list_finance_transactions", serde_json::json!({})),
+                ("get_my_tasks", serde_json::json!({})),
+            ]),
+            text_reply("Done."),
+        ])
+        .await;
+        let config = test_config(url);
+        let sink = RecordingSink::default();
+        let ctx = LlmTurnContext::new(&services, &pool, &config, &owner, "!room:test", Some(&sink));
+
+        let result = run_turn(&ctx, "summarise", None).await.unwrap();
+
+        let stored = llm_repo::get_recent_messages(&pool, &result.conversation_id, 20)
+            .await
+            .unwrap();
+        let tool_rows: Vec<_> = stored.iter().filter(|m| m.role == "tool").collect();
+        assert_eq!(tool_rows.len(), 2);
+        assert!(tool_rows
+            .iter()
+            .all(|m| m.tool_outcome == Some(ToolStepOutcome::Ok)));
+        assert!(stored
+            .iter()
+            .filter(|m| m.role != "tool")
+            .all(|m| m.tool_outcome.is_none()));
     }
 
     #[tokio::test]
