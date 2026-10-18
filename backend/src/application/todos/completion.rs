@@ -6,7 +6,6 @@
 //! `next_todo_id` is set never spawns again (done → undo → done).
 
 use chrono::Utc;
-use sqlx::{Postgres, Transaction};
 
 use super::TodoService;
 use crate::application::AppError;
@@ -110,11 +109,12 @@ impl TodoService {
     async fn after_completion(&self, outcome: &CompletionOutcome) -> Result<SyncOutcome, AppError> {
         let original = outcome.todo.id;
         let room = match outcome.next {
-            Some(_) => {
+            Some(_) => room_or_none(
+                original,
                 self.reminders
-                    .last_room_for_source(ReminderSource::Todo, original)
-                    .await?
-            }
+                    .last_room_for_source(&outcome.todo.owner_id, ReminderSource::Todo, original)
+                    .await,
+            ),
             None => None,
         };
         let cancelled = self
@@ -128,12 +128,22 @@ impl TodoService {
     }
 }
 
+/// The predecessor's reminder room, or `None` when the lookup failed. The
+/// lookup is best effort: failing it must not skip cancelling the original's
+/// reminder, which would otherwise fire for a completed todo.
+fn room_or_none(todo_id: i64, lookup: Result<Option<String>, AppError>) -> Option<String> {
+    lookup.unwrap_or_else(|err| {
+        tracing::warn!(todo_id, error = %err, "reminder room lookup failed after completion");
+        None
+    })
+}
+
 /// Completes the locked, not-yet-completed `current` and, when it recurs and
 /// has not spawned before, inserts its successor with unchecked copies of its
 /// steps. The successor is inserted directly (not through `create`) so it keeps
 /// the inherited series anchor. Events: `TodoUpdated` then `TodoCreated`.
 async fn complete_locked(
-    tx: &mut Transaction<'_, Postgres>,
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     owner_id: &AccountId,
     current: TodoItem,
 ) -> Result<CompletionOutcome, AppError> {
@@ -176,6 +186,18 @@ mod tests {
     use crate::domain::tags::Tag;
     use crate::domain::todos::{NewTodo, TodoItem, TodoPatch, TodoPriority};
     use crate::infrastructure::postgres::repositories;
+
+    /// A failed room lookup falls back to `None` instead of aborting the
+    /// hand-off that cancels the original's reminder.
+    #[test]
+    fn a_failed_room_lookup_falls_back_to_none() {
+        let failed = Err(AppError::Database(sqlx::Error::PoolTimedOut));
+        assert_eq!(super::room_or_none(1, failed), None);
+        assert_eq!(
+            super::room_or_none(1, Ok(Some("!r:x".to_string()))),
+            Some("!r:x".to_string())
+        );
+    }
 
     async fn setup(seed: &str) -> (sqlx::PgPool, AppServices, AccountId) {
         let pool = crate::db::pool::test_pool_sized(4).await;
