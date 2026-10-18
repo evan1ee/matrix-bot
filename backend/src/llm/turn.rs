@@ -458,6 +458,9 @@ mod tests {
         seen: Mutex<Vec<String>>,
         /// Cancelled when a tool call starts: a Stop that lands mid-round.
         stop_on_tool_start: Option<tokio_util::sync::CancellationToken>,
+        /// Cancelled when a delta reaches the sink: a Stop that lands while
+        /// text is arriving, with no timing involved.
+        stop_on_delta: Option<tokio_util::sync::CancellationToken>,
     }
 
     impl RecordingSink {
@@ -481,6 +484,9 @@ mod tests {
         }
         async fn push_delta(&self, delta: &str) {
             self.note(format!("delta:{delta}"));
+            if let Some(token) = &self.stop_on_delta {
+                token.cancel();
+            }
         }
         async fn flush(&self) {
             self.note("flush".to_string());
@@ -1046,15 +1052,15 @@ mod tests {
         let (pool, owner, _) = pool_with_todo("turn-cancel-stream").await;
         let services = AppServices::new(&pool);
         let config = test_config(hanging_stream_llm("Hel").await);
-        let sink = RecordingSink::default();
         let token = tokio_util::sync::CancellationToken::new();
+        // The Stop lands exactly when the first delta reaches the sink; the
+        // provider then never ends the stream.
+        let sink = RecordingSink {
+            stop_on_delta: Some(token.clone()),
+            ..Default::default()
+        };
         let ctx = LlmTurnContext::new(&services, &pool, &config, &owner, "!room:test", Some(&sink))
             .with_cancellation(token.clone());
-        let canceller = token.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-            canceller.cancel();
-        });
 
         let outcome = tokio::time::timeout(
             std::time::Duration::from_secs(2),

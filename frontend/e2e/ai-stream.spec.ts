@@ -279,3 +279,28 @@ test('the same prompt can be sent twice', async ({ app }) => {
   await expect(app.getByText(/I received your prompt/)).toHaveCount(2);
   await expect(app.getByText('hi', { exact: true })).toHaveCount(2);
 });
+
+test('a retraction of the open segment keeps the earlier text and drops the partial', async ({ app, api }) => {
+  await gotoApp(app);
+  await app.getByRole('button', { name: TAB.ai, exact: true }).click();
+  await api.scriptStream({
+    steps: [
+      { event: started },
+      { event: { type: 'delta', text: 'Before tool' } },
+      { event: { type: 'segment_end' } },
+      { event: toolStarted('add_todo') },
+      { event: toolFinished('add_todo', 'ok') },
+      { event: { type: 'delta', text: 'partial' } },
+      { event: { type: 'segment_retracted' } },
+      { event: { type: 'delta', text: 'full answer' } },
+      { event: { type: 'segment_end' } },
+    ],
+    hold: true,
+  });
+
+  await send(app, 'Retract mid-stream');
+  const live = app.getByTestId('live-turn');
+  await expect(live).toContainText('full answer');
+  await expect(live).toContainText('Before tool');
+  await expect(live).not.toContainText('partial');
+});

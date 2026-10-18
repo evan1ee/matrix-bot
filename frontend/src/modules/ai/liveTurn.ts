@@ -89,6 +89,11 @@ function applyEvent(current: LiveTurn, event: AiStreamEvent): LiveTurn {
       }
       return current;
     case 'segment_retracted': {
+      // The open segment if one is still arriving (a stream that failed
+      // mid-reply), otherwise the one that just ended (a rejected reply).
+      if (last?.kind === 'text' && !last.closed) {
+        return { ...current, parts: parts.slice(0, -1) };
+      }
       const index = parts.map((p) => p.kind === 'text' && p.closed).lastIndexOf(true);
       return index < 0 ? current : { ...current, parts: parts.filter((_, i) => i !== index) };
     }
