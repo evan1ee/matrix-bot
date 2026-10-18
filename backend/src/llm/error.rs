@@ -10,6 +10,9 @@ pub enum AiError {
     /// The provider did not answer in time.
     Timeout,
     Db(String),
+    /// The caller stopped the turn (the web client closed its stream). The
+    /// stored conversation already ends with a stopped marker.
+    Cancelled,
 }
 
 impl std::fmt::Display for AiError {
@@ -19,6 +22,7 @@ impl std::fmt::Display for AiError {
             AiError::Provider(msg) => write!(f, "{}", msg),
             AiError::Timeout => write!(f, "The AI provider did not respond in time"),
             AiError::Db(msg) => write!(f, "{}", msg),
+            AiError::Cancelled => write!(f, "The turn was stopped"),
         }
     }
 }
@@ -47,5 +51,6 @@ mod tests {
             AiError::Timeout.to_string(),
             "The AI provider did not respond in time"
         );
+        assert_eq!(AiError::Cancelled.to_string(), "The turn was stopped");
     }
 }

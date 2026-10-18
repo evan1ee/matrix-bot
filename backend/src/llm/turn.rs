@@ -1,9 +1,11 @@
 use tracing::{error, info, warn};
 
+use super::cancel;
 use super::context::{AiTurnResult, LlmTurnContext};
 use super::error::AiError;
 use super::guard;
 use super::resolved_config::ResolvedAiConfig;
+use super::stream::StreamError;
 use super::tools::ToolRegistry;
 use crate::domain::llm::ToolStepOutcome;
 use crate::infrastructure::inference::llm::{ChatCompletionMessage, ChatCompletionRequest};
@@ -193,6 +195,9 @@ pub async fn run_turn(
     let request_timeout = std::time::Duration::from_secs(resolved_config.request_timeout_seconds);
 
     while iteration < max_iterations {
+        if cancel::is_cancelled(ctx) {
+            return Err(cancel::finish_stopped(ctx, &conversation.id, "").await);
+        }
         iteration += 1;
         let request = ChatCompletionRequest {
             model: resolved_config.model_name.clone(),
@@ -211,15 +216,16 @@ pub async fn run_turn(
                 &resolved_config,
                 &request,
                 ctx.progress,
+                ctx.cancel.as_ref(),
             ),
         )
         .await
         {
             Ok(res) => res,
-            Err(_) => Err(format!(
+            Err(_) => Err(StreamError::Failed(format!(
                 "LLM request timed out after {}s",
                 resolved_config.request_timeout_seconds
-            )),
+            ))),
         };
 
         match step_result {
@@ -343,7 +349,10 @@ pub async fn run_turn(
                 final_content = "Received empty response from AI model.".to_string();
                 break;
             }
-            Err(err) => {
+            Err(StreamError::Cancelled { partial }) => {
+                return Err(cancel::finish_stopped(ctx, &conversation.id, &partial).await);
+            }
+            Err(StreamError::Failed(err)) => {
                 error!("LLM completion failed: {}", err);
                 return Err(AiError::Provider(err));
             }
@@ -357,6 +366,9 @@ pub async fn run_turn(
     }
 
     if final_content.trim().is_empty() && !tool_calls_executed.is_empty() {
+        if cancel::is_cancelled(ctx) {
+            return Err(cancel::finish_stopped(ctx, &conversation.id, "").await);
+        }
         let final_req = ChatCompletionRequest {
             model: resolved_config.model_name.clone(),
             messages: chat_messages.clone(),
@@ -366,20 +378,23 @@ pub async fn run_turn(
             tool_choice: None,
             stream: Some(ctx.progress.is_some()),
         };
-        if let Ok(Ok((content, _))) = tokio::time::timeout(
+        match tokio::time::timeout(
             request_timeout,
             super::stream::execute_stream_or_complete(
                 &client,
                 &resolved_config,
                 &final_req,
                 ctx.progress,
+                ctx.cancel.as_ref(),
             ),
         )
         .await
         {
-            if !content.trim().is_empty() {
-                final_content = content;
+            Ok(Ok((content, _))) if !content.trim().is_empty() => final_content = content,
+            Ok(Err(StreamError::Cancelled { partial })) => {
+                return Err(cancel::finish_stopped(ctx, &conversation.id, &partial).await);
             }
+            _ => {}
         }
     }
 
@@ -441,6 +456,8 @@ mod tests {
     #[derive(Default)]
     struct RecordingSink {
         seen: Mutex<Vec<String>>,
+        /// Cancelled when a tool call starts: a Stop that lands mid-round.
+        stop_on_tool_start: Option<tokio_util::sync::CancellationToken>,
     }
 
     impl RecordingSink {
@@ -473,6 +490,9 @@ mod tests {
         }
         async fn report_tool_started(&self, call_id: &str, name: &str) {
             self.note(format!("start:{call_id}:{name}"));
+            if let Some(token) = &self.stop_on_tool_start {
+                token.cancel();
+            }
         }
         async fn report_tool_finished(&self, call_id: &str, _name: &str, outcome: ToolStepOutcome) {
             self.note(format!("finish:{call_id}:{}", outcome.as_str()));
@@ -1002,6 +1022,109 @@ mod tests {
             &seen[start..],
             ["delta:partial", "retract", "delta:full answer", "flush"],
             "{seen:?}"
+        );
+    }
+
+    /// The conversation a sink was told about, for a turn that returned `Err`.
+    fn reported_conversation(sink: &RecordingSink) -> String {
+        let seen = sink.seen();
+        seen.iter()
+            .find_map(|e| e.strip_prefix("conv:").map(str::to_string))
+            .unwrap_or_else(|| panic!("no conversation reported: {seen:?}"))
+    }
+
+    async fn last_stored(pool: &crate::db::DbPool, conversation_id: &str) -> (String, String) {
+        let stored = llm_repo::get_recent_messages(pool, conversation_id, 20)
+            .await
+            .unwrap();
+        let last = stored.last().expect("the conversation has messages");
+        (last.role.clone(), last.content.clone())
+    }
+
+    #[tokio::test]
+    async fn cancel_during_stream_returns_promptly() {
+        let (pool, owner, _) = pool_with_todo("turn-cancel-stream").await;
+        let services = AppServices::new(&pool);
+        let config = test_config(hanging_stream_llm("Hel").await);
+        let sink = RecordingSink::default();
+        let token = tokio_util::sync::CancellationToken::new();
+        let ctx = LlmTurnContext::new(&services, &pool, &config, &owner, "!room:test", Some(&sink))
+            .with_cancellation(token.clone());
+        let canceller = token.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            canceller.cancel();
+        });
+
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            run_turn(&ctx, "hello", None),
+        )
+        .await
+        .expect("a cancelled turn returns within 2 s");
+
+        assert!(matches!(outcome, Err(AiError::Cancelled)), "{outcome:?}");
+        let conversation_id = reported_conversation(&sink);
+        assert_eq!(
+            last_stored(&pool, &conversation_id).await,
+            ("assistant".to_string(), "Hel\n\n_(stopped)_".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn cancel_during_a_tool_round_finishes_the_round_then_stops() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::Arc;
+
+        let token = tokio_util::sync::CancellationToken::new();
+        let requests = Arc::new(AtomicUsize::new(0));
+        // The first answer asks for a tool; any later request would be one
+        // made after Stop.
+        let app = Router::new().route(
+            "/chat/completions",
+            post({
+                let requests = requests.clone();
+                move || async move {
+                    let n = requests.fetch_add(1, Ordering::SeqCst);
+                    let delta = if n == 0 {
+                        serde_json::json!({"tool_calls":[{"index":0,"id":"call_0",
+                            "type":"function","function":{"name":"get_my_tasks","arguments":"{}"}}]})
+                    } else {
+                        serde_json::json!({"content":"should not be asked"})
+                    };
+                    let chunk = serde_json::json!({"id":"c","model":"m","choices":[{"index":0,
+                        "delta":delta,"finish_reason":null}]});
+                    (
+                        [("content-type", "text/event-stream")],
+                        format!("data: {chunk}\n\ndata: [DONE]\n\n"),
+                    )
+                }
+            }),
+        );
+        let config = test_config(spawn_server(app).await);
+        let (pool, owner, _) = pool_with_todo("turn-cancel-round").await;
+        let services = AppServices::new(&pool);
+        let sink = RecordingSink {
+            stop_on_tool_start: Some(token.clone()),
+            ..Default::default()
+        };
+        let ctx = LlmTurnContext::new(&services, &pool, &config, &owner, "!room:test", Some(&sink))
+            .with_cancellation(token);
+
+        let outcome = run_turn(&ctx, "what is on my list?", None).await;
+
+        assert!(matches!(outcome, Err(AiError::Cancelled)), "{outcome:?}");
+        assert_eq!(requests.load(Ordering::SeqCst), 1, "no request after Stop");
+        let conversation_id = reported_conversation(&sink);
+        let stored = llm_repo::get_recent_messages(&pool, &conversation_id, 20)
+            .await
+            .unwrap();
+        let tool_rows: Vec<_> = stored.iter().filter(|m| m.role == "tool").collect();
+        assert_eq!(tool_rows.len(), 1, "the running round finished");
+        assert_eq!(tool_rows[0].tool_outcome, Some(ToolStepOutcome::Ok));
+        assert_eq!(
+            last_stored(&pool, &conversation_id).await,
+            ("assistant".to_string(), "_(stopped)_".to_string())
         );
     }
 }

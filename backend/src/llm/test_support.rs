@@ -95,6 +95,30 @@ pub async fn scripted_stream_replies(replies: Vec<serde_json::Value>) -> String 
     spawn_server(app).await
 }
 
+/// A provider that streams one delta and then holds the connection open
+/// without ever ending it, so only cancellation can end the turn.
+pub async fn hanging_stream_llm(first_delta: &str) -> String {
+    let chunk = serde_json::json!({"id":"c","model":"m","choices":[{"index":0,
+        "delta":{"content":first_delta},"finish_reason":null}]});
+    let frame = format!("data: {chunk}\n\n");
+    let app = Router::new().route(
+        "/chat/completions",
+        post(move || async move {
+            let first = futures_util::stream::once(async move {
+                Ok::<_, std::io::Error>(bytes::Bytes::from(frame))
+            });
+            let never = futures_util::stream::pending();
+            axum::response::Response::builder()
+                .header("content-type", "text/event-stream")
+                .body(axum::body::Body::from_stream(
+                    futures_util::StreamExt::chain(first, never),
+                ))
+                .unwrap()
+        }),
+    );
+    spawn_server(app).await
+}
+
 pub fn test_config(base_url: String) -> crate::config::AiEnvConfig {
     crate::config::AiEnvConfig {
         base_url: Some(base_url),

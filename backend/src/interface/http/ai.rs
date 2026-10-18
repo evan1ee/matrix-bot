@@ -29,6 +29,13 @@ impl From<AiError> for ApiError {
                 ApiError::gateway_timeout("The AI provider did not respond in time")
             }
             AiError::Db(msg) => ApiError::internal(msg),
+            // Only a streaming turn can be stopped, and its client has gone:
+            // nginx's "client closed request", never a 500 (and never logged
+            // as an error; `run_turn` already logged the stop at info).
+            AiError::Cancelled => ApiError {
+                status: StatusCode::from_u16(499).unwrap_or(StatusCode::BAD_REQUEST),
+                message: "Client closed request".to_string(),
+            },
         }
     }
 }
@@ -515,5 +522,8 @@ mod tests {
             ApiError::from(AiError::Db("db exploded".to_string())).status,
             StatusCode::INTERNAL_SERVER_ERROR
         );
+        let cancelled = ApiError::from(AiError::Cancelled);
+        assert_eq!(cancelled.status.as_u16(), 499);
+        assert_eq!(cancelled.message, "Client closed request");
     }
 }

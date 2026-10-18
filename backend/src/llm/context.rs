@@ -1,6 +1,7 @@
 use crate::db::DbPool;
 use crate::domain::accounts::AccountId;
 use crate::llm::progress::ProgressSink;
+use tokio_util::sync::CancellationToken;
 
 /// Runtime context for an LLM turn.
 ///
@@ -17,6 +18,10 @@ pub struct LlmTurnContext<'a> {
     /// than the bot, OCR text), so the turn is tainted from the start: see
     /// `llm::guard`.
     pub untrusted_input: bool,
+    /// Cancelled when the caller stops the turn. `run_turn` checks it only at
+    /// safe points (an LLM call, the top of a round, before the summary),
+    /// never while a tool round runs; `None` for channels that cannot stop.
+    pub cancel: Option<CancellationToken>,
 }
 
 impl<'a> LlmTurnContext<'a> {
@@ -24,6 +29,12 @@ impl<'a> LlmTurnContext<'a> {
     /// actually embedded some calls this.
     pub fn with_untrusted_input(mut self) -> Self {
         self.untrusted_input = true;
+        self
+    }
+
+    /// Lets the caller stop the turn by cancelling `token`.
+    pub fn with_cancellation(mut self, token: CancellationToken) -> Self {
+        self.cancel = Some(token);
         self
     }
 
@@ -43,6 +54,7 @@ impl<'a> LlmTurnContext<'a> {
             room_id,
             progress,
             untrusted_input: false,
+            cancel: None,
         }
     }
 }

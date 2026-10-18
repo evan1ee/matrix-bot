@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod cancel;
 pub mod context;
 pub mod error;
 pub mod guard;
