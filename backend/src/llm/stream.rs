@@ -1,5 +1,7 @@
 //! Streaming execution helper for AI turns that report text as it arrives.
 
+use std::sync::atomic::{AtomicBool, Ordering};
+
 use tracing::warn;
 
 use super::progress::ProgressSink;
@@ -16,27 +18,39 @@ pub async fn execute_stream_or_complete(
     request: &ChatCompletionRequest,
     progress: Option<&dyn ProgressSink>,
 ) -> Result<(String, Vec<ToolCall>), String> {
-    if let Some(sink) = progress {
-        match client
-            .chat_completion_stream(config.endpoint(), request, move |delta| async move {
-                sink.push_delta(&delta).await;
-            })
-            .await
-        {
-            Ok(StreamedCompletion {
-                content,
-                tool_calls,
-            }) => {
-                sink.flush().await;
-                Ok((content, tool_calls))
-            }
-            Err(err) => {
-                warn!("AI stream error ({:?}), falling back to non-streaming", err);
-                fallback_complete(client, config, request).await
-            }
+    let Some(sink) = progress else {
+        return fallback_complete(client, config, request).await;
+    };
+    let streamed = AtomicBool::new(false);
+    let streamed_ref = &streamed;
+    let outcome = client
+        .chat_completion_stream(config.endpoint(), request, move |delta| async move {
+            streamed_ref.store(true, Ordering::Relaxed);
+            sink.push_delta(&delta).await;
+        })
+        .await;
+    match outcome {
+        Ok(StreamedCompletion {
+            content,
+            tool_calls,
+        }) => {
+            sink.flush().await;
+            Ok((content, tool_calls))
         }
-    } else {
-        fallback_complete(client, config, request).await
+        Err(err) => {
+            warn!("AI stream error ({:?}), falling back to non-streaming", err);
+            // Text already shown came from a stream that failed; the fallback
+            // re-answers in full, so the partial text must not stay.
+            if streamed.load(Ordering::Relaxed) {
+                sink.retract_segment().await;
+            }
+            let (content, tool_calls) = fallback_complete(client, config, request).await?;
+            if !content.is_empty() {
+                sink.push_delta(&content).await;
+                sink.flush().await;
+            }
+            Ok((content, tool_calls))
+        }
     }
 }
 

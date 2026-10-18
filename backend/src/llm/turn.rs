@@ -316,6 +316,9 @@ pub async fn run_turn(
                     {
                         warn!("Reply claims success but no tool succeeded; asking the model to correct itself once");
                         corrected = true;
+                        if let Some(sink) = ctx.progress {
+                            sink.retract_segment().await;
+                        }
                         chat_messages.push(ChatCompletionMessage {
                             role: "assistant".to_string(),
                             content: Some(content),
@@ -390,6 +393,9 @@ pub async fn run_turn(
     // The correction is offered once; a reply that still claims success
     // must not reach the user as if something was saved.
     if guard::claims_unrecorded_success(&final_content, any_tool_succeeded) {
+        if let Some(sink) = ctx.progress {
+            sink.retract_segment().await;
+        }
         final_content = guard::UNRECORDED_NOTICE.to_string();
     }
 
@@ -470,6 +476,9 @@ mod tests {
         }
         async fn report_tool_finished(&self, call_id: &str, _name: &str, outcome: ToolStepOutcome) {
             self.note(format!("finish:{call_id}:{}", outcome.as_str()));
+        }
+        async fn retract_segment(&self) {
+            self.note("retract".to_string());
         }
         fn message_ref(&self) -> Option<String> {
             Some("$stage".to_string())
@@ -866,5 +875,101 @@ mod tests {
         let result = run_turn(&ctx, "delete my todo", None).await.unwrap();
 
         assert_eq!(result.message, guard::UNRECORDED_NOTICE);
+    }
+
+    #[tokio::test]
+    async fn a_reply_the_guard_rejects_is_retracted() {
+        let (pool, owner, _) = pool_with_todo("turn-retract-guard").await;
+        let services = AppServices::new(&pool);
+        let url = scripted_stream_replies(vec![
+            text_reply("✅ Added the todo"),
+            text_reply("I could not save it."),
+        ])
+        .await;
+        let config = test_config(url);
+        let sink = RecordingSink::default();
+        let ctx = LlmTurnContext::new(&services, &pool, &config, &owner, "!room:test", Some(&sink));
+
+        let result = run_turn(&ctx, "add milk", None).await.unwrap();
+
+        let seen = sink.seen();
+        let flush = seen.iter().position(|e| e == "flush").expect("flushed");
+        let retract = seen.iter().position(|e| e == "retract").expect("retracted");
+        assert!(flush < retract, "{seen:?}");
+        assert_eq!(result.message, "I could not save it.");
+    }
+
+    #[tokio::test]
+    async fn a_final_reply_replaced_by_the_notice_is_retracted() {
+        let (pool, owner, _) = pool_with_todo("turn-retract-notice").await;
+        let services = AppServices::new(&pool);
+        let url =
+            scripted_stream_replies(vec![text_reply("✅ saved"), text_reply("✅ really saved")])
+                .await;
+        let config = test_config(url);
+        let sink = RecordingSink::default();
+        let ctx = LlmTurnContext::new(&services, &pool, &config, &owner, "!room:test", Some(&sink));
+
+        let result = run_turn(&ctx, "add milk", None).await.unwrap();
+
+        assert_eq!(result.message, guard::UNRECORDED_NOTICE);
+        let seen = sink.seen();
+        let retracts = seen.iter().filter(|e| *e == "retract").count();
+        assert_eq!(retracts, 2, "{seen:?}");
+        assert_eq!(seen.last().map(String::as_str), Some("retract"), "{seen:?}");
+    }
+
+    #[tokio::test]
+    async fn a_stream_that_fails_midway_retracts_then_sends_the_fallback() {
+        let app = Router::new().route(
+            "/chat/completions",
+            post(|Json(body): Json<serde_json::Value>| async move {
+                if body["stream"] == true {
+                    let chunk = serde_json::json!({"id":"c","model":"m","choices":[{"index":0,
+                        "delta":{"content":"partial"},"finish_reason":null}]});
+                    // The error follows the delta after a pause, so the first
+                    // chunk is delivered before the body breaks.
+                    let first = futures_util::stream::once(async move {
+                        Ok::<_, std::io::Error>(bytes::Bytes::from(format!(
+                            "data: {chunk}
+
+"
+                        )))
+                    });
+                    let broken = futures_util::stream::once(async {
+                        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                        Err(std::io::Error::other("connection reset"))
+                    });
+                    axum::response::Response::builder()
+                        .header("content-type", "text/event-stream")
+                        .body(axum::body::Body::from_stream(
+                            futures_util::StreamExt::chain(first, broken),
+                        ))
+                        .unwrap()
+                } else {
+                    axum::response::IntoResponse::into_response(Json(text_reply("full answer")))
+                }
+            }),
+        );
+        let url = spawn_server(app).await;
+        let (pool, owner, _) = pool_with_todo("turn-retract-midstream").await;
+        let services = AppServices::new(&pool);
+        let config = test_config(url);
+        let sink = RecordingSink::default();
+        let ctx = LlmTurnContext::new(&services, &pool, &config, &owner, "!room:test", Some(&sink));
+
+        let result = run_turn(&ctx, "hello", None).await.unwrap();
+
+        assert_eq!(result.message, "full answer");
+        let seen = sink.seen();
+        let start = seen
+            .iter()
+            .position(|e| e == "delta:partial")
+            .unwrap_or_else(|| panic!("{seen:?}"));
+        assert_eq!(
+            &seen[start..],
+            ["delta:partial", "retract", "delta:full answer", "flush"],
+            "{seen:?}"
+        );
     }
 }
