@@ -7,6 +7,9 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
+use crate::domain::reminders::RecurrencePattern;
+use crate::domain::tags::{parse_tags, Tag};
+use crate::domain::todos::steps::{TodoStep, TodoWithSteps};
 use crate::interface::http::auth::{ApiState, AuthUser};
 use crate::interface::http::error::ApiError;
 
@@ -50,6 +53,24 @@ pub struct TodoItem {
     pub remind_before_minutes: Option<i64>,
     pub completed: bool,
     pub created_at: Option<DateTime<Utc>>,
+    /// Normalized tags, sorted.
+    pub tags: Vec<String>,
+    /// `none`, `daily`, `weekly`, `monthly` or `yearly`.
+    pub recurrence: String,
+    /// The successor spawned when this recurring todo was completed.
+    pub next_todo_id: Option<i64>,
+    /// Checklist steps already done.
+    pub steps_done: i64,
+    /// Checklist steps in total.
+    pub steps_total: i64,
+}
+
+impl TodoItem {
+    fn with_progress(mut self, (done, total): (i64, i64)) -> Self {
+        self.steps_done = done;
+        self.steps_total = total;
+        self
+    }
 }
 
 impl From<crate::domain::todos::TodoItem> for TodoItem {
@@ -65,6 +86,11 @@ impl From<crate::domain::todos::TodoItem> for TodoItem {
             remind_before_minutes: item.remind_before_minutes,
             completed: item.completed,
             created_at: item.created_at,
+            tags: item.tags.iter().map(ToString::to_string).collect(),
+            recurrence: item.recurrence.as_str().to_string(),
+            next_todo_id: item.next_todo_id,
+            steps_done: 0,
+            steps_total: 0,
         }
     }
 }
@@ -78,6 +104,8 @@ pub struct TodoQuery {
     /// `total` counts every task — callers wanting an outstanding-work figure
     /// must ask for `completed=false` explicitly.
     pub completed: Option<bool>,
+    /// Only todos carrying this tag (parsed like any tag; invalid is 400).
+    pub tag: Option<String>,
 }
 
 #[derive(Deserialize, ToSchema)]
@@ -92,6 +120,11 @@ pub struct CreateTodoRequest {
     /// Matrix room the due reminder should be delivered to. Defaults to the
     /// task's own room; required when that is the `web` sentinel.
     pub remind_room_id: Option<String>,
+    /// Tags to attach (max 10; each normalized, invalid is 400).
+    pub tags: Option<Vec<String>>,
+    /// `none` (default), `daily`, `weekly`, `monthly` or `yearly`. A recurring
+    /// todo needs a due date.
+    pub recurrence: Option<String>,
 }
 
 /// A PATCH body.
@@ -100,7 +133,7 @@ pub struct CreateTodoRequest {
 /// distinguishable on the wire: absent leaves the value alone, `null` clears it,
 /// and a value sets it. A plain `Option<T>` would make "clear the due date"
 /// unexpressible.
-#[derive(Deserialize, ToSchema)]
+#[derive(Debug, Default, Deserialize, ToSchema)]
 pub struct UpdateTodoRequest {
     pub text: Option<String>,
     pub priority: Option<String>,
@@ -112,6 +145,9 @@ pub struct UpdateTodoRequest {
     #[schema(value_type = Option<i64>)]
     pub remind_before_minutes: Option<Option<i64>>,
     pub remind_room_id: Option<String>,
+    /// Replaces the whole tag set when present.
+    pub tags: Option<Vec<String>>,
+    pub recurrence: Option<String>,
 }
 
 /// Distinguishes an explicit JSON `null` from an absent field.
@@ -126,7 +162,7 @@ where
     Option::<T>::deserialize(deserializer).map(Some)
 }
 
-#[derive(Serialize, ToSchema)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct TodoListResponse {
     pub items: Vec<TodoItem>,
     pub page: i64,
@@ -154,6 +190,13 @@ pub async fn list_todos(
     let limit = query.limit.unwrap_or(25).clamp(1, 100);
     let offset = (page - 1) * limit;
 
+    let tag = query
+        .tag
+        .as_deref()
+        .map(Tag::parse)
+        .transpose()
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
+
     let domain_items = state
         .services
         .todos
@@ -161,7 +204,7 @@ pub async fn list_todos(
             &user.account_id,
             query.room_id.as_deref(),
             query.completed,
-            None,
+            tag.as_ref(),
             limit,
             offset,
         )
@@ -174,11 +217,24 @@ pub async fn list_todos(
             &user.account_id,
             query.room_id.as_deref(),
             query.completed,
-            None,
+            tag.as_ref(),
         )
         .await?;
 
-    let items = domain_items.into_iter().map(TodoItem::from).collect();
+    // One query for the whole page, not one per row.
+    let ids: Vec<i64> = domain_items.iter().map(|t| t.id).collect();
+    let progress = state
+        .services
+        .todos
+        .step_progress(&user.account_id, &ids)
+        .await?;
+    let items = domain_items
+        .into_iter()
+        .map(|t| {
+            let counts = progress.get(&t.id).copied().unwrap_or((0, 0));
+            TodoItem::from(t).with_progress(counts)
+        })
+        .collect();
 
     Ok(Json(TodoListResponse {
         items,
@@ -204,6 +260,8 @@ pub async fn create_todo(
     user: AuthUser,
     Json(payload): Json<CreateTodoRequest>,
 ) -> Result<Json<TodoItem>, ApiError> {
+    let tags = parse_tag_list(payload.tags.as_deref())?.unwrap_or_default();
+    let recurrence = parse_recurrence(payload.recurrence.as_deref())?.unwrap_or_default();
     let priority = payload
         .priority
         .as_deref()
@@ -228,8 +286,8 @@ pub async fn create_todo(
         due_at: payload.due_at,
         remind_before_minutes: payload.remind_before_minutes,
         remind_room_id,
-        tags: vec![],
-        recurrence: crate::domain::reminders::RecurrencePattern::None,
+        tags,
+        recurrence,
         recurrence_anchor: None,
     };
 
@@ -256,6 +314,8 @@ pub async fn update_todo(
     Path(id): Path<i64>,
     Json(payload): Json<UpdateTodoRequest>,
 ) -> Result<Json<TodoItem>, ApiError> {
+    let tags = parse_tag_list(payload.tags.as_deref())?;
+    let recurrence = parse_recurrence(payload.recurrence.as_deref())?;
     let priority = payload
         .priority
         .as_deref()
@@ -274,8 +334,8 @@ pub async fn update_todo(
         due_at: payload.due_at,
         remind_before_minutes: payload.remind_before_minutes,
         remind_room_id,
-        tags: None,
-        recurrence: None,
+        tags,
+        recurrence,
     };
 
     let (item, _) = state
@@ -284,7 +344,15 @@ pub async fn update_todo(
         .update(&user.account_id, id, patch)
         .await?;
 
-    Ok(Json(item.into()))
+    let counts = state
+        .services
+        .todos
+        .step_progress(&user.account_id, &[item.id])
+        .await?
+        .get(&item.id)
+        .copied()
+        .unwrap_or((0, 0));
+    Ok(Json(TodoItem::from(item).with_progress(counts)))
 }
 
 #[utoipa::path(
@@ -306,6 +374,128 @@ pub async fn delete_todo(
     state.services.todos.delete(&user.account_id, id).await?;
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// A checklist step on the wire.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TodoStepDto {
+    pub id: i64,
+    /// 1-based position within the todo.
+    pub position: i32,
+    pub text: String,
+    pub done: bool,
+}
+
+impl From<&TodoStep> for TodoStepDto {
+    fn from(step: &TodoStep) -> Self {
+        Self {
+            id: step.id,
+            position: step.position,
+            text: step.text.clone(),
+            done: step.done,
+        }
+    }
+}
+
+/// One todo with its ordered checklist steps.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TodoDetail {
+    pub item: TodoItem,
+    pub steps: Vec<TodoStepDto>,
+}
+
+impl From<TodoWithSteps> for TodoDetail {
+    fn from(detail: TodoWithSteps) -> Self {
+        let done = detail.steps.iter().filter(|s| s.done).count() as i64;
+        let total = detail.steps.len() as i64;
+        Self {
+            steps: detail.steps.iter().map(TodoStepDto::from).collect(),
+            item: TodoItem::from(detail.todo).with_progress((done, total)),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TodoTagCount {
+    pub tag: String,
+    /// Active (not completed) todos carrying the tag.
+    pub count: i64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TodoTagsResponse {
+    pub tags: Vec<TodoTagCount>,
+}
+
+fn parse_tag_list(raw: Option<&[String]>) -> Result<Option<Vec<Tag>>, ApiError> {
+    raw.map(parse_tags)
+        .transpose()
+        .map_err(|e| ApiError::bad_request(e.to_string()))
+}
+
+/// Exact wire names only: unlike `from_str_or_default`, an unknown value must
+/// fail rather than silently turn a typo into "no recurrence".
+fn parse_recurrence(raw: Option<&str>) -> Result<Option<RecurrencePattern>, ApiError> {
+    raw.map(|s| match s {
+        "none" => Ok(RecurrencePattern::None),
+        "daily" => Ok(RecurrencePattern::Daily),
+        "weekly" => Ok(RecurrencePattern::Weekly),
+        "monthly" => Ok(RecurrencePattern::Monthly),
+        "yearly" => Ok(RecurrencePattern::Yearly),
+        _ => Err(ApiError::bad_request(
+            "recurrence must be one of none, daily, weekly, monthly, yearly",
+        )),
+    })
+    .transpose()
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/todos/{id}",
+    params(("id" = i64, Path, description = "Todo item ID")),
+    responses(
+        (status = 200, description = "Todo with its steps", body = TodoDetail),
+        (status = 404, description = "Todo not found", body = ApiErrorResponse),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
+pub async fn get_todo(
+    State(state): State<ApiState>,
+    user: AuthUser,
+    Path(id): Path<i64>,
+) -> Result<Json<TodoDetail>, ApiError> {
+    let detail = state
+        .services
+        .todos
+        .get_with_steps(&user.account_id, id)
+        .await?;
+    Ok(Json(detail.into()))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/v1/todos/tags",
+    responses(
+        (status = 200, description = "Tags on active todos with counts", body = TodoTagsResponse),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
+pub async fn list_todo_tags(
+    State(state): State<ApiState>,
+    user: AuthUser,
+) -> Result<Json<TodoTagsResponse>, ApiError> {
+    let tags = state.services.todos.list_tags(&user.account_id).await?;
+    Ok(Json(TodoTagsResponse {
+        tags: tags
+            .into_iter()
+            .map(|(tag, count)| TodoTagCount {
+                tag: tag.to_string(),
+                count,
+            })
+            .collect(),
+    }))
 }
 
 #[cfg(test)]
@@ -353,6 +543,8 @@ mod tests {
                     due_at: None,
                     remind_before_minutes: None,
                     remind_room_id: None,
+                    tags: None,
+                    recurrence: None,
                 }),
             )
             .await
@@ -372,6 +564,8 @@ mod tests {
                 due_at: None,
                 remind_before_minutes: None,
                 remind_room_id: None,
+                tags: None,
+                recurrence: None,
             }),
         )
         .await
@@ -389,6 +583,7 @@ mod tests {
                         page: None,
                         limit: None,
                         completed,
+                        tag: None,
                     }),
                 )
                 .await
@@ -441,6 +636,8 @@ mod tests {
             due_at: None,
             remind_before_minutes: None,
             remind_room_id: None,
+            tags: None,
+            recurrence: None,
         };
         let created = create_todo(State(state.clone()), alice.clone(), Json(req))
             .await
@@ -453,6 +650,7 @@ mod tests {
             page: None,
             limit: None,
             completed: None,
+            tag: None,
         };
         let bob_list = list_todos(State(state.clone()), bob.clone(), Query(query))
             .await
@@ -473,6 +671,8 @@ mod tests {
             due_at: None,
             remind_before_minutes: None,
             remind_room_id: None,
+            tags: None,
+            recurrence: None,
         };
         let updated = update_todo(
             State(state.clone()),
@@ -525,6 +725,8 @@ mod tests {
                 due_at: None,
                 remind_before_minutes: None,
                 remind_room_id: None,
+                tags: None,
+                recurrence: None,
             }),
         )
         .await
@@ -538,6 +740,8 @@ mod tests {
             due_at: None,
             remind_before_minutes: None,
             remind_room_id: None,
+            tags: None,
+            recurrence: None,
         };
 
         let done = update_todo(
@@ -569,6 +773,7 @@ mod tests {
                 page: None,
                 limit: None,
                 completed: None,
+                tag: None,
             }),
         )
         .await
@@ -621,6 +826,8 @@ mod tests {
                 due_at: None,
                 remind_before_minutes: None,
                 remind_room_id: None,
+                tags: None,
+                recurrence: None,
             }),
         )
         .await
@@ -635,6 +842,7 @@ mod tests {
                 page: None,
                 limit: None,
                 completed: None,
+                tag: None,
             }),
         )
         .await
@@ -654,6 +862,7 @@ mod tests {
                 page: None,
                 limit: None,
                 completed: None,
+                tag: None,
             }),
         )
         .await
@@ -672,6 +881,8 @@ mod tests {
                 due_at: None,
                 remind_before_minutes: None,
                 remind_room_id: None,
+                tags: None,
+                recurrence: None,
             }),
         )
         .await
@@ -692,6 +903,7 @@ mod tests {
                 page: None,
                 limit: None,
                 completed: None,
+                tag: None,
             }),
         )
         .await
@@ -743,6 +955,8 @@ mod tests {
             due_at,
             remind_before_minutes: lead,
             remind_room_id: remind_room_id.map(str::to_string),
+            tags: None,
+            recurrence: None,
         }
     }
 
@@ -878,6 +1092,8 @@ mod tests {
                 due_at: None,
                 remind_before_minutes: None,
                 remind_room_id: None,
+                tags: None,
+                recurrence: None,
             }),
         )
         .await
@@ -898,6 +1114,8 @@ mod tests {
                 due_at: Some(None),
                 remind_before_minutes: None,
                 remind_room_id: None,
+                tags: None,
+                recurrence: None,
             }),
         )
         .await
@@ -944,6 +1162,8 @@ mod tests {
                 due_at: None,
                 remind_before_minutes: None,
                 remind_room_id: None,
+                tags: None,
+                recurrence: None,
             }),
         )
         .await
@@ -994,6 +1214,8 @@ mod tests {
                 due_at: None,
                 remind_before_minutes: Some(Some(1440)),
                 remind_room_id: None,
+                tags: None,
+                recurrence: None,
             }),
         )
         .await
@@ -1043,5 +1265,280 @@ mod tests {
             .is_none(),
             "a deleted task must not leave a reminder pointing at it"
         );
+    }
+
+    // ---- tags, recurrence, detail ----
+
+    fn create_req(text: &str) -> CreateTodoRequest {
+        CreateTodoRequest {
+            room_id: None,
+            text: text.to_string(),
+            priority: None,
+            due_at: None,
+            remind_before_minutes: None,
+            remind_room_id: None,
+            tags: None,
+            recurrence: None,
+        }
+    }
+
+    fn list_query(tag: Option<&str>) -> TodoQuery {
+        TodoQuery {
+            room_id: None,
+            page: None,
+            limit: None,
+            completed: None,
+            tag: tag.map(str::to_string),
+        }
+    }
+
+    fn strings(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[tokio::test]
+    async fn create_with_tags_and_recurrence_round_trips() {
+        let state = due_reminder_state().await;
+        let alice = AuthUser::named_seed("alice", "acct_alice");
+        let due = crate::utils::time::now_at_storage_precision() + chrono::Duration::days(1);
+        let created = create_todo(
+            State(state.clone()),
+            alice.clone(),
+            Json(CreateTodoRequest {
+                due_at: Some(due),
+                tags: Some(strings(&["#Work", "home", "work"])),
+                recurrence: Some("weekly".to_string()),
+                ..create_req("Water plants")
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(created.tags, vec!["home", "work"]);
+        assert_eq!(created.recurrence, "weekly");
+        assert_eq!((created.steps_done, created.steps_total), (0, 0));
+
+        let listed = list_todos(State(state), alice, Query(list_query(None)))
+            .await
+            .unwrap();
+        assert_eq!(listed.items[0].tags, vec!["home", "work"]);
+        assert_eq!(listed.items[0].recurrence, "weekly");
+    }
+
+    #[tokio::test]
+    async fn invalid_tag_is_400() {
+        let state = due_reminder_state().await;
+        let alice = AuthUser::named_seed("alice", "acct_alice");
+        let err = create_todo(
+            State(state.clone()),
+            alice.clone(),
+            Json(CreateTodoRequest {
+                tags: Some(strings(&["bad tag!"])),
+                ..create_req("x")
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+
+        let err = list_todos(State(state), alice, Query(list_query(Some("no good"))))
+            .await
+            .unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn unknown_recurrence_is_400() {
+        let state = due_reminder_state().await;
+        let alice = AuthUser::named_seed("alice", "acct_alice");
+        let err = create_todo(
+            State(state.clone()),
+            alice.clone(),
+            Json(CreateTodoRequest {
+                recurrence: Some("fortnightly".to_string()),
+                ..create_req("x")
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+
+        let created = create_todo(State(state.clone()), alice.clone(), Json(create_req("y")))
+            .await
+            .unwrap();
+        let err = update_todo(
+            State(state),
+            alice,
+            Path(created.id),
+            Json(UpdateTodoRequest {
+                recurrence: Some("sometimes".to_string()),
+                ..UpdateTodoRequest::default()
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
+    }
+
+    #[tokio::test]
+    async fn list_filters_by_tag() {
+        let state = due_reminder_state().await;
+        let alice = AuthUser::named_seed("alice", "acct_alice");
+        for (text, tags) in [("a", vec!["work"]), ("b", vec!["home"]), ("c", vec![])] {
+            let _ = create_todo(
+                State(state.clone()),
+                alice.clone(),
+                Json(CreateTodoRequest {
+                    tags: Some(strings(&tags)),
+                    ..create_req(text)
+                }),
+            )
+            .await
+            .unwrap();
+        }
+        let listed = list_todos(State(state), alice, Query(list_query(Some("#Work"))))
+            .await
+            .unwrap();
+        assert_eq!(listed.total, 1);
+        assert_eq!(listed.items.len(), 1);
+        assert_eq!(listed.items[0].text, "a");
+    }
+
+    #[tokio::test]
+    async fn list_reports_step_progress_per_item() {
+        let state = due_reminder_state().await;
+        let alice = AuthUser::named_seed("alice", "acct_alice");
+        let with = create_todo(
+            State(state.clone()),
+            alice.clone(),
+            Json(create_req("with")),
+        )
+        .await
+        .unwrap();
+        let _ = create_todo(
+            State(state.clone()),
+            alice.clone(),
+            Json(create_req("without")),
+        )
+        .await
+        .unwrap();
+        let owner = alice.account_id;
+        let todos = &state.services.todos;
+        todos.add_step(&owner, with.id, "one").await.unwrap();
+        let two = todos.add_step(&owner, with.id, "two").await.unwrap();
+        todos
+            .update_step(&owner, with.id, two.steps[1].id, None, Some(true))
+            .await
+            .unwrap();
+
+        let listed = list_todos(State(state), alice, Query(list_query(None)))
+            .await
+            .unwrap();
+        for item in &listed.items {
+            let want = if item.id == with.id { (1, 2) } else { (0, 0) };
+            assert_eq!((item.steps_done, item.steps_total), want, "{}", item.text);
+        }
+    }
+
+    #[tokio::test]
+    async fn get_todo_returns_steps() {
+        let state = due_reminder_state().await;
+        let alice = AuthUser::named_seed("alice", "acct_alice");
+        let created = create_todo(State(state.clone()), alice.clone(), Json(create_req("t")))
+            .await
+            .unwrap();
+        let owner = alice.account_id;
+        let todos = &state.services.todos;
+        todos.add_step(&owner, created.id, "first").await.unwrap();
+        todos.add_step(&owner, created.id, "second").await.unwrap();
+
+        let detail = get_todo(State(state.clone()), alice, Path(created.id))
+            .await
+            .unwrap();
+        assert_eq!(detail.item.id, created.id);
+        assert_eq!(detail.steps.len(), 2);
+        assert_eq!(detail.steps[0].text, "first");
+        assert_eq!(detail.steps[1].position, 2);
+        assert_eq!((detail.item.steps_done, detail.item.steps_total), (0, 2));
+
+        let err = get_todo(
+            State(state),
+            AuthUser::named_seed("bob", "acct_bob"),
+            Path(created.id),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(err.status, StatusCode::NOT_FOUND);
+    }
+
+    #[tokio::test]
+    async fn tags_endpoint_lists_counts() {
+        let state = due_reminder_state().await;
+        let alice = AuthUser::named_seed("alice", "acct_alice");
+        for tags in [vec!["work", "home"], vec!["work"]] {
+            let _ = create_todo(
+                State(state.clone()),
+                alice.clone(),
+                Json(CreateTodoRequest {
+                    tags: Some(strings(&tags)),
+                    ..create_req("t")
+                }),
+            )
+            .await
+            .unwrap();
+        }
+        let resp = list_todo_tags(State(state.clone()), alice).await.unwrap();
+        let got: Vec<(&str, i64)> = resp
+            .tags
+            .iter()
+            .map(|t| (t.tag.as_str(), t.count))
+            .collect();
+        assert!(
+            got.contains(&("work", 2)) && got.contains(&("home", 1)),
+            "{got:?}"
+        );
+
+        let bob = list_todo_tags(State(state), AuthUser::named_seed("bob", "acct_bob"))
+            .await
+            .unwrap();
+        assert!(bob.tags.is_empty());
+    }
+
+    #[tokio::test]
+    async fn patch_completed_recurring_sets_next_todo_id() {
+        let state = due_reminder_state().await;
+        let alice = AuthUser::named_seed("alice", "acct_alice");
+        let due = crate::utils::time::now_at_storage_precision() + chrono::Duration::days(1);
+        let created = create_todo(
+            State(state.clone()),
+            alice.clone(),
+            Json(CreateTodoRequest {
+                due_at: Some(due),
+                recurrence: Some("daily".to_string()),
+                tags: Some(strings(&["chores"])),
+                ..create_req("Dishes")
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(created.next_todo_id, None);
+
+        let done = update_todo(
+            State(state.clone()),
+            alice.clone(),
+            Path(created.id),
+            Json(UpdateTodoRequest {
+                completed: Some(true),
+                ..UpdateTodoRequest::default()
+            }),
+        )
+        .await
+        .unwrap();
+        let next_id = done.next_todo_id.expect("a successor must be reported");
+        assert_ne!(next_id, created.id);
+
+        let detail = get_todo(State(state), alice, Path(next_id)).await.unwrap();
+        assert!(!detail.item.completed);
+        assert_eq!(detail.item.tags, vec!["chores"]);
+        assert_eq!(detail.item.recurrence, "daily");
     }
 }

@@ -2049,7 +2049,71 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/todos/tags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_todo_tags"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/todos/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_todo"];
+        put?: never;
+        post?: never;
+        delete: operations["delete_todo"];
+        options?: never;
+        head?: never;
+        patch: operations["update_todo"];
+        trace?: never;
+    };
+    "/api/v1/todos/{id}/steps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["add_step"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/todos/{id}/steps/order": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["reorder_steps"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/todos/{id}/steps/{step_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -2059,10 +2123,10 @@ export interface paths {
         get?: never;
         put?: never;
         post?: never;
-        delete: operations["delete_todo"];
+        delete: operations["remove_step"];
         options?: never;
         head?: never;
-        patch: operations["update_todo"];
+        patch: operations["update_step"];
         trace?: never;
     };
     "/api/v1/voice/transcribe": {
@@ -2586,6 +2650,10 @@ export interface components {
             provider: string;
             secret: string;
         };
+        CreateStepRequest: {
+            /** @description Step text, at most 200 characters. */
+            text: string;
+        };
         CreateTodoRequest: {
             /**
              * Format: date-time
@@ -2593,6 +2661,11 @@ export interface components {
              */
             due_at?: string | null;
             priority?: string | null;
+            /**
+             * @description `none` (default), `daily`, `weekly`, `monthly` or `yearly`. A recurring
+             *     todo needs a due date.
+             */
+            recurrence?: string | null;
             /**
              * Format: int64
              * @description Minutes before `due_at` to send a reminder. Requires `due_at`.
@@ -2604,6 +2677,8 @@ export interface components {
              */
             remind_room_id?: string | null;
             room_id?: string | null;
+            /** @description Tags to attach (max 10; each normalized, invalid is 400). */
+            tags?: string[] | null;
             text: string;
         };
         CreateWebhookInput: {
@@ -3402,6 +3477,10 @@ export interface components {
         RenamePasskeyRequest: {
             label: string;
         };
+        ReorderStepsRequest: {
+            /** @description Every step id of the todo exactly once, in the wanted order (max 50). */
+            step_ids: number[];
+        };
         /** @description Request payload for replacing an existing credential's secret value. */
         ReplaceSecretRequest: {
             secret: string;
@@ -3591,6 +3670,11 @@ export interface components {
             quote_type?: string | null;
             symbol: string;
         };
+        /** @description One todo with its ordered checklist steps. */
+        TodoDetail: {
+            item: components["schemas"]["TodoItem"];
+            steps: components["schemas"]["TodoStepDto"][];
+        };
         TodoItem: {
             completed: boolean;
             /** Format: date-time */
@@ -3603,8 +3687,15 @@ export interface components {
             due_at?: string | null;
             /** Format: int64 */
             id: number;
+            /**
+             * Format: int64
+             * @description The successor spawned when this recurring todo was completed.
+             */
+            next_todo_id?: number | null;
             owner_id: string;
             priority: string;
+            /** @description `none`, `daily`, `weekly`, `monthly` or `yearly`. */
+            recurrence: string;
             /**
              * Format: int64
              * @description Minutes before `due_at` to fire a reminder. `None` means no reminder.
@@ -3612,6 +3703,18 @@ export interface components {
             remind_before_minutes?: number | null;
             room_id: string;
             sender_name: string;
+            /**
+             * Format: int64
+             * @description Checklist steps already done.
+             */
+            steps_done: number;
+            /**
+             * Format: int64
+             * @description Checklist steps in total.
+             */
+            steps_total: number;
+            /** @description Normalized tags, sorted. */
+            tags: string[];
             text: string;
         };
         TodoListResponse: {
@@ -3640,6 +3743,31 @@ export interface components {
             /** Format: int64 */
             page?: number | null;
             room_id?: string | null;
+            /** @description Only todos carrying this tag (parsed like any tag; invalid is 400). */
+            tag?: string | null;
+        };
+        /** @description A checklist step on the wire. */
+        TodoStepDto: {
+            done: boolean;
+            /** Format: int64 */
+            id: number;
+            /**
+             * Format: int32
+             * @description 1-based position within the todo.
+             */
+            position: number;
+            text: string;
+        };
+        TodoTagCount: {
+            /**
+             * Format: int64
+             * @description Active (not completed) todos carrying the tag.
+             */
+            count: number;
+            tag: string;
+        };
+        TodoTagsResponse: {
+            tags: components["schemas"]["TodoTagCount"][];
         };
         ToggleHabitRequest: {
             date?: string | null;
@@ -3853,6 +3981,10 @@ export interface components {
              */
             tts_voice?: string | null;
         };
+        UpdateStepRequest: {
+            done?: boolean | null;
+            text?: string | null;
+        };
         UpdateSymbolRequest: {
             symbol: string;
         };
@@ -3872,9 +4004,12 @@ export interface components {
             /** Format: date-time */
             due_at?: string | null;
             priority?: string | null;
+            recurrence?: string | null;
             /** Format: int64 */
             remind_before_minutes?: number | null;
             remind_room_id?: string | null;
+            /** @description Replaces the whole tag set when present. */
+            tags?: string[] | null;
             text?: string | null;
         };
         UpdateWebhookInput: {
@@ -9507,6 +9642,8 @@ export interface operations {
                  *     must ask for `completed=false` explicitly.
                  */
                 completed?: boolean | null;
+                /** @description Only todos carrying this tag (parsed like any tag; invalid is 400). */
+                tag?: string | null;
             };
             header?: never;
             path?: never;
@@ -9567,6 +9704,76 @@ export interface operations {
             };
             /** @description Unauthorized */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    list_todo_tags: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Tags on active todos with counts */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TodoTagsResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    get_todo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Todo item ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Todo with its steps */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TodoDetail"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Todo not found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -9650,6 +9857,213 @@ export interface operations {
                 };
             };
             /** @description Todo not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    add_step: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Todo item ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateStepRequest"];
+            };
+        };
+        responses: {
+            /** @description Step added */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TodoDetail"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Todo not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    reorder_steps: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Todo item ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReorderStepsRequest"];
+            };
+        };
+        responses: {
+            /** @description Steps reordered */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TodoDetail"];
+                };
+            };
+            /** @description Order does not list every step once */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Todo not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    remove_step: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Todo item ID */
+                id: number;
+                /** @description Step ID */
+                step_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Step removed */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TodoDetail"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Todo or step not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    update_step: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Todo item ID */
+                id: number;
+                /** @description Step ID */
+                step_id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateStepRequest"];
+            };
+        };
+        responses: {
+            /** @description Step updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TodoDetail"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Todo or step not found */
             404: {
                 headers: {
                     [name: string]: unknown;

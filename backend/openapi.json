@@ -7540,6 +7540,16 @@
               "type": "boolean",
               "nullable": true
             }
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "description": "Only todos carrying this tag (parsed like any tag; invalid is 400).",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
           }
         ],
         "responses": {
@@ -7624,7 +7634,97 @@
         ]
       }
     },
+    "/api/v1/todos/tags": {
+      "get": {
+        "tags": [
+          "todos"
+        ],
+        "operationId": "list_todo_tags",
+        "responses": {
+          "200": {
+            "description": "Tags on active todos with counts",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TodoTagsResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/todos/{id}": {
+      "get": {
+        "tags": [
+          "todos"
+        ],
+        "operationId": "get_todo",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Todo item ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Todo with its steps",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TodoDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Todo not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      },
       "delete": {
         "tags": [
           "todos"
@@ -7723,6 +7823,312 @@
           },
           "404": {
             "description": "Todo not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/todos/{id}/steps": {
+      "post": {
+        "tags": [
+          "todo_steps"
+        ],
+        "operationId": "add_step",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Todo item ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateStepRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Step added",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TodoDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Todo not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/todos/{id}/steps/order": {
+      "put": {
+        "tags": [
+          "todo_steps"
+        ],
+        "operationId": "reorder_steps",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Todo item ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReorderStepsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Steps reordered",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TodoDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Order does not list every step once",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Todo not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/todos/{id}/steps/{step_id}": {
+      "delete": {
+        "tags": [
+          "todo_steps"
+        ],
+        "operationId": "remove_step",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Todo item ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "step_id",
+            "in": "path",
+            "description": "Step ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Step removed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TodoDetail"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Todo or step not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "todo_steps"
+        ],
+        "operationId": "update_step",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Todo item ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "step_id",
+            "in": "path",
+            "description": "Step ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateStepRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Step updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TodoDetail"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Todo or step not found",
             "content": {
               "application/json": {
                 "schema": {
@@ -9375,6 +9781,18 @@
           }
         }
       },
+      "CreateStepRequest": {
+        "type": "object",
+        "required": [
+          "text"
+        ],
+        "properties": {
+          "text": {
+            "type": "string",
+            "description": "Step text, at most 200 characters."
+          }
+        }
+      },
       "CreateTodoRequest": {
         "type": "object",
         "required": [
@@ -9391,6 +9809,11 @@
             "type": "string",
             "nullable": true
           },
+          "recurrence": {
+            "type": "string",
+            "description": "`none` (default), `daily`, `weekly`, `monthly` or `yearly`. A recurring\ntodo needs a due date.",
+            "nullable": true
+          },
           "remind_before_minutes": {
             "type": "integer",
             "format": "int64",
@@ -9404,6 +9827,14 @@
           },
           "room_id": {
             "type": "string",
+            "nullable": true
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Tags to attach (max 10; each normalized, invalid is 400).",
             "nullable": true
           },
           "text": {
@@ -11773,6 +12204,22 @@
           }
         }
       },
+      "ReorderStepsRequest": {
+        "type": "object",
+        "required": [
+          "step_ids"
+        ],
+        "properties": {
+          "step_ids": {
+            "type": "array",
+            "items": {
+              "type": "integer",
+              "format": "int64"
+            },
+            "description": "Every step id of the todo exactly once, in the wanted order (max 50)."
+          }
+        }
+      },
       "ReplaceSecretRequest": {
         "type": "object",
         "description": "Request payload for replacing an existing credential's secret value.",
@@ -12355,6 +12802,25 @@
           }
         }
       },
+      "TodoDetail": {
+        "type": "object",
+        "description": "One todo with its ordered checklist steps.",
+        "required": [
+          "item",
+          "steps"
+        ],
+        "properties": {
+          "item": {
+            "$ref": "#/components/schemas/TodoItem"
+          },
+          "steps": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TodoStepDto"
+            }
+          }
+        }
+      },
       "TodoItem": {
         "type": "object",
         "required": [
@@ -12364,7 +12830,11 @@
           "sender_name",
           "text",
           "priority",
-          "completed"
+          "completed",
+          "tags",
+          "recurrence",
+          "steps_done",
+          "steps_total"
         ],
         "properties": {
           "completed": {
@@ -12385,11 +12855,21 @@
             "type": "integer",
             "format": "int64"
           },
+          "next_todo_id": {
+            "type": "integer",
+            "format": "int64",
+            "description": "The successor spawned when this recurring todo was completed.",
+            "nullable": true
+          },
           "owner_id": {
             "type": "string"
           },
           "priority": {
             "type": "string"
+          },
+          "recurrence": {
+            "type": "string",
+            "description": "`none`, `daily`, `weekly`, `monthly` or `yearly`."
           },
           "remind_before_minutes": {
             "type": "integer",
@@ -12402,6 +12882,23 @@
           },
           "sender_name": {
             "type": "string"
+          },
+          "steps_done": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Checklist steps already done."
+          },
+          "steps_total": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Checklist steps in total."
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Normalized tags, sorted."
           },
           "text": {
             "type": "string"
@@ -12467,6 +12964,69 @@
           "room_id": {
             "type": "string",
             "nullable": true
+          },
+          "tag": {
+            "type": "string",
+            "description": "Only todos carrying this tag (parsed like any tag; invalid is 400).",
+            "nullable": true
+          }
+        }
+      },
+      "TodoStepDto": {
+        "type": "object",
+        "description": "A checklist step on the wire.",
+        "required": [
+          "id",
+          "position",
+          "text",
+          "done"
+        ],
+        "properties": {
+          "done": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "position": {
+            "type": "integer",
+            "format": "int32",
+            "description": "1-based position within the todo."
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "TodoTagCount": {
+        "type": "object",
+        "required": [
+          "tag",
+          "count"
+        ],
+        "properties": {
+          "count": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Active (not completed) todos carrying the tag."
+          },
+          "tag": {
+            "type": "string"
+          }
+        }
+      },
+      "TodoTagsResponse": {
+        "type": "object",
+        "required": [
+          "tags"
+        ],
+        "properties": {
+          "tags": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TodoTagCount"
+            }
           }
         }
       },
@@ -12989,6 +13549,19 @@
           }
         }
       },
+      "UpdateStepRequest": {
+        "type": "object",
+        "properties": {
+          "done": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "text": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
       "UpdateSymbolRequest": {
         "type": "object",
         "required": [
@@ -13032,6 +13605,10 @@
             "type": "string",
             "nullable": true
           },
+          "recurrence": {
+            "type": "string",
+            "nullable": true
+          },
           "remind_before_minutes": {
             "type": "integer",
             "format": "int64",
@@ -13039,6 +13616,14 @@
           },
           "remind_room_id": {
             "type": "string",
+            "nullable": true
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Replaces the whole tag set when present.",
             "nullable": true
           },
           "text": {
