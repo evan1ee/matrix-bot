@@ -185,6 +185,16 @@ impl TodoService {
         Ok(count)
     }
 
+    /// The owner's tags over active todos with their todo counts. A stored
+    /// value that no longer parses predates validation and is skipped.
+    pub async fn list_tags(&self, owner_id: &AccountId) -> Result<Vec<(Tag, i64)>, AppError> {
+        let rows = repositories::todos::list_tags(&self.pool, owner_id).await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|(raw, count)| Tag::parse(&raw).ok().map(|tag| (tag, count)))
+            .collect())
+    }
+
     pub async fn list_room(
         &self,
         room_id: &str,
@@ -253,8 +263,13 @@ mod tests {
     use crate::application::AppServices;
     use crate::domain::accounts::AccountId;
     use crate::domain::reminders::RecurrencePattern;
+    use crate::domain::tags::Tag;
     use crate::domain::todos::{NewTodo, TodoPatch, TodoPriority};
     use crate::infrastructure::postgres::repositories;
+
+    fn tag(raw: &str) -> Tag {
+        Tag::parse(raw).unwrap()
+    }
 
     fn new_todo(text: &str) -> NewTodo {
         NewTodo {
@@ -414,5 +429,92 @@ mod tests {
         };
         let (item, _) = services.todos.update(&owner, item.id, off).await.unwrap();
         assert_eq!(item.recurrence_anchor, None);
+    }
+
+    /// Given a tagged todo, When a patch replaces the tag set, Then the new
+    /// set is stored and TodoUpdated is published.
+    #[tokio::test]
+    async fn update_replaces_tag_set_and_publishes_updated() {
+        let (pool, services, owner) = setup("todo_tags_replace").await;
+        let input = NewTodo {
+            tags: vec![tag("home")],
+            ..new_todo("sweep")
+        };
+        let (item, _) = services.todos.create(&owner, input).await.unwrap();
+
+        let patch = TodoPatch {
+            tags: Some(vec![tag("work"), tag("urgent")]),
+            ..Default::default()
+        };
+        let (updated, _) = services.todos.update(&owner, item.id, patch).await.unwrap();
+
+        assert_eq!(updated.tags, vec![tag("urgent"), tag("work")]);
+        assert_eq!(
+            repositories::outbox::event_types_for(&pool, &owner)
+                .await
+                .unwrap(),
+            vec!["TodoCreated", "TodoUpdated"]
+        );
+    }
+
+    /// Given two owners with tagged todos, When each lists tags, Then each
+    /// sees only their own, counted over active todos.
+    #[tokio::test]
+    async fn list_tags_is_owner_scoped() {
+        let (pool, services, alice) = setup("todo_tags_alice").await;
+        let bob = AccountId::from_seed("todo_tags_bob");
+        crate::db::pool::seed_account(&pool, &bob).await;
+        for (owner, text, tags) in [
+            (&alice, "a1", vec![tag("home"), tag("work")]),
+            (&alice, "a2", vec![tag("home")]),
+            (&bob, "b1", vec![tag("secret")]),
+        ] {
+            let input = NewTodo {
+                tags,
+                ..new_todo(text)
+            };
+            services.todos.create(owner, input).await.unwrap();
+        }
+
+        assert_eq!(
+            services.todos.list_tags(&alice).await.unwrap(),
+            vec![(tag("home"), 2), (tag("work"), 1)]
+        );
+        assert_eq!(
+            services.todos.list_tags(&bob).await.unwrap(),
+            vec![(tag("secret"), 1)]
+        );
+    }
+
+    /// Given tagged todos, When listing and counting with a tag filter, Then
+    /// only matching todos are returned.
+    #[tokio::test]
+    async fn list_and_count_filter_by_tag() {
+        let (_pool, services, owner) = setup("todo_tags_filter").await;
+        for (text, tags) in [("x", vec![tag("home")]), ("y", vec![tag("work")])] {
+            let input = NewTodo {
+                tags,
+                ..new_todo(text)
+            };
+            services.todos.create(&owner, input).await.unwrap();
+        }
+        let home = tag("home");
+
+        let items = services
+            .todos
+            .list(&owner, None, None, Some(&home), 50, 0)
+            .await
+            .unwrap();
+        let count = services
+            .todos
+            .count(&owner, None, None, Some(&home))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            items.iter().map(|i| i.text.as_str()).collect::<Vec<_>>(),
+            ["x"]
+        );
+        assert_eq!(count, 1);
     }
 }

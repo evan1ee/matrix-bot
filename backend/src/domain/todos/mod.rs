@@ -218,6 +218,27 @@ pub fn validate_merged(todo: &TodoItem) -> Result<(), TodoError> {
     Ok(())
 }
 
+/// The tag set after adding `add` and removing `remove` (removal wins), sorted
+/// and deduplicated; at most `MAX_TAGS`.
+pub fn apply_tag_edits(
+    current: &[Tag],
+    add: &[Tag],
+    remove: &[Tag],
+) -> Result<Vec<Tag>, TodoError> {
+    let mut tags: Vec<Tag> = current
+        .iter()
+        .chain(add)
+        .filter(|t| !remove.contains(t))
+        .cloned()
+        .collect();
+    tags.sort();
+    tags.dedup();
+    if tags.len() > MAX_TAGS {
+        return Err(TodoError::TooManyTags);
+    }
+    Ok(tags)
+}
+
 /// The instant a reminder should fire for `todo`, if it wants one at all.
 /// A completed task never wants one.
 pub fn wanted_trigger(todo: &TodoItem) -> Option<DateTime<Utc>> {
@@ -406,5 +427,34 @@ mod tests {
         assert_eq!(todo.recurrence, RecurrencePattern::None);
         assert_eq!(todo.recurrence_anchor, None);
         assert_eq!(todo.next_todo_id, None);
+    }
+
+    fn tag(raw: &str) -> Tag {
+        Tag::parse(raw).unwrap()
+    }
+
+    #[test]
+    fn apply_tag_edits_adds_and_removes() {
+        let result = apply_tag_edits(&[tag("home")], &[tag("work")], &[tag("home")]);
+        assert_eq!(result, Ok(vec![tag("work")]));
+    }
+
+    #[test]
+    fn apply_tag_edits_sorts_and_dedups() {
+        let result = apply_tag_edits(&[tag("b")], &[tag("a"), tag("b")], &[]);
+        assert_eq!(result, Ok(vec![tag("a"), tag("b")]));
+    }
+
+    #[test]
+    fn apply_tag_edits_caps_at_ten() {
+        let current = tags(10);
+        assert_eq!(apply_tag_edits(&current, &[], &[]).map(|t| t.len()), Ok(10));
+        assert_eq!(
+            apply_tag_edits(&current, &[tag("extra")], &[]),
+            Err(TodoError::TooManyTags)
+        );
+        // Removal is applied before the cap is checked.
+        let swapped = apply_tag_edits(&current, &[tag("extra")], &[tag("t0")]);
+        assert_eq!(swapped.map(|t| t.len()), Ok(10));
     }
 }
