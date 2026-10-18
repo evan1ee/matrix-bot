@@ -1,6 +1,7 @@
 //! PostgreSQL repository for finance entities: categories, transactions, analytics, and shares.
 
 pub mod analytics;
+pub mod budgets;
 pub mod categories;
 pub mod transactions;
 

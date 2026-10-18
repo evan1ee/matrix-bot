@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT c.name AS \"name?\", b.limit_minor FROM finance_budgets b\n               LEFT JOIN finance_categories c ON c.id = b.category_id\n               WHERE b.owner_id = $1 ORDER BY c.name NULLS LAST",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "finance_categories",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "limit_minor",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "finance_budgets",
+            "name": "limit_minor"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "f21c4c344a8df32eb116584570419b37a44314f2a635a52459f8b8ee72721cf6"
+}
