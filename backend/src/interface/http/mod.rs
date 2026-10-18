@@ -25,6 +25,7 @@ pub mod account;
 pub mod admin;
 pub mod agent;
 pub mod ai;
+pub mod ai_stream;
 pub mod app_error;
 pub mod auth;
 pub mod bookmarks;

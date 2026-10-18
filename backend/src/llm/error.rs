@@ -1,6 +1,6 @@
 //! Why an LLM/AI turn did not produce an answer.
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum AiError {
     /// The request itself is wrong: an empty or over-long prompt, or a
     /// conversation id that does not exist for this owner.
