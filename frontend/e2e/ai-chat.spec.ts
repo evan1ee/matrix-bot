@@ -44,9 +44,11 @@ test('renders markdown table, headers, and filters empty assistant replies', asy
 
   await suggestionBtn.click();
 
-  // Tool result should appear
-  await expect(app.getByText('Tool Result:')).toBeVisible();
-  await expect(app.getByText('get_my_portfolio_summary')).toBeVisible();
+  // The stored tool row appears as a collapsed step that expands to the raw result
+  const step = app.getByTestId('tool-step');
+  await expect(step).toContainText('Look up portfolio');
+  await step.locator('summary').click();
+  await expect(step.getByText(/cost_basis_minor/)).toBeVisible();
 
   // Markdown table should be rendered as HTML table elements, not raw markdown pipes
   const table = app.locator('table');
@@ -150,7 +152,7 @@ test('shows optimistic user message and clears input while AI is replying', asyn
   await expect(app.getByText(promptText, { exact: true })).toBeVisible();
 
   // Thinking indicator should be visible
-  await expect(app.getByText('Thinking and executing tools...')).toBeVisible();
+  await expect(app.getByText('Thinking…')).toBeVisible();
 
   const brainDir = process.env.BRAIN_DIR || '/Users/nosinx/.gemini/antigravity/brain/d97c3792-b421-4577-aa66-bc70c73a4412';
   if (brainDir) {
@@ -182,8 +184,7 @@ test('triggers tool-augmented query to inspect tasks', async ({ app, api }) => {
   await app.getByPlaceholder(/Ask AI assistant/i).fill('What tasks do I have?');
   await app.locator('form button[type="submit"]').click();
 
-  await expect(app.getByText(/Tool Result:/i)).toBeVisible();
-  await expect(app.getByText('get_my_tasks')).toBeVisible();
+  await expect(app.getByTestId('tool-step')).toContainText('Look up tasks');
   await expect(app.getByText('You have 2 task(s) currently recorded in your list.')).toBeVisible();
 });
 

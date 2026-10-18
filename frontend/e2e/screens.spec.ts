@@ -123,7 +123,7 @@ test('@screens ai assistant chat thread and settings modal', async ({ app, api }
 
   await app.getByPlaceholder(/Ask AI assistant/i).fill('What tasks do I have due?');
   await app.locator('form button[type="submit"]').click();
-  await expect(app.getByText(/Tool Result:/i)).toBeVisible();
+  await expect(app.getByTestId('tool-step')).toContainText('Look up tasks');
   await shot(app, '13-ai-chat-thread');
 
   await app.locator('button[title="Configure AI model & API keys"]').click();

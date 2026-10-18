@@ -14,8 +14,7 @@ test.describe('Smart AI Enhancements: Multi-Action Capture & Executive Retrospec
     await expect(app.getByText(multiPrompt)).toBeVisible();
 
     // Verify multi-action tool execution
-    await expect(app.getByText(/Tool Result:/i)).toBeVisible();
-    await expect(app.getByText('multi_action_executor')).toBeVisible();
+    await expect(app.getByTestId('tool-step')).toContainText('Multi action executor');
 
     // Verify structured response covering all three distinct life domains
     await expect(app.getByText(/Recorded \$16\.50 for Dining at Shake Shack/i)).toBeVisible();

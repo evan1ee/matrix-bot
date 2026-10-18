@@ -358,6 +358,7 @@ export interface FakeAiMessage {
   content: string;
   tool_call_id: string | null;
   tool_name: string | null;
+  tool_outcome?: 'ok' | 'failed' | 'needs_confirmation' | null;
   created_at: string;
 }
 
