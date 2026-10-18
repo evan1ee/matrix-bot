@@ -107,10 +107,24 @@ pub async fn handle_add(
     }
 }
 
+/// `"<br/>↻ Next: #id, due date"` for the successor a completion spawned.
+fn next_occurrence_line(next: &crate::domain::todos::TodoItem, tz: &Tz) -> String {
+    let due = next
+        .due_at
+        .map(|d| format_datetime(&d, tz))
+        .unwrap_or_default();
+    format!(
+        "<br/>↻ Next: <b>#{}</b>, due <b>{}</b>",
+        next.id,
+        html_escape(&due)
+    )
+}
+
 pub async fn handle_done(
     todos: &TodoService,
     owner_id: &AccountId,
     args_body: &str,
+    tz: &Tz,
 ) -> Option<String> {
     let id_str = args_body[4..].trim();
     if id_str.is_empty() {
@@ -134,15 +148,20 @@ pub async fn handle_done(
         .unwrap_or(false);
 
     match todos.set_completed(owner_id, id, true).await {
-        Ok(item) => Some(format!(
-            "🎉 Marked Task <b>#{}</b> (<i>\"{}\"</i>) as completed! ✅{}",
-            item.id,
-            html_escape(&item.text),
+        Ok(outcome) => Some(format!(
+            "🎉 Marked Task <b>#{}</b> (<i>\"{}\"</i>) as completed! ✅{}{}",
+            outcome.todo.id,
+            html_escape(&outcome.todo.text),
             if had_reminder {
                 " <i>(due reminder cancelled)</i>"
             } else {
                 ""
-            }
+            },
+            outcome
+                .next
+                .as_ref()
+                .map(|next| next_occurrence_line(next, tz))
+                .unwrap_or_default()
         )),
         Err(AppError::NotFound(_)) => Some(format!("⚠️ Task <b>#{}</b> not found.", id)),
         Err(err) => {
@@ -480,6 +499,43 @@ mod tests {
                 .await
                 .unwrap(),
             vec!["TodoCreated"]
+        );
+    }
+
+    /// Given a recurring todo, When `!todo done` completes it, Then the reply
+    /// names the spawned next occurrence and its due date.
+    #[tokio::test]
+    async fn done_on_a_recurring_todo_announces_the_next_occurrence() {
+        let (todos, _pool) = setup_service().await;
+        let owner = AccountId::from_seed("@alice:1");
+        let due = crate::utils::time::now_at_storage_precision() + chrono::Duration::days(1);
+        let input = NewTodo {
+            room_id: "!room:1".to_string(),
+            sender_name: "alice".to_string(),
+            text: "water <plants>".to_string(),
+            priority: TodoPriority::Medium,
+            due_at: Some(due),
+            remind_before_minutes: None,
+            remind_room_id: None,
+            tags: vec![],
+            recurrence: crate::domain::reminders::RecurrencePattern::Daily,
+            recurrence_anchor: None,
+        };
+        let (item, _) = todos.create(&owner, input).await.unwrap();
+
+        let reply = handle_done(&todos, &owner, &format!("done {}", item.id), &Tz::UTC)
+            .await
+            .unwrap();
+
+        let next = todos.find_owned(&owner, item.id).await.unwrap().unwrap();
+        let next_id = next.next_todo_id.unwrap();
+        let next_due = format_datetime(&(due + chrono::Duration::days(1)), &Tz::UTC);
+        assert!(reply.contains("water &lt;plants&gt;"), "{reply}");
+        assert!(
+            reply.contains(&format!(
+                "<br/>↻ Next: <b>#{next_id}</b>, due <b>{next_due}</b>"
+            )),
+            "{reply}"
         );
     }
 }

@@ -8,7 +8,10 @@ use crate::domain::accounts::AccountId;
 use crate::domain::reminders::RecurrencePattern;
 use crate::domain::tags::Tag;
 
+pub mod recurrence;
 pub mod steps;
+
+pub use recurrence::{anchor_after_patch, successor};
 
 /// Maximum number of tags on one todo.
 pub const MAX_TAGS: usize = 10;
@@ -159,8 +162,6 @@ pub struct TodoPatch {
     /// Whole-set replace.
     pub tags: Option<Vec<Tag>>,
     pub recurrence: Option<RecurrencePattern>,
-    /// Set by the service, never by an interface: the series anchor to write.
-    pub recurrence_anchor: Option<Option<DateTime<Utc>>>,
 }
 
 impl TodoPatch {
@@ -180,6 +181,28 @@ impl TodoPatch {
             }
         }
         Ok(())
+    }
+
+    /// `current` with this patch applied, the series anchor re-derived
+    /// ([`anchor_after_patch`]). `remind_room_id` is not a todo field and is
+    /// left to the caller.
+    pub fn apply_to(&self, current: &TodoItem) -> TodoItem {
+        let merged = TodoItem {
+            text: self.text.clone().unwrap_or_else(|| current.text.clone()),
+            priority: self.priority.unwrap_or(current.priority),
+            completed: self.completed.unwrap_or(current.completed),
+            due_at: self.due_at.unwrap_or(current.due_at),
+            remind_before_minutes: self
+                .remind_before_minutes
+                .unwrap_or(current.remind_before_minutes),
+            tags: self.tags.clone().unwrap_or_else(|| current.tags.clone()),
+            recurrence: self.recurrence.unwrap_or(current.recurrence),
+            ..current.clone()
+        };
+        TodoItem {
+            recurrence_anchor: anchor_after_patch(current, &merged),
+            ..merged
+        }
     }
 }
 
@@ -342,6 +365,33 @@ mod tests {
         assert_eq!(validate_merged(&todo), Ok(()));
         todo.tags = tags(11);
         assert_eq!(validate_merged(&todo), Err(TodoError::TooManyTags));
+    }
+
+    #[test]
+    fn patch_apply_merges_fields_and_rederives_the_anchor() {
+        let due = Utc::now();
+        let current: TodoItem = serde_json::from_value(serde_json::json!({
+            "id": 1, "room_id": "web", "owner_id": AccountId::from_seed("m"),
+            "sender_name": "a", "text": "t", "priority": "low", "due_at": due,
+            "remind_before_minutes": null, "completed": false, "created_at": null
+        }))
+        .unwrap();
+        let patch = TodoPatch {
+            text: Some("new".to_string()),
+            completed: Some(true),
+            tags: Some(tags(2)),
+            recurrence: Some(RecurrencePattern::Weekly),
+            ..Default::default()
+        };
+        let merged = patch.apply_to(&current);
+        assert_eq!(merged.text, "new");
+        assert!(merged.completed);
+        assert_eq!(merged.tags, tags(2));
+        assert_eq!(merged.priority, TodoPriority::Low);
+        assert_eq!(merged.due_at, Some(due));
+        assert_eq!(merged.recurrence, RecurrencePattern::Weekly);
+        assert_eq!(merged.recurrence_anchor, Some(due));
+        assert_eq!(TodoPatch::default().apply_to(&current), current);
     }
 
     #[test]

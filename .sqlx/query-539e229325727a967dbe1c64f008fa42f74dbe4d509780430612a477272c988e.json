@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO todo_steps (todo_id, owner_id, position, text, done)\n        SELECT $2, owner_id, position, text, FALSE\n        FROM todo_steps\n        WHERE todo_id = $1 AND owner_id = $3\n        ORDER BY position\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "539e229325727a967dbe1c64f008fa42f74dbe4d509780430612a477272c988e"
+}

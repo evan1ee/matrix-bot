@@ -151,7 +151,8 @@ pub async fn execute_tool(
                     .todos
                     .set_completed(&acct, target_id, true)
                     .await
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|e| e.to_string())?
+                    .todo;
 
                 serde_json::to_string(&updated).map_err(|e| e.to_string())
             }

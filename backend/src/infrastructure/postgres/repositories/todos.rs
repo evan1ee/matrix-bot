@@ -283,6 +283,7 @@ pub async fn update<'e>(
     owner_id: &AccountId,
     id: i64,
     patch: &TodoPatch,
+    anchor: Option<Option<DateTime<Utc>>>,
 ) -> Result<Option<TodoItem>, sqlx::Error> {
     let priority_str = patch.priority.map(|p| p.as_str());
     let has_due_at = patch.due_at.is_some();
@@ -297,8 +298,8 @@ pub async fn update<'e>(
         .map(|t| t.as_str().to_string())
         .collect();
     let recurrence_val = patch.recurrence.map(|r| r.as_str());
-    let has_anchor = patch.recurrence_anchor.is_some();
-    let anchor_val = patch.recurrence_anchor.flatten();
+    let has_anchor = anchor.is_some();
+    let anchor_val = anchor.flatten();
 
     let row = sqlx::query_as!(
         TodoRow,
@@ -546,7 +547,7 @@ mod tests {
             ..Default::default()
         };
 
-        let updated = update(&pool, &owner, created.id, &patch)
+        let updated = update(&pool, &owner, created.id, &patch, None)
             .await
             .unwrap()
             .unwrap();

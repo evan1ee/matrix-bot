@@ -1,5 +1,9 @@
 //! Todo application service.
 
+mod completion;
+
+pub use completion::CompletionOutcome;
+
 use sqlx::PgPool;
 
 use crate::application::reminders::ReminderService;
@@ -9,7 +13,7 @@ use crate::domain::events::SystemEvent;
 use crate::domain::reminders::RecurrencePattern;
 use crate::domain::reminders::{ReminderPlan, ReminderSource, SyncOutcome};
 use crate::domain::tags::Tag;
-use crate::domain::todos::{wanted_trigger, NewTodo, TodoError, TodoItem, TodoPatch};
+use crate::domain::todos::{wanted_trigger, NewTodo, TodoError, TodoItem};
 use crate::infrastructure::postgres::repositories::{self, outbox};
 
 impl From<TodoError> for AppError {
@@ -63,94 +67,6 @@ impl TodoService {
     ) -> Result<Option<TodoItem>, AppError> {
         let item = repositories::todos::find_owned(&self.pool, owner_id, id).await?;
         Ok(item)
-    }
-
-    pub async fn update(
-        &self,
-        owner_id: &AccountId,
-        id: i64,
-        patch: TodoPatch,
-    ) -> Result<(TodoItem, SyncOutcome), AppError> {
-        patch.validate()?;
-
-        let remind_room = patch.remind_room_id.clone();
-        let mut tx = self.pool.begin().await?;
-        let patch = Self::with_anchor(&mut tx, owner_id, id, patch).await?;
-        let updated = repositories::todos::update(&mut *tx, owner_id, id, &patch)
-            .await?
-            .ok_or_else(|| {
-                AppError::NotFound("Todo item not found or access denied".to_string())
-            })?;
-        outbox::publish(&mut tx, &SystemEvent::TodoUpdated(updated.clone())).await?;
-        tx.commit().await?;
-
-        let sync_outcome = self
-            .sync_reminder_for_todo(&updated, remind_room.as_deref())
-            .await?;
-
-        Ok((updated, sync_outcome))
-    }
-
-    /// Derives the series anchor a patch implies: recurrence turned on from none
-    /// or a changed due date of a recurring todo re-anchors to the new due date;
-    /// recurrence set to none clears it.
-    async fn with_anchor(
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-        owner_id: &AccountId,
-        id: i64,
-        patch: TodoPatch,
-    ) -> Result<TodoPatch, AppError> {
-        if patch.recurrence.is_none() && patch.due_at.is_none() {
-            return Ok(patch);
-        }
-        let Some(current) = repositories::todos::find_owned(&mut **tx, owner_id, id).await? else {
-            return Ok(patch);
-        };
-        let recurrence = patch.recurrence.unwrap_or(current.recurrence);
-        let due_at = patch.due_at.unwrap_or(current.due_at);
-        let anchor = if recurrence == RecurrencePattern::None {
-            Some(None)
-        } else if current.recurrence == RecurrencePattern::None || due_at != current.due_at {
-            Some(due_at)
-        } else {
-            None
-        };
-        Ok(TodoPatch {
-            recurrence_anchor: anchor,
-            ..patch
-        })
-    }
-
-    pub async fn set_completed(
-        &self,
-        owner_id: &AccountId,
-        id: i64,
-        completed: bool,
-    ) -> Result<TodoItem, AppError> {
-        let existing = self.find_owned(owner_id, id).await?.ok_or_else(|| {
-            AppError::NotFound("Todo item not found or access denied".to_string())
-        })?;
-
-        if existing.completed == completed {
-            return Ok(existing);
-        }
-
-        let mut tx = self.pool.begin().await?;
-        let updated = repositories::todos::set_completed(&mut *tx, id, completed)
-            .await?
-            .ok_or_else(|| AppError::NotFound("Todo item not found".to_string()))?;
-        outbox::publish(&mut tx, &SystemEvent::TodoUpdated(updated.clone())).await?;
-        tx.commit().await?;
-
-        if completed {
-            self.reminders
-                .cancel_due_reminder(ReminderSource::Todo, id)
-                .await?;
-        } else {
-            self.sync_reminder_for_todo(&updated, None).await?;
-        }
-
-        Ok(updated)
     }
 
     pub async fn delete(&self, owner_id: &AccountId, id: i64) -> Result<(), AppError> {

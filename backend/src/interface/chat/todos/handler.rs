@@ -59,7 +59,7 @@ pub async fn handle_todo_command(
             .await
             .map(Reply::from)
     } else if args_lower.starts_with("done") {
-        handle_done(todos, owner_id, args_body)
+        handle_done(todos, owner_id, args_body, &tz)
             .await
             .map(Reply::from)
     } else if args_lower.starts_with("edit") {

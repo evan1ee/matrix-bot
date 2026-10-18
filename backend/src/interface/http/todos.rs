@@ -276,7 +276,6 @@ pub async fn update_todo(
         remind_room_id,
         tags: None,
         recurrence: None,
-        recurrence_anchor: None,
     };
 
     let (item, _) = state
