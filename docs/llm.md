@@ -4,7 +4,7 @@ How the AI assistant, its tools and the MCP server are built. The governing rule
 
 ```text
 Chat DM / mention ───┐
-Web chat (/ai/chat) ─┼─► llm::run_turn ─► LLM (OpenAI-compatible) ─► tool call
+Web (/ai/chat[/stream])┼─► llm::run_turn ─► LLM (OpenAI-compatible) ─► tool call
                      │        ▲                                        │
                      │        └──────────── tool result ◄──────────────┤
 MCP client ──────────┴───────────────────────────────────────────────► llm/tools (same registry)
@@ -28,6 +28,8 @@ MCP client ──────────┴────────────
 | Progress reporting seam (`ProgressSink`, `NoProgress`) | `llm/progress.rs`; Matrix's in-place message editor is `interface/channels/matrix/stage.rs` |
 | Outage alert to the owner's dev conversation | `interface/chat/llm_alert.rs` (through the channel registry) |
 | Web front door (`/ai/*`, `/account/ai-config`) | `interface/http/ai.rs` |
+| Streaming web turn (`/ai/chat/stream`: events, sink, per-account cap) | `interface/http/ai_stream/` |
+| Stopping a turn (safe-point checks, stopped marker) | `llm/cancel.rs`; `until_cancelled` and `StreamError` in `llm/stream.rs` |
 | MCP server | `interface/mcp/`, `interface/http/mcp.rs`, `interface/chat/mcp.rs`, `domain/mcp`, `infrastructure/postgres/repositories/mcp.rs` |
 
 ## Transport and configuration
@@ -47,7 +49,7 @@ MCP client ──────────┴────────────
 1. **Trigger.** In a DM, any message no command module claims goes to the AI (`LlmModule` registers after the TTS module for that reason). In a shared room it triggers on `!ai <prompt>` or a mention. A quoted reply carries its text into the prompt through `QuotedMessage::to_context_prompt()`, inside a `<quoted_message>` block (see *Untrusted content and confirmation*).
 2. **Context.** The active conversation for `(owner, room)` is loaded; one idle longer than `SESSION_TTL_SECONDS` (1 h) is replaced by a fresh one, and `!ai reset` clears it. Immediate retries are deduped by checking the conversation's tail message before inserting.
 3. **Tool loop.** The model may request tools; each round executes them, appends `tool` messages and calls the model again. Concurrent calls in a round run through `futures_util::future::join_all`. The loop stops after `MAX_TOOL_ROUNDS` (5); the Matrix front door rejects prompts over `MAX_PROMPT_LENGTH` (16384 bytes).
-4. **Reply.** The turn returns text; the front door wraps it in a `Reply` and the adapter renders it (Matrix: `text_html(&plain, &html)`). When a `ProgressSink` is present the turn reports stages, tool calls and streamed deltas to it and falls back to a plain completion on any transport error; each adapter decides how to show them (Matrix edits one message in place, a channel that cannot edit ignores most of it). Every sink method is best-effort and infallible, so a sink can never fail a turn. The turn does not record which message a tool created: the Matrix callers do that after the turn from the sink's `message_ref()`. The web endpoint is `POST /ai/chat`. Failures reach the user through `interface::chat::error_reply` and never show a provider or database error.
+4. **Reply.** The turn returns text; the front door wraps it in a `Reply` and the adapter renders it (Matrix: `text_html(&plain, &html)`). When a `ProgressSink` is present the turn reports stages, tool calls and streamed deltas to it and falls back to a plain completion on any transport error; each adapter decides how to show them (Matrix edits one message in place, a channel that cannot edit ignores most of it). Every sink method is best-effort and infallible, so a sink can never fail a turn. The turn does not record which message a tool created: the Matrix callers do that after the turn from the sink's `message_ref()`. The web endpoints are `POST /ai/chat` (waits for the whole turn) and `POST /ai/chat/stream` (same turn, streamed; see [`api.md`](api.md#streaming-ai-chat)). Failures reach the user through `interface::chat::error_reply` and never show a provider or database error.
 
 ### Untrusted content and confirmation
 
@@ -82,6 +84,20 @@ Text the model reads can carry instructions: a quoted message, a web page, a web
 ### The agent knows no channel
 
 `llm/` imports no channel SDK and nothing from `interface::channels` (`the_agent_knows_no_channel` in `tests/architecture.rs`), so Discord, Telegram or Email arrive without touching the loop: the agent talks to the world through `ProgressSink` going out and `AppServices` going in. The one place the AI addresses a channel on its own is the **outage alert**: when the provider fails, `interface/chat/llm_alert.rs` sends a notice to the owner's `dev_room_id` (parsed from its storage form) or, failing that, to the Matrix room named "dev", through `ChannelRegistry::send` and `find_conversation_by_name`, so it works for whichever channel the room lives on and degrades to a warning log when no registry or adapter is available.
+
+### Progress, streaming and stopping
+
+`ProgressSink` (`llm/progress.rs`) carries more than the first three channels use. The methods added for the web front door all have no-op defaults, so the Matrix, Discord and Telegram sinks are unchanged:
+
+- `report_conversation(id)` once the turn has resolved (created or reused) its conversation. A caller learns the conversation only this way.
+- `report_tool_started(call_id, name)` for **every** call of a round before the round runs, and `report_tool_finished(call_id, name, outcome)` for every call after it. `ToolStepOutcome` (`Ok | Failed | NeedsConfirmation`, in `domain/llm`) comes from the `refused` and `succeeded` flags of `tool_round`; a guard refusal is `NeedsConfirmation`. The older `report_tool_call` still fires for the first call of a round, for the sinks that predate these methods.
+- `retract_segment()` discards the text streamed since the last `flush`. It fires in three places: the guard rejected a reply that claims an unrecorded success (the model gets one correction round), the final reply was replaced by `UNRECORDED_NOTICE`, and a stream that had already shown text failed so `stream.rs` fell back to a plain completion (the full answer then arrives as a fresh delta plus `flush`). It always follows the `flush` of the text it retracts. A sink that cannot take text back (Matrix replaces its message anyway) ignores it.
+
+Each tool result row is stored with `ai_messages.tool_outcome` (`ok | failed | needs_confirmation`, nullable; migration `0012`), exposed as `AiMessage.tool_outcome`. Clients read the outcome of a past step from this column instead of parsing the result text, which would copy backend string formats into the frontend. Rows from before the migration have `NULL`.
+
+**Stopping.** `LlmTurnContext.cancel` is an optional `CancellationToken` (`with_cancellation`); channels that cannot stop leave it `None`. `run_turn` honours it only at safe points: while waiting on an LLM request or stream (the request is dropped), at the top of each tool round, and before the final summary completion. It never cancels inside `tool_round::run_calls`: a tool that started finishes and its result row is stored, so a stop cannot leave a half-done write. A stop therefore takes effect after the running round ends. The one exception to "never mid-tool" is the 180 s timeout path of the streaming endpoint, which cancels the token, allows a 5 s grace for the turn to reach a safe point, and then drops the turn future.
+
+A stopped turn stores an assistant message through `LlmService::append_assistant_message` (so `AiConversationUpdated` fires like for any reply): the text of the segment that was arriving, if any, then `_(stopped)_`. It returns `AiError::Cancelled`, which `/ai/chat`'s error mapping reports as `499` and which is logged at `info`, never as an error. A turn that panics, or is dropped past the grace, stores no stopped marker.
 
 ### Agent runs use native tool calling
 

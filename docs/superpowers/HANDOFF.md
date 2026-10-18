@@ -2,7 +2,7 @@
 
 **Read this before touching code.** [`AGENTS.md`](../../AGENTS.md) holds the rules; this file holds the state: what is done, what an operator must still do, what is open, and the rulings that settled each disagreement. Design rationale lives in [`docs/architecture.md`](../architecture.md) and its sibling documents, not here.
 
-> **Status (2026-10):** every architectural phase and all Track 2 post-cutover enhancements are implemented: the PostgreSQL foundation, omnichannel adapters, object storage, the autonomous agent runtime with deep procedural pipelines and Kokoro TTS audio compilation, the web console with WebAuthn conditional UI autofill, the notes and knowledge base (pgvector hybrid search), and dynamic configuration with the encrypted credential vault. What remains is operator cutover (Track 1).
+> **Status (2026-10):** every architectural phase and all Track 2 post-cutover enhancements are implemented: the PostgreSQL foundation, omnichannel adapters, object storage, the autonomous agent runtime with deep procedural pipelines and Kokoro TTS audio compilation, the web console with WebAuthn conditional UI autofill, the notes and knowledge base (pgvector hybrid search), and dynamic configuration with the encrypted credential vault. The web AI assistant streams replies, tool steps and Stop (phase 1, awaiting merge). What remains is operator cutover (Track 1) and web assistant phase 2.
 
 ---
 
@@ -106,6 +106,11 @@ Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in sequence:
    - `resolve_runtime_stt` and `resolve_runtime_tts` log warnings on vault decrypt errors instead of silently dropping them.
    - `POST /agent/approvals/:id/approve` requires `VerifiedUser` (enforcing step-up within 5 minutes) and is registered in `SENSITIVE`.
 
+7. **Web AI assistant streaming, Stop and tool steps (Done, phase 1; spec [`2026-10-18-web-ai-streaming.md`](specs/2026-10-18-web-ai-streaming.md)):**
+   - `POST /ai/chat/stream`, `ProgressSink` tool and retraction methods, safe-point cancellation with a stored `_(stopped)_` marker, `ai_messages.tool_outcome` (migration `0012`), and a frontend live-turn store with Stop and tool-step rendering. Reference: [`api.md`](../api.md#streaming-ai-chat), [`llm.md`](../llm.md#progress-streaming-and-stopping). Branch `feat/web-ai-streaming`, awaiting the owner's merge.
+   - **Next (phase 2):** conversation list and switching, a non-destructive "New chat" (today it deletes the conversation), and the model chip's hard-coded `gpt-4o-mini` fallback label. Phase 3: regenerate, edit-and-resend, copy.
+   - **Known follow-ups:** `llm::MAX_PROMPT_LENGTH` is 16384 while the HTTP handlers cap the prompt at 4000 bytes (pre-existing); the frontend counts characters, so CJK prompts are refused near 1,333 characters. `get_ai_config` merges config in the handler and AI handlers call `llm_repo` directly instead of `LlmService` (AGENTS section 2, rule 2). A turn that panics, or is dropped past the 5 s timeout grace, stores no stopped marker.
+
 ---
 
 ## 5. Settled rulings
@@ -155,6 +160,16 @@ Format: `Ruling: <decision> — <why> — <cost if wrong>`. New rulings go here 
 - *Ruling: Deterministic domain calculation engines (`portfolio::rebalance`, `finance::audit`, `recurring_bills::due`, `habits::consistency`) perform exact integer minor-unit math and rule evaluation prior to or during LLM synthesis — prevents floating-point inaccuracies, LLM hallucination in financial/streak math, and guarantees consistent analysis across all 5 built-in agent tasks — cost if wrong: none.*
 - *Ruling: Multi-modal Kokoro TTS audio digest compilation extracts `<audio_script>...</audio_script>`, synthesizes Ogg Opus audio via `TtsClient`, attaches it as `AttachmentKind::Audio` to the delivered message, and strips the tag from plain/HTML text with fail-open graceful degradation — gives users audio podcast briefings in supported channels without breaking text delivery or aborting agent runs if TTS is unconfigured or unavailable — cost if wrong: none.*
 - *Ruling: Non-execution trade safety invariant enforced across portfolio tools — `evaluate_portfolio_rebalance` calculates mathematical drift and recommended buy/sell rebalancing amounts, explicitly instructing the agent to explain adjustments without executing trades directly — prevents autonomous agent execution of destructive financial transactions without human-in-the-loop approval — cost if wrong: none.*
+
+### Rulings (2026-10-18 — Web AI Streaming)
+
+- *Ruling: keep `POST /ai/chat` unchanged beside the new `POST /ai/chat/stream`, both calling `run_turn` — `/ai/chat` is a public bearer-usable contract in `openapi.json` — cost if wrong: one extra thin handler.*
+- *Ruling: Stop is closing the response body (client `AbortController`), with no stop endpoint or server-side turn registry; the turn runs on a tracked task and a drop guard cancels its token — ties the turn's lifetime to its one consumer without a registry — cost if wrong: a proxy that keeps the upstream open after the browser aborts delays the stop until the next failed send.*
+- *Ruling: cancellation only at safe points (LLM call, top of each tool round, before the final summary), never inside a running tool round — a stop must not leave a half-done write — cost if wrong: Stop can take as long as the running tool round, and the UI says "Stopping…" until the stored history arrives; the only mid-tool drop is the 180 s timeout after its 5 s grace.*
+- *Ruling: at most 2 concurrent streaming turns per account (`429` before opening), no requests-per-window limit — nothing limited `/ai/chat` before and an in-process counter suffices for one instance — cost if wrong: one more limiter later; the count is per process.*
+- *Ruling: nullable `ai_messages.tool_outcome` column written with each tool row, instead of parsing result text — keeps backend result formats out of the frontend — cost if wrong: rows from before migration `0012` carry no outcome and render as neutral steps.*
+- *Ruling: the live turn outlives navigation (owner's decision): the stream reader, its `AbortController` and the parts live in a module-level store under `frontend/src/modules/ai/`; only Stop or closing the tab stops a turn, one live turn per tab — cost if wrong: a turn the user forgot about keeps running until it ends or hits 180 s.*
+- *Ruling: the HTTP prompt cap stays 4000 bytes on both chat endpoints while `llm::MAX_PROMPT_LENGTH` is 16384 — both pre-existing and out of scope here — cost if wrong: CJK prompts are refused near 1,333 characters because the frontend counts characters; fix as a separate change.*
 
 ---
 

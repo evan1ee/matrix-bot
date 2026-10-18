@@ -35,6 +35,31 @@ The stream is fed by the outbox: one `LISTEN outbox` per process pushes each com
 
 Reconnects. If the server's listener connection drops, the hub replays recent events of connected accounts when it returns (a duplicate only re-invalidates a client cache). A subscriber that cannot keep up is dropped and the browser's own `EventSource` reconnect applies, unchanged: the client refetches its state and the stream carries no history of its own.
 
+## Streaming AI chat
+
+`POST /api/v1/ai/chat/stream` runs the same `llm::run_turn` as `POST /ai/chat` and takes the same body (`prompt`, `conversation_id?`, `room_id?`) but answers `200 text/event-stream`, so the web assistant shows text and tool steps as they happen. `/ai/chat` is unchanged: it is a bearer-usable contract in `openapi.json`, and both handlers share `validate_prompt` and the 180 s limit. The browser reads the stream with `fetch` (an `EventSource` cannot POST). The stream belongs to the request that opened it; it is not the `/events` hub, which carries only committed outbox events. Another tab learns the result through `AiConversationUpdated`.
+
+**Before the stream opens** the answers are ordinary JSON `ApiError`s: `400` (empty or over-long prompt; the cap is 4000 **bytes** server-side), `401`, `404` (unknown or foreign `conversation_id`, checked up front; `/ai/chat` still answers `400` for that), and `429` when the account already runs 2 streaming turns. There is no per-window rate limit.
+
+Each SSE message is an unnamed `data:` line with one JSON object tagged `type` (`AiStreamEvent` in OpenAPI, so `generate-api` produces the frontend type):
+
+| `type` | Fields | Meaning |
+|---|---|---|
+| `started` | `conversation_id` | Always first; the conversation may be new or the room's recent one. |
+| `delta` | `text` | Text appended to the current segment. |
+| `segment_end` | | The current segment is finished; the next `delta` starts a new one. |
+| `segment_retracted` | | Discard the segment that just ended (guard rejection, or a failed stream replaced by a fallback). |
+| `tool_started` | `call_id`, `name` | One per call of a round, before the round runs. |
+| `tool_finished` | `call_id`, `name`, `outcome` | `ok`, `failed` or `needs_confirmation`. |
+| `done` | `conversation_id`, `message`, `model_used`, `tool_calls_executed` | Last on success; the `/ai/chat` response fields. |
+| `error` | `status`, `message` | Last on failure after opening: the status and client-safe text `/ai/chat` would answer (400/503/504/500). The 180 s limit gives `504` with the `/ai/chat` text. |
+
+Stage text ("thinking...") is deliberately not forwarded; the client derives that state from the event order. Keep-alive comments go out every 15 s; the response sets `Cache-Control: no-cache` and `X-Accel-Buffering: no`.
+
+**A stream can end with no `done` or `error`**: a server shutdown, a panic in the turn, a network drop, or Stop. Clients must treat that as "unknown outcome", wait for `AiConversationUpdated` and refetch the conversation. A panic stores no stopped marker.
+
+**Stop is closing the response body** (`AbortController.abort()`), not an endpoint. The turn runs on its own tracked task (shutdown drains it), not inside the body future; dropping the body cancels a token, and `run_turn` stops at its next safe point (see [`llm.md`](llm.md#progress-streaming-and-stopping)): a tool round already running finishes, so the stop lands after it, and the stored history then ends with `_(stopped)_`. The event channel is bounded (64) and the sink awaits it, so a slow reader slows the model read rather than losing events; a send to a closed channel also cancels the turn. A stopped client may not hear how the turn ended, which is why it refetches.
+
 ## Authentication
 
 ### Passkeys and sessions
