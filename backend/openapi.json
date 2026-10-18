@@ -1821,6 +1821,71 @@
         ]
       }
     },
+    "/api/v1/ai/chat/stream": {
+      "post": {
+        "tags": [
+          "ai"
+        ],
+        "operationId": "chat_stream",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AiChatRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "One JSON `AiStreamEvent` per SSE `data:` line, `started` first, then `done` or `error` last",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiStreamEvent"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Empty or too-long prompt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or foreign conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The account already runs its maximum of streaming turns",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/ai/conversations": {
       "get": {
         "tags": [
@@ -8404,6 +8469,185 @@
             ],
             "nullable": true
           }
+        }
+      },
+      "AiStreamEvent": {
+        "oneOf": [
+          {
+            "type": "object",
+            "description": "The conversation this turn writes to. Always first.",
+            "required": [
+              "conversation_id",
+              "type"
+            ],
+            "properties": {
+              "conversation_id": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "started"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Appended text for the current text segment.",
+            "required": [
+              "text",
+              "type"
+            ],
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "delta"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "segment_end"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "type": "string",
+                "enum": [
+                  "segment_retracted"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "call_id",
+              "name",
+              "type"
+            ],
+            "properties": {
+              "call_id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "tool_started"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": [
+              "call_id",
+              "name",
+              "outcome",
+              "type"
+            ],
+            "properties": {
+              "call_id": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "outcome": {
+                "$ref": "#/components/schemas/AiToolOutcome"
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "tool_finished"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "Final reply; always last on success.",
+            "required": [
+              "conversation_id",
+              "message",
+              "model_used",
+              "tool_calls_executed",
+              "type"
+            ],
+            "properties": {
+              "conversation_id": {
+                "type": "string"
+              },
+              "message": {
+                "type": "string"
+              },
+              "model_used": {
+                "type": "string"
+              },
+              "tool_calls_executed": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "done"
+                ]
+              }
+            }
+          },
+          {
+            "type": "object",
+            "description": "The turn failed after the stream opened; last event.",
+            "required": [
+              "status",
+              "message",
+              "type"
+            ],
+            "properties": {
+              "message": {
+                "type": "string"
+              },
+              "status": {
+                "type": "integer",
+                "format": "int32",
+                "minimum": 0
+              },
+              "type": {
+                "type": "string",
+                "enum": [
+                  "error"
+                ]
+              }
+            }
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type"
         }
       },
       "AiToolOutcome": {

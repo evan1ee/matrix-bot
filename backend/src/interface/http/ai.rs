@@ -40,6 +40,27 @@ impl From<AiError> for ApiError {
     }
 }
 
+/// How long one AI turn may run, on either chat endpoint.
+pub(crate) const TURN_TIME_LIMIT: std::time::Duration = std::time::Duration::from_secs(180);
+/// What the client is told when a turn hits [`TURN_TIME_LIMIT`].
+pub(crate) const TURN_TIMED_OUT: &str =
+    "AI response timed out after 180 seconds. Please try again.";
+
+/// The trimmed prompt, or the 400 both chat endpoints answer for a prompt
+/// that is empty or too long.
+pub(crate) fn validate_prompt(prompt: &str) -> Result<&str, ApiError> {
+    let prompt = prompt.trim();
+    if prompt.is_empty() {
+        return Err(ApiError::bad_request("Prompt cannot be empty"));
+    }
+    if prompt.len() > 4000 {
+        return Err(ApiError::bad_request(
+            "Prompt exceeds maximum length of 4000 characters",
+        ));
+    }
+    Ok(prompt)
+}
+
 #[utoipa::path(
     post,
     tag = "ai",
@@ -53,15 +74,7 @@ pub async fn chat(
     user: AuthUser,
     Json(payload): Json<AiChatRequest>,
 ) -> Result<Json<AiChatResponse>, ApiError> {
-    let prompt = payload.prompt.trim();
-    if prompt.is_empty() {
-        return Err(ApiError::bad_request("Prompt cannot be empty"));
-    }
-    if prompt.len() > 4000 {
-        return Err(ApiError::bad_request(
-            "Prompt exceeds maximum length of 4000 characters",
-        ));
-    }
+    let prompt = validate_prompt(&payload.prompt)?;
 
     let owner_id = &user.account_id;
     let room_id = state
@@ -80,13 +93,13 @@ pub async fn chat(
     );
 
     let turn_result = tokio::time::timeout(
-        std::time::Duration::from_secs(180),
+        TURN_TIME_LIMIT,
         run_turn(&turn_ctx, prompt, payload.conversation_id.as_deref()),
     )
     .await
     .map_err(|_| {
         error!("AI chat execution timed out after 180s for {}", owner_id);
-        ApiError::gateway_timeout("AI response timed out after 180 seconds. Please try again.")
+        ApiError::gateway_timeout(TURN_TIMED_OUT)
     })?
     .map_err(|e| {
         error!("AI chat execution error for {}: {}", owner_id, e);

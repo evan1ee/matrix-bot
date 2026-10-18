@@ -37,7 +37,7 @@ aws-sdk-s3 = { version = "1", default-features = false, features = ["rustls", "r
 aws-config = { version = "1", default-features = false, features = ["rustls", "rt-tokio"] }
 tokio = { version = "1", features = ["full"] }
 # CancellationToken: the one shutdown tree `app.rs` owns.
-tokio-util = "0.7"
+tokio-util = { version = "0.7", features = ["rt"] }
 futures-util = "0.3"
 anyhow = "1.0"
 thiserror = "1.0"

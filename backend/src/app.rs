@@ -316,6 +316,9 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
     );
 
     let listener = http::bind(&config).await?;
+    // Kept here as well as in the API state: the turn tasks outlive a request,
+    // so `run` drains them itself once the server has stopped.
+    let ai_turns = http::ai_stream::AiTurns::new(http::ai_stream::MAX_TURNS_PER_ACCOUNT);
     let api = http::start_api_server(
         &config,
         db.clone(),
@@ -325,6 +328,7 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
         telegram.as_ref().and_then(|t| t.ingress()),
         listener,
         shutdown.child_token(),
+        ai_turns.clone(),
     )?;
     let mut api = api;
     // Spawned only once nothing fallible remains before supervision: an earlier
@@ -385,6 +389,19 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
             SHUTDOWN_GRACE,
             laggards.join(", ")
         );
+    }
+
+    // Streaming AI turns run on their own tasks, not the server's. Each one
+    // got a child of the server's token, so they are already stopping; wait
+    // for them (they store a stopped marker) before the pool closes.
+    let tracker = ai_turns.tracker();
+    tracker.close();
+    match tokio::time::timeout_at(deadline, tracker.wait()).await {
+        Ok(()) => info!("AI turns stopped."),
+        Err(_) => warn!(
+            "{} AI turn(s) still running at the shutdown deadline.",
+            tracker.len()
+        ),
     }
 
     // Whatever is left of the same deadline: `close` waits for every checked

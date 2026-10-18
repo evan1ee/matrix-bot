@@ -31,7 +31,7 @@ use crate::interface::http::reminders::{RecurrencePattern, Reminder, ReminderSta
 use crate::interface::http::todos::{TodoItem, TodoPriority};
 use crate::interface::http::webhooks::{TelegramMessageResult, TelegramQuery, TelegramResponse};
 use crate::interface::http::{
-    account, admin, agent, ai, auth, bookmarks, briefing, finance, finance_analytics,
+    account, admin, agent, ai, ai_stream, auth, bookmarks, briefing, finance, finance_analytics,
     finance_categories, finance_net_worth, footprints, habits, health, identities, knowledge,
     knowledge_transfer, life, life_activity, link, mcp, ocr, portfolio, portfolio_alerts,
     portfolio_cash, portfolio_history, portfolio_prices, recurring_bills, reminders, rooms,
@@ -137,6 +137,7 @@ use crate::interface::http::{
         webhooks::delete_webhook,
         webhooks::get_webhook_logs,
         ai::chat,
+        ai_stream::chat_stream,
         ai::verify_ai_config,
         ai::list_conversations,
         ai::get_conversation_messages,
@@ -337,6 +338,7 @@ use crate::interface::http::{
             crate::llm::models::AiToolOutcome,
             crate::llm::models::AiChatRequest,
             crate::llm::models::AiChatResponse,
+            crate::interface::http::ai_stream::AiStreamEvent,
             crate::llm::retrospective::WeeklyRetrospective,
             crate::llm::retrospective::CurrencySpendSummary,
             crate::llm::retrospective::UpcomingBillsSummary,

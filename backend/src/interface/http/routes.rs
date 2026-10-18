@@ -5,7 +5,7 @@ use axum::{
 };
 
 use super::{
-    account, admin, agent, ai, auth, bookmarks, briefing, finance, finance_analytics,
+    account, admin, agent, ai, ai_stream, auth, bookmarks, briefing, finance, finance_analytics,
     finance_categories, finance_net_worth, footprints, habits, identities, knowledge,
     knowledge_transfer, life, life_activity, link, mcp, ocr, openapi, portfolio, portfolio_alerts,
     portfolio_cash, portfolio_history, portfolio_prices, recurring_bills, reminders, rooms,
@@ -361,6 +361,7 @@ fn routes_ai_and_webhooks() -> Router<auth::ApiState> {
             get(webhooks::get_webhook_logs),
         )
         .route("/ai/chat", post(ai::chat))
+        .route("/ai/chat/stream", post(ai_stream::chat_stream))
         .route("/ai/verify", post(ai::verify_ai_config))
         .route("/ai/conversations", get(ai::list_conversations))
         .route("/ai/conversations/:id", delete(ai::delete_conversation))

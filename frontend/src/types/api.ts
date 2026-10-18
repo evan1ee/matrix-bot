@@ -555,6 +555,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ai/chat/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["chat_stream"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ai/conversations": {
         parameters: {
             query?: never;
@@ -2261,6 +2277,46 @@ export interface components {
             tool_call_id?: string | null;
             tool_name?: string | null;
             tool_outcome?: components["schemas"]["AiToolOutcome"] | null;
+        };
+        AiStreamEvent: {
+            conversation_id: string;
+            /** @enum {string} */
+            type: "started";
+        } | {
+            text: string;
+            /** @enum {string} */
+            type: "delta";
+        } | {
+            /** @enum {string} */
+            type: "segment_end";
+        } | {
+            /** @enum {string} */
+            type: "segment_retracted";
+        } | {
+            call_id: string;
+            name: string;
+            /** @enum {string} */
+            type: "tool_started";
+        } | {
+            call_id: string;
+            name: string;
+            outcome: components["schemas"]["AiToolOutcome"];
+            /** @enum {string} */
+            type: "tool_finished";
+        } | {
+            conversation_id: string;
+            message: string;
+            model_used: string;
+            /** Format: int32 */
+            tool_calls_executed: number;
+            /** @enum {string} */
+            type: "done";
+        } | {
+            message: string;
+            /** Format: int32 */
+            status: number;
+            /** @enum {string} */
+            type: "error";
         };
         /**
          * @description How one tool call ended.
@@ -5341,6 +5397,57 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AiChatResponse"];
+                };
+            };
+        };
+    };
+    chat_stream: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AiChatRequest"];
+            };
+        };
+        responses: {
+            /** @description One JSON `AiStreamEvent` per SSE `data:` line, `started` first, then `done` or `error` last */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": components["schemas"]["AiStreamEvent"];
+                };
+            };
+            /** @description Empty or too-long prompt */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unknown or foreign conversation */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description The account already runs its maximum of streaming turns */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
                 };
             };
         };

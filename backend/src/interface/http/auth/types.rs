@@ -187,6 +187,9 @@ pub struct ApiState {
     /// The API server's shutdown token. Long-lived responses (SSE) end on it,
     /// or graceful shutdown would wait on every open browser tab.
     pub shutdown: tokio_util::sync::CancellationToken,
+    /// Streaming AI turns: the per-account cap and the tracker `app::run`
+    /// drains after the server stops.
+    pub ai_turns: crate::interface::http::ai_stream::AiTurns,
     pub ocr_config: crate::interface::chat::ocr::OcrConfig,
     pub ocr: crate::infrastructure::inference::ocr::OcrClient,
     pub voice_config: crate::interface::chat::voice::VoiceConfig,
@@ -272,6 +275,7 @@ impl ApiState {
             webauthn_origin: "http://localhost:8080".to_string(),
             sync_health: crate::interface::channels::matrix::sync_health::SyncHealth::default(),
             shutdown: tokio_util::sync::CancellationToken::new(),
+            ai_turns: crate::interface::http::ai_stream::AiTurns::new(2),
             ocr_config: crate::interface::chat::ocr::OcrConfig::default(),
             ocr: crate::infrastructure::inference::ocr::OcrClient::new(None),
             voice_config: crate::interface::chat::voice::VoiceConfig::default(),
@@ -301,6 +305,7 @@ impl ApiState {
         hub: crate::events::Hub,
         handles: crate::interface::channels::matrix::handles::BotHandles,
         shutdown: tokio_util::sync::CancellationToken,
+        ai_turns: crate::interface::http::ai_stream::AiTurns,
     ) -> anyhow::Result<Self> {
         // Bound outbound calls so a stalled homeserver cannot pin a request task
         // indefinitely -- but generously. Reaching a homeserver through a VPN or
@@ -339,6 +344,7 @@ impl ApiState {
             webauthn_origin: config.webauthn_origin.trim_end_matches('/').to_string(),
             sync_health: handles.sync_health,
             shutdown,
+            ai_turns,
             ocr_config: crate::interface::chat::ocr::OcrConfig {
                 enabled: config.ocr_enabled,
                 base_url: config.ocr_base_url.clone(),
@@ -573,6 +579,7 @@ mod tests {
             crate::events::Hub::new(crate::application::AppServices::new(&pool).outbox, 8),
             crate::interface::channels::matrix::handles::BotHandles::default(),
             tokio_util::sync::CancellationToken::new(),
+            crate::interface::http::ai_stream::AiTurns::new(2),
         )
         .expect("a valid Relying Party must build");
 
@@ -621,6 +628,7 @@ mod tests {
             crate::events::Hub::new(crate::application::AppServices::new(&pool).outbox, 8,),
             crate::interface::channels::matrix::handles::BotHandles::default(),
             tokio_util::sync::CancellationToken::new(),
+            crate::interface::http::ai_stream::AiTurns::new(2),
         )
         .is_err());
     }

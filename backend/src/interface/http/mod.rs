@@ -131,9 +131,17 @@ pub fn start_api_server(
     telegram: Option<crate::interface::channels::telegram::ingress::TelegramIngress>,
     listener: TcpListener,
     shutdown: CancellationToken,
+    ai_turns: ai_stream::AiTurns,
 ) -> anyhow::Result<JoinHandle<()>> {
-    let mut state =
-        auth::ApiState::from_config(config, db, services, hub, handles, shutdown.clone())?;
+    let mut state = auth::ApiState::from_config(
+        config,
+        db,
+        services,
+        hub,
+        handles,
+        shutdown.clone(),
+        ai_turns,
+    )?;
     state.telegram = telegram;
 
     // Same-origin by default. `Any`/`Any`/`Any` let any site on the internet
@@ -549,6 +557,7 @@ mod server_shutdown_tests {
             None,
             listener,
             shutdown.clone(),
+            ai_stream::AiTurns::new(2),
         )
         .unwrap();
 
