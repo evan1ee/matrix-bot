@@ -285,7 +285,7 @@ export const TodoRow: React.FC<TodoRowProps> = ({ item, rooms, onToggle, onDelet
             </div>
           </div>
         </div>
-  
+
         <div className="flex items-center gap-3 shrink-0">
           <button
             type="button"

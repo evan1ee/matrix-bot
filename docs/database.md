@@ -160,6 +160,12 @@ Migration `0010_knowledge_base` introduces the personal knowledge base and vecto
 
 **Rebuild invariant.** Embeddings are derived data. Deleting every row of `knowledge_embeddings` and clearing `notes.indexed_content_hash` loses nothing: `knowledge.backfill_embeddings` re-queues every item and the chunks come back identical (a test pins this). The same path re-tags everything after an `EMBEDDING_MODEL` change.
 
+## Todo tags, recurrence and steps (`0012_todo_tags_recurrence_steps.sql`)
+
+- **`todos.tags TEXT[] NOT NULL DEFAULT '{}'`** with `idx_todos_tags USING GIN (tags)`. Tags follow the same rule as `notes.tags`, one shared `domain::tags::Tag` (Unicode letters/digits, `_`, `-`, at most 50 characters, lowercased).
+- **`todos.recurrence`** (`none|daily|weekly|monthly|yearly`, CHECK) with `todos_recurrence_needs_due` (a recurring todo needs `due_at`), **`recurrence_anchor TIMESTAMPTZ`** (the schedule anchor the successor is computed from) and **`next_todo_id BIGINT REFERENCES todos(id) ON DELETE SET NULL`** (spawn-once guard, written under `FOR UPDATE`).
+- **`todo_steps`** (`id`, `todo_id` cascade, `owner_id` cascade, `position`, `text`, `done`, `UNIQUE (todo_id, position)`, `idx_todo_steps_owner`). It is owner-keyed and listed in `OWNED_TABLES`, so an account merge moves its rows.
+
 ## Configuration and encrypted secrets (`0011_configuration_and_secrets.sql`)
 
 Migration `0011_configuration_and_secrets` introduces system-wide dynamic configuration, an encrypted credentials vault, and an administrative audit log. The audit `target_type` CHECK allows `setting`, `secret`, `account` and `system`, and the `accounts.role` CHECK is named inline so that every schema (one per test) gets its own. The list below is the resulting schema:
