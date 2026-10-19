@@ -13,6 +13,7 @@ use super::portfolio;
 use super::reminder;
 use super::settings;
 use super::todo;
+use super::todo_steps;
 use super::webhooks;
 
 pub async fn execute(
@@ -71,6 +72,9 @@ pub async fn execute(
     if let Some(res) =
         todo::execute_tool(services, pool, owner_id, room_id, name, &parsed_args).await
     {
+        return res;
+    }
+    if let Some(res) = todo_steps::execute_tool(services, owner_id, name, &parsed_args).await {
         return res;
     }
 

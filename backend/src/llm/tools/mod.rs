@@ -12,6 +12,7 @@ pub mod portfolio;
 pub mod reminder;
 pub mod settings;
 pub mod todo;
+pub mod todo_steps;
 pub mod webhooks;
 
 use crate::infrastructure::inference::llm::ToolDefinition;
@@ -55,13 +56,15 @@ mod tests {
     #[tokio::test]
     async fn test_tool_definitions() {
         let defs = ToolRegistry::get_tool_definitions();
-        assert_eq!(defs.len(), 56);
+        assert_eq!(defs.len(), 58);
         let names: Vec<_> = defs.iter().map(|d| d.function.name.as_str()).collect();
         assert!(names.contains(&"get_my_tasks"));
         assert!(names.contains(&"add_todo"));
         assert!(names.contains(&"complete_todo"));
         assert!(names.contains(&"update_todo"));
         assert!(names.contains(&"delete_todo"));
+        assert!(names.contains(&"add_todo_step"));
+        assert!(names.contains(&"set_todo_step_done"));
         assert!(names.contains(&"record_finance_entry"));
         assert!(names.contains(&"list_finance_transactions"));
         assert!(names.contains(&"get_spending_by_category"));
@@ -865,5 +868,223 @@ mod tests {
         .unwrap();
         assert!(habit_res.contains("total_active"));
         assert!(habit_res.contains("Reading"));
+    }
+
+    async fn run(
+        db: &Database,
+        owner: &AccountId,
+        name: &str,
+        args: serde_json::Value,
+    ) -> Result<String, String> {
+        ToolRegistry::execute_tool(
+            &crate::application::AppServices::new(&db.pool),
+            &db.pool,
+            owner,
+            "!room:a",
+            name,
+            &args.to_string(),
+        )
+        .await
+    }
+
+    fn json_of(res: Result<String, String>) -> serde_json::Value {
+        serde_json::from_str(&res.unwrap()).unwrap()
+    }
+
+    #[tokio::test]
+    async fn tool_registry_lists_step_tools() {
+        let defs = ToolRegistry::get_tool_definitions();
+        let find = |n: &str| defs.iter().find(|d| d.function.name == n).unwrap();
+        let add = serde_json::to_value(&find("add_todo").function.parameters).unwrap();
+        assert_eq!(add["properties"]["tags"]["maxItems"], 10);
+        assert_eq!(
+            add["properties"]["recurrence"]["enum"],
+            serde_json::json!(["none", "daily", "weekly", "monthly", "yearly"])
+        );
+        let step = serde_json::to_value(&find("set_todo_step_done").function.parameters).unwrap();
+        assert_eq!(step["properties"]["position"]["type"], "integer");
+        assert!(find("get_my_tasks").function.parameters["properties"]["tag"].is_object());
+    }
+
+    #[tokio::test]
+    async fn add_todo_with_tags_and_recurrence() {
+        let (db, owner) = setup_db().await;
+        let todo = json_of(
+            run(
+                &db,
+                &owner,
+                "add_todo",
+                serde_json::json!({"text": "Water plants", "due_in_minutes": 60,
+                    "tags": ["#Home", "garden"], "recurrence": "weekly"}),
+            )
+            .await,
+        );
+        assert_eq!(todo["tags"], serde_json::json!(["garden", "home"]));
+        assert_eq!(todo["recurrence"], "weekly");
+
+        let listed = json_of(
+            run(
+                &db,
+                &owner,
+                "get_my_tasks",
+                serde_json::json!({"tag": "home"}),
+            )
+            .await,
+        );
+        assert_eq!(listed.as_array().unwrap().len(), 1);
+        assert_eq!(listed[0]["steps_total"], 0);
+        let none = json_of(
+            run(
+                &db,
+                &owner,
+                "get_my_tasks",
+                serde_json::json!({"tag": "work"}),
+            )
+            .await,
+        );
+        assert!(none.as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn add_todo_with_invalid_recurrence_errors() {
+        let (db, owner) = setup_db().await;
+        let bad_rec = run(
+            &db,
+            &owner,
+            "add_todo",
+            serde_json::json!({"text": "x", "recurrence": "fortnightly"}),
+        )
+        .await;
+        assert!(bad_rec.is_err());
+        let bad_tag = run(
+            &db,
+            &owner,
+            "add_todo",
+            serde_json::json!({"text": "x", "tags": ["no spaces allowed"]}),
+        )
+        .await;
+        assert!(bad_tag.is_err());
+        let listed = json_of(run(&db, &owner, "get_my_tasks", serde_json::json!({})).await);
+        assert!(listed.as_array().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn complete_recurring_todo_reports_next() {
+        let (db, owner) = setup_db().await;
+        let todo = json_of(
+            run(
+                &db,
+                &owner,
+                "add_todo",
+                serde_json::json!({"text": "Standup", "due_in_minutes": 30, "recurrence": "daily"}),
+            )
+            .await,
+        );
+        let id = todo["id"].as_i64().unwrap();
+        let done = json_of(run(&db, &owner, "complete_todo", serde_json::json!({"id": id})).await);
+        assert_eq!(done["todo"]["completed"], true);
+        assert_eq!(done["next"]["text"], "Standup");
+        assert_ne!(done["next"]["id"].as_i64().unwrap(), id);
+
+        let plain = json_of(
+            run(
+                &db,
+                &owner,
+                "add_todo",
+                serde_json::json!({"text": "One-off"}),
+            )
+            .await,
+        );
+        let done = json_of(
+            run(
+                &db,
+                &owner,
+                "complete_todo",
+                serde_json::json!({"id": plain["id"]}),
+            )
+            .await,
+        );
+        assert!(done["next"].is_null());
+    }
+
+    #[tokio::test]
+    async fn set_step_done_by_position() {
+        let (db, owner) = setup_db().await;
+        let todo = json_of(run(&db, &owner, "add_todo", serde_json::json!({"text": "Trip"})).await);
+        let id = todo["id"].as_i64().unwrap();
+        for t in ["Passport", "Tickets"] {
+            run(
+                &db,
+                &owner,
+                "add_todo_step",
+                serde_json::json!({"todo_id": id, "text": t}),
+            )
+            .await
+            .unwrap();
+        }
+        run(
+            &db,
+            &owner,
+            "set_todo_step_done",
+            serde_json::json!({"todo_id": id, "position": 2, "done": true}),
+        )
+        .await
+        .unwrap();
+
+        let listed = json_of(run(&db, &owner, "get_my_tasks", serde_json::json!({})).await);
+        assert_eq!(listed[0]["steps_done"], 1);
+        assert_eq!(listed[0]["steps_total"], 2);
+
+        let err = run(
+            &db,
+            &owner,
+            "set_todo_step_done",
+            serde_json::json!({"todo_id": id, "position": 3, "done": true}),
+        )
+        .await
+        .unwrap_err();
+        assert!(err.contains("No step 3"), "{err}");
+        let err = run(
+            &db,
+            &owner,
+            "set_todo_step_done",
+            serde_json::json!({"todo_id": id, "position": 0, "done": true}),
+        )
+        .await;
+        assert!(err.is_err());
+    }
+
+    #[tokio::test]
+    async fn owner_in_args_is_ignored() {
+        let (db, a) = setup_db().await;
+        let b = AccountId::from_seed("victim2");
+        crate::db::pool::seed_account(&db.pool, &b).await;
+        let todo = json_of(
+            run(
+                &db,
+                &a,
+                "add_todo",
+                serde_json::json!({"text": "mine", "owner_id": b.to_string()}),
+            )
+            .await,
+        );
+        let id = todo["id"].as_i64().unwrap();
+        // b cannot touch a's todo through the step tools, whatever the args say.
+        let err = run(
+            &db,
+            &b,
+            "add_todo_step",
+            serde_json::json!({"todo_id": id, "text": "x", "owner_id": a.to_string()}),
+        )
+        .await;
+        assert!(err.is_err());
+        run(
+            &db,
+            &a,
+            "add_todo_step",
+            serde_json::json!({"todo_id": id, "text": "ok", "owner": b.to_string()}),
+        )
+        .await
+        .unwrap();
     }
 }
