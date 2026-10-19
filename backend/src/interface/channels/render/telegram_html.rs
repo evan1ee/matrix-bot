@@ -347,6 +347,7 @@ mod tests {
             &[item(1, "buy <milk>"), item(2, "call mum")],
             1,
             &chrono_tz::UTC,
+            &Default::default(),
         );
         let out = html_to_telegram(&html);
         assert!(out.contains("<b>Room Tasks (Page 1):</b>"), "{out}");

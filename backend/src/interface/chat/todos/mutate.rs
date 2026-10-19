@@ -4,6 +4,7 @@ use chrono::Utc;
 use chrono_tz::Tz;
 use tracing::error;
 
+use super::tags::{added_details, split_add_extras, AddExtras};
 use crate::application::todos::TodoService;
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
@@ -24,9 +25,12 @@ pub async fn handle_add(
     sender_name: &str,
     args_body: &str,
     quoted: Option<&QuotedMessage>,
+    tz: &Tz,
 ) -> Option<String> {
     let mut raw_text = args_body[3..].trim();
     let quoted_text_holder;
+    // A quoted message is the task text verbatim: its `#42` is not a tag.
+    let from_quote = raw_text.is_empty() && quoted.is_some();
     if raw_text.is_empty() {
         if let Some(q) = quoted {
             quoted_text_holder = q.body.trim().to_string();
@@ -55,9 +59,20 @@ pub async fn handle_add(
         raw_text = task_part.trim();
     }
 
-    if raw_text.is_empty() {
+    let extras = if from_quote {
+        AddExtras::plain(raw_text)
+    } else {
+        match split_add_extras(raw_text) {
+            Ok(extras) => extras,
+            Err(reply) => return Some(reply),
+        }
+    };
+    if extras.text.is_empty() {
         return Some("⚠️ Please specify task description after priority tag!".to_string());
     }
+    let due_at = extras
+        .due
+        .map(|d| Utc::now() + chrono::Duration::from_std(d).unwrap_or(chrono::Duration::days(1)));
 
     // Limit active tasks per room to 500
     match todos.count_room_active(room_id).await {
@@ -78,28 +93,33 @@ pub async fn handle_add(
         .create(
             owner_id,
             NewTodo {
-                text: raw_text.to_string(),
+                text: extras.text,
                 priority,
                 room_id: room_id.to_string(),
                 sender_name: sender_name.to_string(),
-                due_at: None,
+                due_at,
                 remind_before_minutes: None,
-                remind_room_id: None, tags: vec![], recurrence: crate::domain::reminders::RecurrencePattern::None, recurrence_anchor: None,
+                remind_room_id: None,
+                tags: extras.tags,
+                recurrence: extras.recurrence,
+                recurrence_anchor: None,
             },
         )
         .await
     {
         Ok((item, _)) => Some(format!(
-            "✅ Added Task <b>#{}</b> for {}: <i>\"{}\"</i> {}<br/><font color=\"#888888\" size=\"-1\">React: 👍️ Done · 👎️ Delete · 😝 +1 Day · 🎉 Celebrate</font>",
+            "✅ Added Task <b>#{}</b> for {}: <i>\"{}\"</i> {}{}<br/><font color=\"#888888\" size=\"-1\">React: 👍️ Done · 👎️ Delete · 😝 +1 Day · 🎉 Celebrate</font>",
             item.id,
             html_escape(&item.sender_name),
             html_escape(&item.text),
-            priority_badge(item.priority.as_str())
+            priority_badge(item.priority.as_str()),
+            added_details(&item, tz)
         )),
         Err(AppError::Validation(msg)) if msg.contains("exceeds") => Some(format!(
             "⚠️ Task description too long! Maximum limit is {} characters.",
             MAX_TEXT_LEN
         )),
+        Err(AppError::Validation(msg)) => Some(format!("⚠️ {}", html_escape(&msg))),
         Err(err) => {
             error!("Failed to add todo item: {:?}", err);
             Some("❌ Failed to save task to database.".to_string())
@@ -489,9 +509,17 @@ mod tests {
         let (todos, pool) = setup_service().await;
         let owner = AccountId::from_seed("@alice:1");
 
-        let reply = handle_add(&todos, "!room:1", &owner, "alice", "add Buy milk", None)
-            .await
-            .unwrap();
+        let reply = handle_add(
+            &todos,
+            "!room:1",
+            &owner,
+            "alice",
+            "add Buy milk",
+            None,
+            &Tz::UTC,
+        )
+        .await
+        .unwrap();
         assert!(reply.contains("Added Task"));
 
         assert_eq!(

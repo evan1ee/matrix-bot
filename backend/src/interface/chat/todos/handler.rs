@@ -9,7 +9,9 @@ use crate::utils::html_escape;
 use super::mutate::{
     handle_add, handle_clear, handle_delete, handle_done, handle_due, handle_edit, handle_priority,
 };
-use super::view::{handle_list_room, handle_list_user, list_reply, PAGE_SIZE};
+use super::steps::{handle_show, handle_step};
+use super::tags::{handle_repeat, handle_tag, handle_tags};
+use super::view::{handle_list_room, handle_list_user, page_reply, PAGE_SIZE};
 
 pub async fn handle_todo_command(
     todos: &TodoService,
@@ -38,13 +40,8 @@ pub async fn handle_todo_command(
             .list(owner_id, None, None, None, PAGE_SIZE, 0)
             .await
             .unwrap_or_default();
-        return Some(list_reply(
-            owner_id,
-            &format!("Your Tasks ({})", html_escape(sender_name)),
-            &items,
-            1,
-            &tz,
-        ));
+        let title = format!("Your Tasks ({})", html_escape(sender_name));
+        return Some(page_reply(todos, owner_id, &title, &items, 1, &tz).await);
     }
 
     let args_body = if clean_lower.starts_with("!todo ") {
@@ -54,10 +51,40 @@ pub async fn handle_todo_command(
     };
     let args_lower = args_body.to_lowercase();
 
-    if args_lower.starts_with("add") {
-        handle_add(todos, room_id, owner_id, sender_name, args_body, quoted)
+    // Matched on the whole first word, and `tags` ahead of `tag`, so neither
+    // is swallowed by a looser prefix test below.
+    let first_word = args_lower.split_whitespace().next().unwrap_or("");
+
+    if first_word == "tags" {
+        handle_tags(todos, owner_id).await.map(Reply::from)
+    } else if first_word == "tag" {
+        handle_tag(todos, owner_id, args_body)
             .await
             .map(Reply::from)
+    } else if first_word == "repeat" {
+        handle_repeat(todos, owner_id, args_body)
+            .await
+            .map(Reply::from)
+    } else if first_word == "show" {
+        handle_show(todos, owner_id, args_body, &tz)
+            .await
+            .map(Reply::from)
+    } else if first_word == "step" {
+        handle_step(todos, owner_id, args_body, &tz)
+            .await
+            .map(Reply::from)
+    } else if args_lower.starts_with("add") {
+        handle_add(
+            todos,
+            room_id,
+            owner_id,
+            sender_name,
+            args_body,
+            quoted,
+            &tz,
+        )
+        .await
+        .map(Reply::from)
     } else if args_lower.starts_with("done") {
         handle_done(todos, owner_id, args_body, &tz)
             .await
@@ -94,7 +121,8 @@ pub async fn handle_todo_command(
     } else {
         Some(Reply::html("⚠️ Unknown todo command. Available: <code>add</code>, <code>list</code>, \
               <code>all</code>, <code>room</code>, <code>done</code>, <code>edit</code>, <code>priority</code>, \
-              <code>due</code>, <code>clear</code>, <code>delete</code>"))
+              <code>due</code>, <code>clear</code>, <code>delete</code>, <code>tags</code>, \
+              <code>tag</code>, <code>repeat</code>, <code>show</code>, <code>step</code>"))
     }
 }
 
@@ -151,6 +179,53 @@ mod tests {
         let res_done = html(handle_todo_command(&todos, &settings, &ctx("!todo done 1")).await);
         assert!(res_done.contains("Marked Task <b>#1</b>"));
         assert!(res_done.contains("as completed"));
+    }
+
+    /// Given the new commands, When dispatched, Then `tags` is not taken for
+    /// `tag`, and tags, repeat, steps and the filtered list all round-trip.
+    #[tokio::test]
+    async fn tags_repeat_and_steps_dispatch_and_round_trip() {
+        let (todos, settings) = setup_services().await;
+        let run = |body: &'static str| {
+            let (t, s) = (todos.clone(), settings.clone());
+            async move { html(handle_todo_command(&t, &s, &ctx(body)).await) }
+        };
+
+        let added = run("!todo add Pay <rent> #Home every month due 3d").await;
+        assert!(added.contains("Added Task <b>#1</b>"), "{added}");
+        assert!(
+            added.contains("↻ monthly") && added.contains("#home"),
+            "{added}"
+        );
+        assert!(added.contains("Pay &lt;rent&gt;"), "{added}");
+
+        let needs_due = run("!todo add Pay rent every month").await;
+        assert!(needs_due.contains("needs a due date"), "{needs_due}");
+
+        assert!(run("!todo tag 1 +work -home").await.contains("#work"));
+        let tags = run("!todo tags").await;
+        assert!(tags.contains("#work") && !tags.contains("#home"), "{tags}");
+        assert!(run("!todo list #work").await.contains("Pay &lt;rent&gt;"));
+        assert!(!run("!todo list #home").await.contains("Pay"));
+        assert!(run("!todo repeat 1 weekly")
+            .await
+            .contains("repeats weekly"));
+        assert!(run("!todo tag 99 +x").await.contains("not found"));
+
+        assert!(run("!todo step 1 add buy <milk>")
+            .await
+            .contains("buy &lt;milk&gt;"));
+        run("!todo step 1 add call").await;
+        let done = run("!todo step 1 done 2").await;
+        assert!(
+            done.contains("Steps 1/2") && done.contains("☑ 2."),
+            "{done}"
+        );
+        assert!(run("!todo list").await.contains("· 1/2"));
+        assert!(run("!todo step 1 rm 9").await.contains("no step"));
+        assert!(run("!todo step 1 rm 1").await.contains("Steps 1/1"));
+        assert!(run("!todo show 1").await.contains("☑ 1."));
+        assert!(run("!todo show 42").await.contains("not found"));
     }
 
     #[tokio::test]

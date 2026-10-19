@@ -7,6 +7,8 @@ use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 
 pub mod handler;
 pub mod mutate;
+pub mod steps;
+pub mod tags;
 pub mod view;
 
 pub struct TodoModule;
@@ -33,13 +35,43 @@ impl BotModule for TodoModule {
         vec![
             CommandHelp {
                 name: "todo add".to_string(),
-                usage: "!todo add [[high|low]] <task>".to_string(),
-                description: "Add a new task (supports inline priority like [high])".to_string(),
+                usage: "!todo add [high] <task> [#tag] [every day|week|month|year] [due <3d>]"
+                    .to_string(),
+                description: "Add a task. Inline [high] sets priority, #tags label it, and \
+                              'every month' repeats it (needs 'due 3d')"
+                    .to_string(),
             },
             CommandHelp {
                 name: "todo list".to_string(),
-                usage: "!todo [list|room] [page]".to_string(),
-                description: "View personal or room tasks with pagination".to_string(),
+                usage: "!todo [list|room] [page] [#tag]".to_string(),
+                description: "View personal or room tasks with pagination, optionally by tag"
+                    .to_string(),
+            },
+            CommandHelp {
+                name: "todo tags".to_string(),
+                usage: "!todo tags".to_string(),
+                description: "List your tags with their active task counts".to_string(),
+            },
+            CommandHelp {
+                name: "todo tag".to_string(),
+                usage: "!todo tag <id> +work -home".to_string(),
+                description: "Add or remove tags on a task".to_string(),
+            },
+            CommandHelp {
+                name: "todo repeat".to_string(),
+                usage: "!todo repeat <id> <daily|weekly|monthly|yearly|none>".to_string(),
+                description: "Make a task repeat when completed, or stop it repeating".to_string(),
+            },
+            CommandHelp {
+                name: "todo show".to_string(),
+                usage: "!todo show <id>".to_string(),
+                description: "Show a task with its checklist steps".to_string(),
+            },
+            CommandHelp {
+                name: "todo step".to_string(),
+                usage: "!todo step <id> add <text> | done <n> | undo <n> | rm <n>".to_string(),
+                description: "Manage a task's checklist; steps are numbered as 'show' lists them"
+                    .to_string(),
             },
             CommandHelp {
                 name: "todo done".to_string(),
