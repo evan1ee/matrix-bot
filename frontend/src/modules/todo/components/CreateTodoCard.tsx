@@ -4,6 +4,8 @@ import { CustomSelect } from '../../../components/CustomSelect';
 import { DateTimePicker } from '../../../components/DateTimePicker';
 import { nowInZone, useSettings } from '../../../core/settings';
 import { JoinedRoomInfo, LEAD_OPTIONS } from '../types';
+import { TagInput } from './TagInput';
+import { RepeatSelect } from './RepeatSelect';
 
 export interface CreateTodoCardProps {
   text: string;
@@ -16,6 +18,10 @@ export interface CreateTodoCardProps {
   setLeadMinutes: (val: string) => void;
   remindRoomId: string;
   setRemindRoomId: (val: string) => void;
+  tags: string[];
+  setTags: (val: string[]) => void;
+  recurrence: string;
+  setRecurrence: (val: string) => void;
   rooms?: JoinedRoomInfo[];
   isPending: boolean;
   errorMsg: string | null;
@@ -34,6 +40,10 @@ export const CreateTodoCard: React.FC<CreateTodoCardProps> = ({
   setLeadMinutes,
   remindRoomId,
   setRemindRoomId,
+  tags,
+  setTags,
+  recurrence,
+  setRecurrence,
   rooms,
   isPending,
   errorMsg,
@@ -130,6 +140,13 @@ export const CreateTodoCard: React.FC<CreateTodoCardProps> = ({
               />
             </label>
           )}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+          <div className="sm:col-span-3">
+            <TagInput value={tags} onChange={setTags} />
+          </div>
+          <RepeatSelect value={recurrence} onChange={setRecurrence} hasDueDate={dueAt !== ''} />
         </div>
 
         {noRoomsAvailable && (

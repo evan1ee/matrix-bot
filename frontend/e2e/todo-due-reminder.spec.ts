@@ -154,7 +154,7 @@ test.describe('editing an existing task', () => {
     await todoRow(app, 'Original text').getByTitle('Edit task').click();
 
     const form = todoEditForm(app);
-    await form.locator('input[type="text"]').fill('Renamed task');
+    await form.locator('input[type="text"]').first().fill('Renamed task');
     await chooseOption(selectField(form, 'Priority'), 'High Priority');
     await form.getByRole('button', { name: 'Save' }).click();
 
@@ -284,7 +284,7 @@ test.describe('editing an existing task', () => {
 
     await todoRow(app, 'Keep me as I am').getByTitle('Edit task').click();
     const form = todoEditForm(app);
-    await form.locator('input[type="text"]').fill('Should not persist');
+    await form.locator('input[type="text"]').first().fill('Should not persist');
     await form.getByRole('button', { name: 'Cancel' }).click();
 
     await expect(todoEditForm(app)).toHaveCount(0);
@@ -298,7 +298,7 @@ test.describe('editing an existing task', () => {
 
     await todoRow(app, 'Has text').getByTitle('Edit task').click();
     const form = todoEditForm(app);
-    await form.locator('input[type="text"]').fill('   ');
+    await form.locator('input[type="text"]').first().fill('   ');
     await form.getByRole('button', { name: 'Save' }).click();
 
     await expect(form.getByText('Task text cannot be empty.')).toBeVisible();
@@ -312,7 +312,7 @@ test.describe('editing an existing task', () => {
     await todoRow(app, 'Server will refuse').getByTitle('Edit task').click();
     const form = todoEditForm(app);
     api.failNext = { path: /^\/todos\/\d+$/, status: 400, error: 'Nope, not allowed' };
-    await form.locator('input[type="text"]').fill('Renamed');
+    await form.locator('input[type="text"]').first().fill('Renamed');
     await form.getByRole('button', { name: 'Save' }).click();
 
     await expect(form.getByText('Nope, not allowed')).toBeVisible();

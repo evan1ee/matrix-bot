@@ -19,6 +19,12 @@ import {
  * rather than silently swallowing it.
  */
 
+export interface FakeStep {
+  id: number;
+  text: string;
+  done: boolean;
+}
+
 export interface FakeTodo {
   id: number;
   room_id: string;
@@ -30,6 +36,10 @@ export interface FakeTodo {
   remind_before_minutes: number | null;
   completed: boolean;
   created_at: string;
+  tags: string[];
+  recurrence: string;
+  next_todo_id: number | null;
+  steps: FakeStep[];
 }
 
 export interface FakeReminder {
@@ -651,6 +661,7 @@ export class FakeApi {
   settings: { timezone: string; currency: string } = { timezone: 'UTC', currency: 'USD' };
 
   private nextTodoId = 1;
+  private nextStepId = 1;
   private nextReminderId = 1;
   private nextTxId = 1;
   private nextCategoryId = 1;
@@ -819,10 +830,64 @@ export class FakeApi {
       remind_before_minutes: null,
       completed: false,
       created_at: new Date().toISOString(),
+      tags: [],
+      recurrence: 'none',
+      next_todo_id: null,
+      steps: [],
       ...partial,
     };
     this.todos.push(todo);
     return todo;
+  }
+
+  /** The wire shape of a todo: steps are summarised, never inlined. */
+  private todoDto(todo: FakeTodo) {
+    const { steps, ...rest } = todo;
+    return {
+      ...rest,
+      steps_done: steps.filter((s) => s.done).length,
+      steps_total: steps.length,
+    };
+  }
+
+  private todoDetail(todo: FakeTodo) {
+    return {
+      item: this.todoDto(todo),
+      steps: todo.steps.map((s, i) => ({ id: s.id, position: i + 1, text: s.text, done: s.done })),
+    };
+  }
+
+  /** Mirrors `domain::tags::parse_tags` (strict: the first bad tag is a 400). */
+  private parseTags(raw: unknown): string[] | string {
+    if (!Array.isArray(raw)) return 'tags must be an array';
+    const out = new Set<string>();
+    for (const t of raw) {
+      const tag = String(t).trim().replace(/^#/, '').toLowerCase();
+      if (!/^[\p{L}\p{N}_-]{1,50}$/u.test(tag)) return `invalid tag: ${String(t)}`;
+      out.add(tag);
+    }
+    if (out.size > 10) return 'at most 10 tags per todo';
+    return [...out].sort();
+  }
+
+  /** One period after `iso`: the due date of a completed recurring todo's successor. */
+  private nextDue(iso: string, recurrence: string): string {
+    const d = new Date(iso);
+    if (recurrence === 'daily') d.setUTCDate(d.getUTCDate() + 1);
+    else if (recurrence === 'weekly') d.setUTCDate(d.getUTCDate() + 7);
+    else if (recurrence === 'monthly') d.setUTCMonth(d.getUTCMonth() + 1);
+    else if (recurrence === 'yearly') d.setUTCFullYear(d.getUTCFullYear() + 1);
+    return d.toISOString();
+  }
+
+  private assertRecurrence(route: Route, recurrence: string, dueAt: string | null) {
+    if (!['none', 'daily', 'weekly', 'monthly', 'yearly'].includes(recurrence)) {
+      return json(route, 400, { error: `invalid recurrence: ${recurrence}`, code: 400 });
+    }
+    if (recurrence !== 'none' && !dueAt) {
+      return json(route, 400, { error: 'recurrence requires a due date', code: 400 });
+    }
+    return null;
   }
 
   seedReminder(partial: Partial<FakeReminder> = {}): FakeReminder {
@@ -1429,8 +1494,14 @@ export class FakeApi {
       } else if (completedParam === 'false') {
         items = items.filter((t) => !t.completed);
       }
+      const tagParam = url?.searchParams?.get('tag');
+      if (tagParam) {
+        const wanted = this.parseTags([tagParam]);
+        if (typeof wanted === 'string') return json(route, 400, { error: wanted, code: 400 });
+        items = items.filter((t) => t.tags.includes(wanted[0]));
+      }
       return json(route, 200, {
-        items,
+        items: items.map((t) => this.todoDto(t)),
         page: 1,
         limit: 100,
         total: items.length,
@@ -1464,15 +1535,80 @@ export class FakeApi {
         }
       }
 
+      const tags = this.parseTags(body?.tags ?? []);
+      if (typeof tags === 'string') return json(route, 400, { error: tags, code: 400 });
+      const recurrence = String(body?.recurrence ?? 'none');
+      const badRecurrence = this.assertRecurrence(route, recurrence, body?.due_at ?? null);
+      if (badRecurrence) return badRecurrence;
+
       const todo = this.seedTodo({
         room_id: roomId,
         text,
         priority: body?.priority ?? 'medium',
         due_at: body?.due_at ?? null,
         remind_before_minutes: lead,
+        tags,
+        recurrence,
       });
       this.syncDueReminder(todo, body?.remind_room_id ?? null);
-      return json(route, 200, todo);
+      return json(route, 200, this.todoDto(todo));
+    }
+
+    if (path === '/todos/tags' && method === 'GET') {
+      const counts = new Map<string, number>();
+      for (const t of this.todos.filter((t) => !t.completed)) {
+        for (const tag of t.tags) counts.set(tag, (counts.get(tag) ?? 0) + 1);
+      }
+      const tags = [...counts]
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([tag, count]) => ({ tag, count }));
+      return json(route, 200, { tags });
+    }
+
+    const stepMatch = path.match(/^\/todos\/(\d+)\/steps(?:\/(order|\d+))?$/);
+    if (stepMatch) {
+      const todo = this.todos.find((t) => t.id === Number(stepMatch[1]));
+      if (!todo) return json(route, 404, { error: 'Task not found or access denied', code: 404 });
+      const sub = stepMatch[2];
+
+      if (!sub && method === 'POST') {
+        const text = String(body?.text ?? '').trim();
+        if (!text) return json(route, 400, { error: 'Step text required', code: 400 });
+        if (text.length > 200) {
+          return json(route, 400, { error: 'Step text exceeds 200 character limit', code: 400 });
+        }
+        todo.steps.push({ id: this.nextStepId++, text, done: false });
+        return json(route, 200, this.todoDetail(todo));
+      }
+      if (sub === 'order' && method === 'PUT') {
+        const ids: number[] = body?.step_ids ?? [];
+        const sameSet =
+          ids.length === todo.steps.length && todo.steps.every((s) => ids.includes(s.id));
+        if (!sameSet) {
+          return json(route, 400, { error: 'step_ids must list every step once', code: 400 });
+        }
+        todo.steps = ids.map((id) => todo.steps.find((s) => s.id === id)!);
+        return json(route, 200, this.todoDetail(todo));
+      }
+      if (sub && sub !== 'order') {
+        const step = todo.steps.find((s) => s.id === Number(sub));
+        if (!step) return json(route, 404, { error: 'Step not found', code: 404 });
+        if (method === 'DELETE') {
+          todo.steps = todo.steps.filter((s) => s !== step);
+          return json(route, 200, this.todoDetail(todo));
+        }
+        if (method === 'PATCH') {
+          if (body?.text !== undefined) {
+            const text = String(body.text).trim();
+            if (!text || text.length > 200) {
+              return json(route, 400, { error: 'Step text must be 1-200 characters', code: 400 });
+            }
+            step.text = text;
+          }
+          if (body?.done !== undefined) step.done = Boolean(body.done);
+          return json(route, 200, this.todoDetail(todo));
+        }
+      }
     }
 
     const todoMatch = path.match(/^\/todos\/(\d+)$/);
@@ -1490,7 +1626,23 @@ export class FakeApi {
         return route.fulfill({ status: 204, body: '' });
       }
 
+      if (method === 'GET') {
+        return json(route, 200, this.todoDetail(todo));
+      }
+
       if (method === 'PATCH') {
+        if (body?.tags !== undefined) {
+          const tags = this.parseTags(body.tags);
+          if (typeof tags === 'string') return json(route, 400, { error: tags, code: 400 });
+          todo.tags = tags;
+        }
+        if (body?.recurrence !== undefined) {
+          const dueAfter = body && 'due_at' in body ? body.due_at : todo.due_at;
+          const badRecurrence = this.assertRecurrence(route, String(body.recurrence), dueAfter);
+          if (badRecurrence) return badRecurrence;
+          todo.recurrence = String(body.recurrence);
+        }
+        const wasCompleted = todo.completed;
         if (body && 'remind_before_minutes' in body && body.remind_before_minutes !== null) {
           const bad = this.assertLead(route, body.remind_before_minutes);
           if (bad) return bad;
@@ -1517,7 +1669,20 @@ export class FakeApi {
           }
         }
         this.syncDueReminder(todo, body?.remind_room_id ?? null);
-        return json(route, 200, todo);
+        // Completing a recurring todo spawns the next occurrence, once.
+        if (!wasCompleted && todo.completed && todo.recurrence !== 'none' && todo.due_at) {
+          const successor = this.seedTodo({
+            room_id: todo.room_id,
+            text: todo.text,
+            priority: todo.priority,
+            due_at: this.nextDue(todo.due_at, todo.recurrence),
+            remind_before_minutes: todo.remind_before_minutes,
+            tags: [...todo.tags],
+            recurrence: todo.recurrence,
+          });
+          todo.next_todo_id = successor.id;
+        }
+        return json(route, 200, this.todoDto(todo));
       }
     }
 

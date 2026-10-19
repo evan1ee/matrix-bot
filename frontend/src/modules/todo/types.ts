@@ -3,6 +3,11 @@ import type { components } from '../../types/api';
 export type TodoItem = components['schemas']['TodoItem'];
 export type TodoListResponse = components['schemas']['TodoListResponse'];
 export type JoinedRoomInfo = components['schemas']['JoinedRoomInfo'];
+export type TodoDetail = components['schemas']['TodoDetail'];
+export type TodoStep = components['schemas']['TodoStepDto'];
+export type TodoTagsResponse = components['schemas']['TodoTagsResponse'];
+
+export const RECURRENCE_OPTIONS = ['none', 'daily', 'weekly', 'monthly', 'yearly'] as const;
 
 /** Lead-time presets, in minutes. `''` means no reminder. */
 export const LEAD_OPTIONS = [
@@ -24,6 +29,8 @@ export interface TodoPatch {
   due_at: string | null;
   remind_before_minutes: number | null;
   remind_room_id?: string;
+  tags?: string[];
+  recurrence?: string;
 }
 
 export const priorityBadgeClass = (priority: string) =>

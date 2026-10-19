@@ -5,7 +5,7 @@ import { FrontendModule } from '../../core/types';
 import { Sparkles } from 'lucide-react';
 import { triggerAiPrompt } from '../ai';
 import { useSettings, zonedInputToUtcIso } from '../../core/settings';
-import { TodoItem, TodoListResponse, JoinedRoomInfo, TodoPatch } from './types';
+import { TodoItem, TodoListResponse, TodoTagsResponse, JoinedRoomInfo, TodoPatch } from './types';
 import { TodoRow } from './components/TodoRow';
 import { CreateTodoCard } from './components/CreateTodoCard';
 
@@ -21,15 +21,31 @@ export const TodoMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }) =
   const [leadMinutes, setLeadMinutes] = useState('');
   const [remindRoomId, setRemindRoomId] = useState('');
   const [filter, setFilter] = useState<'all' | 'active' | 'completed'>('all');
+  const [tags, setTags] = useState<string[]>([]);
+  const [recurrence, setRecurrence] = useState('none');
+  const [tagFilter, setTagFilter] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const completedQuery =
     filter === 'active' ? '&completed=false' : filter === 'completed' ? '&completed=true' : '';
+  const tagQuery = tagFilter ? `&tag=${encodeURIComponent(tagFilter)}` : '';
 
   const { data, isLoading } = useQuery<TodoListResponse>({
-    queryKey: ['todos', filter],
-    queryFn: () => fetchApi<TodoListResponse>(`/todos?limit=100${completedQuery}`),
+    queryKey: ['todos', filter, tagFilter],
+    queryFn: () => fetchApi<TodoListResponse>(`/todos?limit=100${completedQuery}${tagQuery}`),
   });
+
+  // Not under the ['todos'] prefix: the optimistic toggle rewrites every
+  // ['todos'] cache entry as a list, which this one is not.
+  const { data: tagData } = useQuery<TodoTagsResponse>({
+    queryKey: ['todo-tags'],
+    queryFn: () => fetchApi<TodoTagsResponse>('/todos/tags'),
+  });
+  const refreshTodos = () => {
+    queryClient.invalidateQueries({ queryKey: ['todos'] });
+    queryClient.invalidateQueries({ queryKey: ['todo-tags'] });
+    queryClient.invalidateQueries({ queryKey: ['todo-detail'] });
+  };
 
   // Rooms the bot and this account are both in. Local (@web-*) accounts share
   // no room with the bot, so this comes back empty for them by design.
@@ -52,6 +68,8 @@ export const TodoMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }) =
       due_at: string | null;
       remind_before_minutes: number | null;
       remind_room_id: string | null;
+      tags: string[];
+      recurrence: string;
     }) =>
       fetchApi<TodoItem>('/todos', {
         method: 'POST',
@@ -61,8 +79,10 @@ export const TodoMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }) =
       setText('');
       setDueAt('');
       setLeadMinutes('');
+      setTags([]);
+      setRecurrence('none');
       setErrorMsg(null);
-      queryClient.invalidateQueries({ queryKey: ['todos'] });
+      refreshTodos();
       // Creating a task with a lead time also creates a reminder row.
       queryClient.invalidateQueries({ queryKey: ['reminders'] });
     },
@@ -103,9 +123,7 @@ export const TodoMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }) =
         });
       }
     },
-    onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: ['todos'] });
-    },
+    onSettled: refreshTodos,
   });
 
   // Full-field edit. Unlike `updateMutation`, this always states `due_at` and
@@ -118,7 +136,7 @@ export const TodoMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }) =
         body: JSON.stringify(patch),
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['todos'] });
+      refreshTodos();
       queryClient.invalidateQueries({ queryKey: ['reminders'] });
     },
   });
@@ -129,7 +147,7 @@ export const TodoMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }) =
         method: 'DELETE',
       }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['todos'] });
+      refreshTodos();
       queryClient.invalidateQueries({ queryKey: ['reminders'] });
     },
   });
@@ -159,10 +177,19 @@ export const TodoMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }) =
       due_at: dueIso,
       remind_before_minutes: wantsReminder ? Number(leadMinutes) : null,
       remind_room_id: wantsReminder ? remindRoomId : null,
+      tags,
+      // A repeat counts forward from the due date, so it is moot without one.
+      recurrence: dueIso ? recurrence : 'none',
     });
   };
 
   const filteredItems = data?.items || [];
+  // Keep the active filter selectable even once its last active todo is done
+  // (the server only counts active todos).
+  const tagOptions =
+    tagFilter && !tagData?.tags.some((t) => t.tag === tagFilter)
+      ? [...(tagData?.tags ?? []), { tag: tagFilter, count: 0 }]
+      : (tagData?.tags ?? []);
 
   return (
     <div className="space-y-6">
@@ -178,6 +205,10 @@ export const TodoMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }) =
         setLeadMinutes={setLeadMinutes}
         remindRoomId={remindRoomId}
         setRemindRoomId={setRemindRoomId}
+        tags={tags}
+        setTags={setTags}
+        recurrence={recurrence}
+        setRecurrence={setRecurrence}
         rooms={rooms}
         isPending={createMutation.isPending}
         errorMsg={errorMsg}
@@ -205,6 +236,23 @@ export const TodoMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }) =
                 </button>
               ))}
             </div>
+            <label className="flex items-center gap-2">
+              <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400 whitespace-nowrap">Tag:</span>
+              <select
+                aria-label="Filter by tag"
+                value={tagFilter}
+                onChange={(e) => setTagFilter(e.target.value)}
+                className="h-7 px-2 rounded bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-xs font-mono text-neutral-700 dark:text-neutral-300 focus:outline-none focus-visible:border-neutral-500 transition-colors duration-150 cursor-pointer"
+              >
+                <option value="">All tags</option>
+                {tagOptions.map((t) => (
+                  <option key={t.tag} value={t.tag}>
+                    #{t.tag}
+                    {t.count > 0 ? ` (${t.count})` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
             <button
               type="button"
               onClick={() =>
@@ -262,6 +310,8 @@ export const todoModule: FrontendModule = {
       event.type === 'TodoDeleted'
     ) {
       queryClient.invalidateQueries({ queryKey: ['todos'] });
+      queryClient.invalidateQueries({ queryKey: ['todo-tags'] });
+      queryClient.invalidateQueries({ queryKey: ['todo-detail'] });
     }
   },
 };
