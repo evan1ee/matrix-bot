@@ -4,7 +4,7 @@ use chrono::Utc;
 use chrono_tz::Tz;
 use tracing::error;
 
-use super::tags::{added_details, split_add_extras, AddExtras};
+use super::tags::{added_details, split_add_extras, validation_reply, AddExtras};
 use crate::application::todos::TodoService;
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
@@ -236,6 +236,7 @@ pub async fn handle_edit(
             html_escape(&item.text)
         )),
         Err(AppError::NotFound(_)) => Some(format!("⚠️ Task <b>#{}</b> not found.", id)),
+        Err(AppError::Validation(msg)) => Some(validation_reply(&msg)),
         Err(err) => {
             error!("Failed to edit todo text: {:?}", err);
             Some("❌ Database error updating task.".to_string())
@@ -284,6 +285,7 @@ pub async fn handle_priority(
             priority_badge(item.priority.as_str())
         )),
         Err(AppError::NotFound(_)) => Some(format!("⚠️ Task <b>#{}</b> not found.", id)),
+        Err(AppError::Validation(msg)) => Some(validation_reply(&msg)),
         Err(err) => {
             error!("Failed to update todo priority: {:?}", err);
             Some("❌ Database error updating priority.".to_string())
@@ -333,6 +335,7 @@ pub async fn handle_due(
                 item.id
             )),
             Err(AppError::NotFound(_)) => Some(format!("⚠️ Task <b>#{}</b> not found.", id)),
+            Err(AppError::Validation(msg)) => Some(validation_reply(&msg)),
             Err(err) => {
                 error!("Failed to clear todo due date: {:?}", err);
                 Some("❌ Database error clearing due date.".to_string())
@@ -407,6 +410,7 @@ pub async fn handle_due(
             Some(format!("{}{}", due_note, reminder_note))
         }
         Err(AppError::NotFound(_)) => Some(format!("⚠️ Task <b>#{}</b> not found.", id)),
+        Err(AppError::Validation(msg)) => Some(validation_reply(&msg)),
         Err(err) => {
             error!("Failed to set todo due date: {:?}", err);
             Some("❌ Database error setting due date.".to_string())
@@ -565,5 +569,41 @@ mod tests {
             )),
             "{reply}"
         );
+    }
+
+    /// Given a recurring todo, When its due date is cleared or edited away in
+    /// chat, Then the reply carries the validation message, not a DB apology.
+    #[tokio::test]
+    async fn clearing_the_due_date_of_a_recurring_todo_replies_with_the_reason() {
+        let (todos, _pool) = setup_service().await;
+        let owner = AccountId::from_seed("@alice:1");
+        let due = crate::utils::time::now_at_storage_precision() + chrono::Duration::days(1);
+        let input = NewTodo {
+            room_id: "!room:1".to_string(),
+            sender_name: "alice".to_string(),
+            text: "water".to_string(),
+            priority: TodoPriority::Medium,
+            due_at: Some(due),
+            remind_before_minutes: None,
+            remind_room_id: None,
+            tags: vec![],
+            recurrence: crate::domain::reminders::RecurrencePattern::Daily,
+            recurrence_anchor: None,
+        };
+        let (item, _) = todos.create(&owner, input).await.unwrap();
+
+        let reply = handle_due(
+            &todos,
+            "!room:1",
+            &owner,
+            &format!("due {} none", item.id),
+            &Tz::UTC,
+        )
+        .await
+        .unwrap();
+
+        assert!(reply.starts_with("⚠️ "), "{reply}");
+        assert!(reply.contains("recurring"), "{reply}");
+        assert!(!reply.contains("Database error"), "{reply}");
     }
 }

@@ -5,6 +5,7 @@ mod steps;
 mod tags;
 
 pub use completion::CompletionOutcome;
+pub use steps::STEP_NOT_FOUND;
 
 use sqlx::PgPool;
 

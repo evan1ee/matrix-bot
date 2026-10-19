@@ -134,7 +134,7 @@ Well-formed model output is still not authoritative. Tool results are fed back a
 
 ### Todo tools
 
-`add_todo`/`update_todo` accept `tags` (normalized by `domain::tags::Tag`) and `recurrence` (`none|daily|weekly|monthly|yearly`, requires a due date); `get_my_tasks` accepts a `tag` filter. `complete_todo` returns `{todo, next}`, where `next` is the spawned successor of a recurring todo or `null`. `llm/tools/todo_steps.rs` adds `add_todo_step { todo_id, text }` and `set_todo_step_done { todo_id, step_id, done }`; a missing step or another owner's todo reads as not found.
+`add_todo`/`update_todo` accept `tags` (normalized by `domain::tags::Tag`) and `recurrence` (`none|daily|weekly|monthly|yearly`, requires a due date); `get_my_tasks` accepts a `tag` filter. `complete_todo` returns `{todo, next}`, where `next` is the spawned successor of a recurring todo or `null`. `llm/tools/todo_steps.rs` adds `add_todo_step { todo_id, text }` and `set_todo_step_done { todo_id, position, done }` (`position` is the 1-based number `show` displays); a missing step or another owner's todo reads as not found.
 
 ### Knowledge tools
 

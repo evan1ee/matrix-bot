@@ -17,7 +17,7 @@ pub enum StepCmd {
     Remove(usize),
 }
 
-pub const STEP_USAGE: &str = "⚠️ Usage: <code>!todo step &lt;id&gt; add &lt;text&gt;</code>,      <code>done &lt;n&gt;</code>, <code>undo &lt;n&gt;</code> or <code>rm &lt;n&gt;</code>";
+pub const STEP_USAGE: &str = "⚠️ Usage: <code>!todo step &lt;id&gt; add &lt;text&gt;</code>, <code>done &lt;n&gt;</code>, <code>undo &lt;n&gt;</code> or <code>rm &lt;n&gt;</code>";
 const SHOW_USAGE: &str = "⚠️ Usage: <code>!todo show &lt;id&gt;</code>";
 
 /// The words after `!todo step <id>`. Steps are addressed by the 1-based

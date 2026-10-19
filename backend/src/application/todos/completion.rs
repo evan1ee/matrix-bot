@@ -121,8 +121,17 @@ impl TodoService {
             .reminders
             .cancel_due_reminder(ReminderSource::Todo, original)
             .await?;
+        // Best effort: the completion and the spawn are already committed, so
+        // reporting the whole completion as failed would mislead the caller.
         if let Some(next) = &outcome.next {
-            self.sync_reminder_for_todo(next, room.as_deref()).await?;
+            if let Err(err) = self.sync_reminder_for_todo(next, room.as_deref()).await {
+                tracing::warn!(
+                    todo_id = original,
+                    successor_id = next.id,
+                    error = %err,
+                    "successor reminder sync failed after completion"
+                );
+            }
         }
         Ok(cancelled)
     }
@@ -159,6 +168,11 @@ async fn complete_locked(
             .unwrap_or_default()
             .tz();
         if let Some(new) = successor(&current, Utc::now(), tz) {
+            // Lock order: this transaction holds the todo row lock, and the
+            // insert below takes FOR KEY SHARE on the `accounts` row through
+            // the FK. An account merge locks `accounts` FOR UPDATE and then
+            // writes todos, so the two can deadlock. PostgreSQL detects it and
+            // rolls one side back cleanly; merges are rare, so this is accepted.
             let created = repositories::todos::create(&mut **tx, owner_id, &new).await?;
             repositories::todo_steps::copy_unchecked(&mut **tx, id, created.id, owner_id).await?;
             repositories::todos::set_next_todo_id(&mut **tx, id, created.id).await?;
@@ -432,6 +446,37 @@ mod tests {
         assert_eq!(successor_reminder.room_id, "!r:x");
         assert!(reminders
             .find_pending_for_source(ReminderSource::Todo, original.id)
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    /// Given a web todo with a lead time but no reminder room, When it
+    /// completes, Then the successor's reminder sync fails ("remind_room_id is
+    /// required") yet the completion and the spawn still succeed.
+    #[tokio::test]
+    async fn a_failed_successor_reminder_sync_does_not_fail_the_completion() {
+        let (pool, services, owner) = setup("todo_complete_sync_fail").await;
+        let original = create(&services, &owner, monthly("rent")).await;
+        // Written directly: the service refuses a lead time without a room, and
+        // the point is a todo whose successor cannot get a reminder.
+        sqlx::query("UPDATE todos SET remind_before_minutes = 60 WHERE id = $1")
+            .bind(original.id)
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        let outcome = services
+            .todos
+            .set_completed(&owner, original.id, true)
+            .await
+            .expect("completion is committed, so it reports success");
+
+        let next = outcome.next.expect("the successor was spawned");
+        assert!(outcome.todo.completed);
+        assert!(services
+            .reminders
+            .find_pending_for_source(ReminderSource::Todo, next.id)
             .await
             .unwrap()
             .is_none());

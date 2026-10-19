@@ -8,6 +8,7 @@ import {
   setDateTime,
   datetimeLocal,
   TAB,
+  todoEditForm,
 } from './fixtures';
 
 test('creates a task and shows it in the list', async ({ app, api }) => {
@@ -197,4 +198,23 @@ test('rejects a step over 200 characters', async ({ app, api }) => {
   await input.fill('x'.repeat(201));
   await input.press('Enter');
   await expect(app.getByRole('alert')).toContainText('200');
+});
+
+test('a text-only edit leaves due_at out so a repeat keeps its anchor', async ({ app, api }) => {
+  // Seconds and milliseconds: the edit input only has minute precision.
+  const due = new Date(Date.now() + 6 * 3_600_000);
+  due.setSeconds(37, 123);
+  api.seedTodo({ text: 'Pay rent', due_at: due.toISOString(), recurrence: 'monthly' });
+  await gotoApp(app, TAB.todo);
+
+  await todoRow(app, 'Pay rent').getByTitle('Edit task').click();
+  const form = todoEditForm(app);
+  await form.locator('input[type="text"]').first().fill('Pay the rent');
+  await form.getByRole('button', { name: 'Save' }).click();
+
+  await expect(todoRow(app, 'Pay the rent')).toBeVisible();
+  const patch = api.requests.find((r) => r.method === 'PATCH')!.body as Record<string, unknown>;
+  expect(patch).not.toHaveProperty('due_at');
+  expect(patch.text).toBe('Pay the rent');
+  expect(api.todos[0].due_at).toBe(due.toISOString());
 });

@@ -26,7 +26,7 @@ export function leadLabel(minutes: number): string {
 export interface TodoPatch {
   text: string;
   priority: string;
-  due_at: string | null;
+  due_at?: string | null;
   remind_before_minutes: number | null;
   remind_room_id?: string;
   tags?: string[];

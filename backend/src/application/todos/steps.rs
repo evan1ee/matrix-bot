@@ -11,13 +11,17 @@ use crate::domain::todos::steps::{validate_step_text, TodoWithSteps, MAX_STEPS};
 use crate::domain::todos::{TodoError, TodoItem};
 use crate::infrastructure::postgres::repositories::{self, outbox};
 
+/// The message of a missing step; chat compares against it to say "no such
+/// step" rather than "task not found".
+pub const STEP_NOT_FOUND: &str = "Todo step not found";
+
 fn todo_not_found() -> AppError {
     AppError::NotFound("Todo item not found or access denied".to_string())
 }
 
 // Mapped explicitly (not through `From<TodoError>`) so HTTP answers 404, not 400.
 fn step_not_found() -> AppError {
-    AppError::NotFound("Todo step not found".to_string())
+    AppError::NotFound(STEP_NOT_FOUND.to_string())
 }
 
 impl TodoService {

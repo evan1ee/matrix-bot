@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use chrono_tz::Tz;
 
-use crate::application::todos::TodoService;
+use crate::application::todos::{TodoService, STEP_NOT_FOUND};
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
 use crate::domain::reminders::RecurrencePattern;
@@ -177,12 +177,17 @@ pub fn parse_list_args(args_body: &str) -> Result<ListArgs, String> {
 /// and dependency detail out of the room.
 pub fn failure(err: AppError, id: i64) -> String {
     match err {
-        AppError::NotFound(msg) if msg.contains("step") => {
+        AppError::NotFound(msg) if msg == STEP_NOT_FOUND => {
             format!("⚠️ Task <b>#{id}</b> has no such step.")
         }
         AppError::NotFound(_) => format!("⚠️ Task <b>#{id}</b> not found."),
         other => error_reply(other).html_body().to_owned(),
     }
+}
+
+/// The reply for a rejected input (`AppError::Validation`): its message, escaped.
+pub fn validation_reply(msg: &str) -> String {
+    format!("⚠️ {}", html_escape(msg))
 }
 
 /// `<code>#a #b</code>`, or nothing for an untagged todo.

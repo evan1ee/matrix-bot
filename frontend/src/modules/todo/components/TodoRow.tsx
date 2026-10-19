@@ -115,7 +115,9 @@ export const TodoRow: React.FC<TodoRowProps> = ({ item, rooms, onToggle, onDelet
       await onSave({
         text: trimmed,
         priority: draftPriority,
-        due_at: dueIso,
+        // Omitted when untouched: the input has minute precision, so re-sending
+        // it would move a due date that carries seconds and re-anchor a repeat.
+        ...(draftDue !== utcIsoToZonedInput(item.due_at, timezone) ? { due_at: dueIso } : {}),
         remind_before_minutes: wantsReminder ? Number(draftLead) : null,
         tags: draftTags,
         recurrence: dueIso ? draftRecurrence : 'none',

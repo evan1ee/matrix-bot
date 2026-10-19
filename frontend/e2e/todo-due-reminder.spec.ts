@@ -224,15 +224,15 @@ test.describe('editing an existing task', () => {
       .poll(() => api.todos.find((t) => t.id === todo.id)?.remind_before_minutes)
       .toBe(1440);
 
-    // The edit form round-trips through the picker, which has minute
-    // granularity — so compare against the stored date, not the seeded one,
-    // and assert the invariant that matters: trigger == due - lead.
+    // The due date was not touched, so it is not re-sent and keeps its seconds
+    // (re-sending the minute-precision picker value would re-anchor a repeat).
+    // The invariant that matters: trigger == due - lead.
     const saved = api.todos.find((t) => t.id === todo.id)!;
     const reminder = api.reminderForTodo(todo.id)!;
     expect(new Date(reminder.trigger_at).getTime()).toBe(
       new Date(saved.due_at!).getTime() - 1440 * 60_000
     );
-    expect(new Date(saved.due_at!).getTime()).toBe(Math.floor(due.getTime() / 60_000) * 60_000);
+    expect(saved.due_at).toBe(due.toISOString());
     expect(reminder.room_id).toBe('!general:mbm.one');
   });
 
