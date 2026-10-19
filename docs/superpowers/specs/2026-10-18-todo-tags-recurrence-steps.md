@@ -121,7 +121,7 @@ The return type gains the successor: `CompletionOutcome { todo: TodoItem, next: 
 
 ### 5.2 Tags
 
-- Create/update accept a full tag set; the chat `+tag -tag` form is resolved to a full set in the interface layer, then calls `update`.
+- Create/update accept a full tag set; `edit_tags(owner, id, add, remove)` applies `+tag -tag` edits under the row lock (`apply_tag_edits` inside the transaction), so concurrent tag edits from different channels never overwrite each other.
 - `list` / `count` gain `tag: Option<&Tag>` (`tags @> ARRAY[$1]`), combined with the existing room/completed filters and owner scope.
 - `list_tags(owner) -> Vec<(Tag, i64)>` over active todos (`unnest(tags)` grouped), owner-scoped.
 

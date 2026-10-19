@@ -12,7 +12,7 @@ use crate::application::AppError;
 use crate::domain::accounts::AccountId;
 use crate::domain::reminders::RecurrencePattern;
 use crate::domain::tags::Tag;
-use crate::domain::todos::{apply_tag_edits, TodoItem, TodoPatch};
+use crate::domain::todos::{TodoItem, TodoPatch};
 use crate::interface::chat::error_reply;
 use crate::utils::{format_datetime, html_escape, parse_reminder_args};
 
@@ -244,24 +244,11 @@ pub async fn handle_tag(
         Err(reply) => return Some(reply),
     };
 
-    let current = match todos.find_owned(owner_id, id).await {
-        Ok(Some(item)) => item.tags,
-        Ok(None) => return Some(format!("⚠️ Task <b>#{id}</b> not found.")),
-        Err(err) => return Some(failure(err, id)),
-    };
-    let tags = match apply_tag_edits(&current, &add, &remove) {
-        Ok(tags) => tags,
-        Err(err) => return Some(failure(err.into(), id)),
-    };
-    let patch = TodoPatch {
-        tags: Some(tags),
-        ..Default::default()
-    };
-    match todos.update(owner_id, id, patch).await {
-        Ok((item, _)) if item.tags.is_empty() => {
+    match todos.edit_tags(owner_id, id, &add, &remove).await {
+        Ok(item) if item.tags.is_empty() => {
             Some(format!("🏷️ Task <b>#{}</b> has no tags.", item.id))
         }
-        Ok((item, _)) => Some(format!(
+        Ok(item) => Some(format!(
             "🏷️ Task <b>#{}</b> tags: {}",
             item.id,
             tags_code(&item.tags)

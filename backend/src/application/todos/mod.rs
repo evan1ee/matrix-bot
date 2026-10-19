@@ -2,6 +2,7 @@
 
 mod completion;
 mod steps;
+mod tags;
 
 pub use completion::CompletionOutcome;
 
