@@ -58,6 +58,11 @@ async fn alert_jobs(pool: &sqlx::PgPool) -> i64 {
         .unwrap()
 }
 
+/// Only the budget's own creation event may remain after a rolled-back write.
+async fn types_of(pool: &sqlx::PgPool, owner: &AccountId) -> Vec<String> {
+    outbox::event_types_for(pool, owner).await.unwrap()
+}
+
 async fn crossed_events(pool: &sqlx::PgPool, owner: &AccountId) -> usize {
     outbox::event_types_for(pool, owner)
         .await
@@ -285,23 +290,16 @@ async fn update_raising_amount_alerts() {
     assert_eq!(alert_jobs(&pool).await, 1);
 }
 
-/// Given publishing fails, When an expense crosses a threshold, Then neither row persists.
-#[tokio::test]
-async fn failed_outbox_publish_rolls_back_expense_and_alert() {
-    let (pool, services, owner) = setup("fin_eval_rollback").await;
-    services
-        .finance
-        .create_budget(&owner, budget(None, "EUR", 10_000))
-        .await
-        .unwrap();
-    outbox::fail_every_publish(&pool).await;
-
+/// A 100.00 budget, then a 90.00 expense that must fail; asserts nothing of the
+/// write survived: no transaction, alert row, job or threshold event.
+async fn assert_crossing_write_rolls_back(
+    pool: &sqlx::PgPool,
+    services: &AppServices,
+    owner: &AccountId,
+) {
     let err = services
         .finance
-        .record_transaction(
-            &owner,
-            input(9_000, "EUR", None, now_at_storage_precision()),
-        )
+        .record_transaction(owner, input(9_000, "EUR", None, now_at_storage_precision()))
         .await
         .unwrap_err();
 
@@ -309,13 +307,61 @@ async fn failed_outbox_publish_rolls_back_expense_and_alert() {
     assert_eq!(
         services
             .finance
-            .count_transactions(&owner, None)
+            .count_transactions(owner, None)
             .await
             .unwrap(),
         0
     );
-    assert_eq!(alerts(&pool).await, 0);
-    assert_eq!(alert_jobs(&pool).await, 0);
+    assert_eq!(alerts(pool).await, 0);
+    assert_eq!(alert_jobs(pool).await, 0);
+    assert_eq!(crossed_events(pool, owner).await, 0);
+}
+
+/// Given every publish fails, When an expense is written, Then the very first publish
+/// (TransactionCreated) aborts the write. Evaluation never runs in this case.
+#[tokio::test]
+async fn failed_first_outbox_publish_rolls_back_expense() {
+    let (pool, services, owner) = setup("fin_eval_rollback_first").await;
+    services
+        .finance
+        .create_budget(&owner, budget(None, "EUR", 10_000))
+        .await
+        .unwrap();
+    outbox::fail_every_publish(&pool).await;
+
+    assert_crossing_write_rolls_back(&pool, &services, &owner).await;
+}
+
+/// Given only BudgetThresholdCrossed fails to publish, When an expense crosses 80 %,
+/// Then the expense, its TransactionCreated event and the alert row all roll back.
+#[tokio::test]
+async fn failed_threshold_event_publish_rolls_back_expense_and_alert() {
+    let (pool, services, owner) = setup("fin_eval_rollback_event").await;
+    services
+        .finance
+        .create_budget(&owner, budget(None, "EUR", 10_000))
+        .await
+        .unwrap();
+    outbox::fail_threshold_crossed_publish(&pool).await;
+
+    assert_crossing_write_rolls_back(&pool, &services, &owner).await;
+    assert_eq!(types_of(&pool, &owner).await, vec!["BudgetCreated"]);
+}
+
+/// Given the alert job insert errors, When an expense crosses 80 %, Then the expense,
+/// the alert row and the already published events roll back.
+#[tokio::test]
+async fn failed_alert_job_enqueue_rolls_back_expense_and_alert() {
+    let (pool, services, owner) = setup("fin_eval_rollback_job").await;
+    services
+        .finance
+        .create_budget(&owner, budget(None, "EUR", 10_000))
+        .await
+        .unwrap();
+    repositories::jobs::fail_every_enqueue(&pool).await;
+
+    assert_crossing_write_rolls_back(&pool, &services, &owner).await;
+    assert_eq!(types_of(&pool, &owner).await, vec!["BudgetCreated"]);
 }
 
 /// Given a budget, When a recurring bill is marked paid across it, Then the alert job exists.

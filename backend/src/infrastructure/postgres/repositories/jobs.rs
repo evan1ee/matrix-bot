@@ -377,6 +377,21 @@ pub async fn dedupe_keys_with_type(
         .await
 }
 
+/// Test-only: makes every later `jobs` insert in this test's schema raise, so a
+/// service's real `enqueue` fails (a dedupe conflict would be silently ignored).
+#[cfg(test)]
+pub async fn fail_every_enqueue(pool: &sqlx::PgPool) {
+    sqlx::raw_sql(
+        "CREATE FUNCTION jobs_test_fail() RETURNS trigger LANGUAGE plpgsql AS \
+         $$ BEGIN RAISE EXCEPTION 'job enqueue forced to fail'; END $$; \
+         CREATE TRIGGER jobs_test_fail BEFORE INSERT ON jobs \
+         FOR EACH ROW EXECUTE FUNCTION jobs_test_fail()",
+    )
+    .execute(pool)
+    .await
+    .expect("install the failing-enqueue trigger");
+}
+
 /// Pushes `heartbeat_at` and `completed_at` `secs` into the past.
 #[cfg(test)]
 pub async fn backdate(exec: impl PgExecutor<'_>, id: JobId, secs: f64) -> sqlx::Result<()> {

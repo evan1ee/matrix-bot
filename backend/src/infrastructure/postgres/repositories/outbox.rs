@@ -457,6 +457,23 @@ pub async fn fail_every_publish(pool: &sqlx::PgPool) {
     .expect("install the failing-publish trigger");
 }
 
+/// Test-only: like [`fail_every_publish`] but only `BudgetThresholdCrossed` inserts
+/// raise, so earlier publishes in the same transaction succeed. Schema-local.
+#[cfg(test)]
+pub async fn fail_threshold_crossed_publish(pool: &sqlx::PgPool) {
+    sqlx::raw_sql(
+        "CREATE FUNCTION outbox_test_fail_crossed() RETURNS trigger LANGUAGE plpgsql AS \
+         $$ BEGIN IF NEW.event_type = 'BudgetThresholdCrossed' THEN \
+         RAISE EXCEPTION 'threshold publish forced to fail'; END IF; \
+         RETURN NEW; END $$; \
+         CREATE TRIGGER outbox_test_fail_crossed BEFORE INSERT ON outbox_events \
+         FOR EACH ROW EXECUTE FUNCTION outbox_test_fail_crossed()",
+    )
+    .execute(pool)
+    .await
+    .expect("install the threshold-crossed failing-publish trigger");
+}
+
 /// Test-only: the delivery states of one account's events, oldest first.
 #[cfg(test)]
 pub async fn delivery_statuses_for(
