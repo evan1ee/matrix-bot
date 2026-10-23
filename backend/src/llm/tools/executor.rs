@@ -5,6 +5,7 @@ use tracing::{debug, warn};
 
 use super::bills;
 use super::bookmarks;
+use super::budgets;
 use super::finance;
 use super::habits;
 use super::knowledge;
@@ -58,6 +59,11 @@ pub async fn execute(
     if let Some(res) =
         finance::execute_tool(services, pool, owner_id, room_id, name, &parsed_args).await
     {
+        return res;
+    }
+
+    // 2b. Try budget tools
+    if let Some(res) = budgets::execute_tool(services, owner_id, name, &parsed_args).await {
         return res;
     }
 
