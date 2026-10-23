@@ -209,6 +209,7 @@ mod tests {
             habits_total_count: 5,
             upcoming_bills_count: 1,
             holdings_count: 4,
+            budgets_attention_count: 0,
         }
     }
 

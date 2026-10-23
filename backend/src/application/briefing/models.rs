@@ -19,6 +19,9 @@ pub struct BriefingSummary {
     pub habits_total_count: usize,
     pub upcoming_bills_count: usize,
     pub holdings_count: usize,
+    /// Budgets in Warning or Exceeded state for the owner's current month.
+    #[serde(default)]
+    pub budgets_attention_count: usize,
 }
 
 /// Formatted briefing payload ready for Matrix delivery and REST preview.

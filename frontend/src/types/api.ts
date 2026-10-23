@@ -2363,6 +2363,7 @@ export interface components {
         };
         /** @description Key statistics summarizing a generated morning briefing. */
         BriefingSummary: {
+            budgets_attention_count?: number;
             habits_completed_count: number;
             habits_total_count: number;
             holdings_count: number;

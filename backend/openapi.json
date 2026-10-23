@@ -8744,6 +8744,10 @@
           "holdings_count"
         ],
         "properties": {
+          "budgets_attention_count": {
+            "type": "integer",
+            "minimum": 0
+          },
           "habits_completed_count": {
             "type": "integer",
             "minimum": 0
