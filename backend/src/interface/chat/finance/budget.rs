@@ -176,7 +176,7 @@ async fn set(services: &AppServices, owner: &AccountId, args: &str, default: &st
         parsed.category.as_deref(),
         &parsed.currency,
         parsed.limit_minor,
-        true,
+        None, // alerts change only through `!budget alerts`
     ) {
         Ok(n) => n,
         Err(e) => return fail(e.into()),
@@ -411,6 +411,35 @@ mod tests {
         let reply = handle_budget(&s, &o, "rm USD", "EUR").await;
         assert!(reply.contains("Removed"), "{reply}");
         assert_eq!(s.finance.list_budgets(&o).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn budget_set_preserves_alerts_off() {
+        let (s, o) = setup().await;
+        handle_budget(&s, &o, "set 300 EUR", "EUR").await;
+        assert!(
+            s.finance.list_budgets(&o).await.unwrap()[0].alerts_enabled,
+            "a new budget starts with alerts on"
+        );
+        handle_budget(&s, &o, "alerts off", "EUR").await;
+        let reply = handle_budget(&s, &o, "set 400 EUR", "EUR").await;
+        assert!(reply.contains("updated"), "{reply}");
+        let b = &s.finance.list_budgets(&o).await.unwrap()[0];
+        assert_eq!(b.limit_minor, 40000);
+        assert!(!b.alerts_enabled, "set must not re-enable alerts");
+    }
+
+    #[tokio::test]
+    async fn hostile_category_names_are_escaped_in_status_and_rm() {
+        let (s, o) = setup().await;
+        s.finance.create_category(&o, "<b>x</b>").await.unwrap();
+        handle_budget(&s, &o, "set 300 EUR <b>x</b>", "EUR").await;
+        let status = handle_budget(&s, &o, "", "EUR").await;
+        assert!(status.contains("&lt;b&gt;x&lt;/b&gt;"), "{status}");
+        assert!(!status.contains("<b>x</b>"), "{status}");
+        let rm = handle_budget(&s, &o, "rm <b>x</b> EUR", "EUR").await;
+        assert!(rm.contains("&lt;b&gt;x&lt;/b&gt;"), "{rm}");
+        assert!(!rm.contains("<b>x</b>"), "{rm}");
     }
 
     #[tokio::test]

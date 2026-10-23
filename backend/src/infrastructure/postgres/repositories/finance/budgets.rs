@@ -82,7 +82,7 @@ pub async fn insert(
         b.currency(),
         b.currency_exponent(),
         b.limit_minor(),
-        b.alerts_enabled()
+        b.alerts_enabled().unwrap_or(true)
     )
     .fetch_one(ex)
     .await?;
@@ -337,7 +337,7 @@ mod tests {
     }
 
     fn new_budget(category: Option<&str>, currency: &str, limit: i64) -> NewBudget {
-        NewBudget::new(category, currency, limit, true).unwrap()
+        NewBudget::new(category, currency, limit, Some(true)).unwrap()
     }
 
     #[allow(clippy::too_many_arguments)] // test fixture: one positional field per column
@@ -606,9 +606,9 @@ mod tests {
         insert(&pool, &owner, None, &new_budget(None, "USD", 100))
             .await
             .unwrap();
-        let muted = NewBudget::new(Some("Food"), "GBP", 100, false).unwrap();
+        let muted = NewBudget::new(Some("Food"), "GBP", 100, Some(false)).unwrap();
         insert(&pool, &owner, Some(food), &muted).await.unwrap();
-        let off = NewBudget::new(None, "JPY", 100, false).unwrap();
+        let off = NewBudget::new(None, "JPY", 100, Some(false)).unwrap();
         insert(&pool, &owner, None, &off).await.unwrap();
 
         let mut tx = pool.begin().await.unwrap();

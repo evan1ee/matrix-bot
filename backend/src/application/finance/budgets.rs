@@ -70,7 +70,7 @@ impl FinanceService {
             Some(found) => {
                 let patch = BudgetPatch {
                     limit_minor: Some(b.limit_minor()),
-                    alerts_enabled: Some(b.alerts_enabled()),
+                    alerts_enabled: b.alerts_enabled(),
                 };
                 let updated = repo::update(&mut *tx, owner, found.id, &patch)
                     .await?

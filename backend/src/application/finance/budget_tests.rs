@@ -15,7 +15,7 @@ pub(super) async fn setup(seed: &str) -> (sqlx::PgPool, AppServices, AccountId) 
 }
 
 pub(super) fn budget(category: Option<&str>, currency: &str, limit_minor: i64) -> NewBudget {
-    NewBudget::new(category, currency, limit_minor, true).unwrap()
+    NewBudget::new(category, currency, limit_minor, Some(true)).unwrap()
 }
 
 async fn types(pool: &sqlx::PgPool, owner: &AccountId) -> Vec<String> {

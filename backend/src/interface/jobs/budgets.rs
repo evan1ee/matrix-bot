@@ -191,7 +191,10 @@ mod tests {
             .await;
         let budget = services
             .finance
-            .create_budget(&owner, NewBudget::new(None, "EUR", 10_000, true).unwrap())
+            .create_budget(
+                &owner,
+                NewBudget::new(None, "EUR", 10_000, Some(true)).unwrap(),
+            )
             .await
             .unwrap();
         services

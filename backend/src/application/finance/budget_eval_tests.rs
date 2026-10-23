@@ -194,7 +194,7 @@ async fn backdated_expense_never_alerts() {
 #[tokio::test]
 async fn alerts_disabled_budget_never_alerts() {
     let (pool, services, owner) = setup("fin_eval_disabled").await;
-    let silent = NewBudget::new(None, "EUR", 10_000, false).unwrap();
+    let silent = NewBudget::new(None, "EUR", 10_000, Some(false)).unwrap();
     services
         .finance
         .create_budget(&owner, silent)

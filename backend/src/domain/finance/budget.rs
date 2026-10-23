@@ -53,7 +53,7 @@ pub struct NewBudget {
     currency: String,
     currency_exponent: i64,
     limit_minor: i64,
-    alerts_enabled: bool,
+    alerts_enabled: Option<bool>,
 }
 
 impl NewBudget {
@@ -62,7 +62,7 @@ impl NewBudget {
         category: Option<&str>,
         currency: &str,
         limit_minor: i64,
-        alerts_enabled: bool,
+        alerts_enabled: Option<bool>,
     ) -> Result<Self, FinanceError> {
         let category = match category.map(str::trim).filter(|c| !c.is_empty()) {
             Some(c) if c.chars().count() > MAX_CATEGORY_LEN => {
@@ -96,7 +96,7 @@ impl NewBudget {
     pub fn limit_minor(&self) -> i64 {
         self.limit_minor
     }
-    pub fn alerts_enabled(&self) -> bool {
+    pub fn alerts_enabled(&self) -> Option<bool> {
         self.alerts_enabled
     }
 }
@@ -459,25 +459,31 @@ mod tests {
     #[test]
     fn new_budget_validation() {
         assert!(matches!(
-            NewBudget::new(None, "EUR", 0, true),
+            NewBudget::new(None, "EUR", 0, None),
             Err(FinanceError::BudgetLimitInvalid)
         ));
-        assert!(NewBudget::new(None, "EURO", 100, true).is_err());
+        assert!(NewBudget::new(None, "EURO", 100, None).is_err());
         let long = "x".repeat(MAX_CATEGORY_LEN + 1);
         assert!(matches!(
-            NewBudget::new(Some(&long), "EUR", 100, true),
+            NewBudget::new(Some(&long), "EUR", 100, None),
             Err(FinanceError::CategoryNameInvalid { .. })
         ));
-        let b = NewBudget::new(Some("  "), "kwd", 1_000, true).unwrap();
+        let b = NewBudget::new(Some("  "), "kwd", 1_000, None).unwrap();
         assert_eq!(
             (b.category(), b.currency(), b.currency_exponent()),
             (None, "KWD", 3)
         );
-        let b = NewBudget::new(Some(" Food "), "eur", 5_000, false).unwrap();
+        let b = NewBudget::new(Some(" Food "), "eur", 5_000, Some(false)).unwrap();
         assert_eq!(
             (b.category(), b.limit_minor(), b.alerts_enabled()),
-            (Some("Food"), 5_000, false)
+            (Some("Food"), 5_000, Some(false))
         );
+    }
+
+    #[test]
+    fn new_budget_accepts_unspecified_alerts() {
+        let b = NewBudget::new(None, "EUR", 100, None).unwrap();
+        assert_eq!(b.alerts_enabled(), None);
     }
 
     #[test]
