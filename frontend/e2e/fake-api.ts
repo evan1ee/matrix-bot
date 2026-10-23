@@ -95,6 +95,17 @@ export interface FakeCategory {
   created_at: string;
 }
 
+export interface FakeBudget {
+  id: number;
+  scope: 'overall' | 'category';
+  category_id: number | null;
+  category_name: string | null;
+  currency: string;
+  currency_exponent: number;
+  limit_minor: number;
+  alerts_enabled: boolean;
+}
+
 export interface FakeRoom {
   room_id: string;
   name: string;
@@ -487,6 +498,8 @@ export class FakeApi {
 
   transactions: FakeTransaction[] = [];
   categories: FakeCategory[] = [];
+  budgets: FakeBudget[] = [];
+  private nextBudgetId = 1;
   financeShare: {
     owner_id: string;
     token: string;
@@ -896,6 +909,58 @@ export class FakeApi {
     };
     this.categories.push(category);
     return category;
+  }
+
+  seedBudget(partial: Partial<FakeBudget> = {}): FakeBudget {
+    const category = this.categories.find((c) => c.id === partial.category_id) ?? null;
+    const currency = partial.currency ?? 'USD';
+    const budget: FakeBudget = {
+      id: this.nextBudgetId++,
+      scope: category ? 'category' : 'overall',
+      category_id: category?.id ?? null,
+      category_name: category?.name ?? null,
+      currency,
+      currency_exponent: exponentFor(currency),
+      limit_minor: 50000,
+      alerts_enabled: true,
+      ...partial,
+    };
+    this.budgets.push(budget);
+    return budget;
+  }
+
+  /** Mirrors the server's `BudgetStatusDto`, computed from the fake ledger. */
+  private budgetStatus(b: FakeBudget, month: string) {
+    const spent = this.transactions
+      .filter(
+        (t) =>
+          t.direction === 'expense' &&
+          t.currency === b.currency &&
+          t.occurred_at.startsWith(month) &&
+          (b.category_id === null || t.category_id === b.category_id)
+      )
+      .reduce((sum, t) => sum + t.amount_minor, 0);
+    const percent = Math.floor((spent * 100) / b.limit_minor);
+    const now = new Date();
+    const isCurrent = month === now.toISOString().slice(0, 7);
+    let pace: { expected_minor: number; projected_minor: number } | null = null;
+    if (isCurrent) {
+      const days = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
+      const day = now.getUTCDate();
+      pace = {
+        expected_minor: Math.floor((b.limit_minor * day) / days),
+        projected_minor: Math.floor((spent * days) / day),
+      };
+    }
+    return {
+      budget: b,
+      month,
+      spent_minor: spent,
+      remaining_minor: b.limit_minor - spent,
+      percent_used: percent,
+      state: percent >= 100 ? 'exceeded' : percent >= 80 ? 'warning' : 'ok',
+      pace,
+    };
   }
 
   seedTransaction(partial: Partial<FakeTransaction> = {}): FakeTransaction {
@@ -1623,6 +1688,56 @@ export class FakeApi {
       }
       this.transactions = this.transactions.filter((t) => t.id !== id);
       return route.fulfill({ status: 204, body: '' });
+    }
+
+    if (path === '/finance/budgets' && method === 'GET') {
+      const month = url?.searchParams?.get('month') || new Date().toISOString().slice(0, 7);
+      return json(
+        route,
+        200,
+        this.budgets.map((b) => this.budgetStatus(b, month))
+      );
+    }
+    if (path === '/finance/budgets' && method === 'POST') {
+      const currency = String(body?.currency ?? '').trim().toUpperCase();
+      const parsed = parseAmount(String(body?.limit ?? ''), currency);
+      if ('error' in parsed) return json(route, 400, { error: parsed.error, code: 400 });
+      const categoryId = body?.category_id ?? null;
+      if (categoryId !== null && !this.categories.some((c) => c.id === categoryId)) {
+        return json(route, 400, { error: 'Unknown category', code: 400 });
+      }
+      if (this.budgets.some((b) => b.category_id === categoryId && b.currency === currency)) {
+        return json(route, 409, {
+          error: 'You already have a budget for that scope and currency',
+          code: 409,
+        });
+      }
+      const created = this.seedBudget({
+        category_id: categoryId,
+        currency,
+        limit_minor: parsed.minor,
+        alerts_enabled: body?.alerts_enabled ?? true,
+      });
+      return json(route, 201, this.budgetStatus(created, new Date().toISOString().slice(0, 7)));
+    }
+    const budgetMatch = path.match(/^\/finance\/budgets\/(\d+)$/);
+    if (budgetMatch) {
+      const id = Number(budgetMatch[1]);
+      const budget = this.budgets.find((b) => b.id === id);
+      if (!budget) return json(route, 404, { error: 'Budget not found', code: 404 });
+      if (method === 'PUT') {
+        if (body?.limit != null) {
+          const parsed = parseAmount(String(body.limit), budget.currency);
+          if ('error' in parsed) return json(route, 400, { error: parsed.error, code: 400 });
+          budget.limit_minor = parsed.minor;
+        }
+        if (body?.alerts_enabled != null) budget.alerts_enabled = Boolean(body.alerts_enabled);
+        return json(route, 200, this.budgetStatus(budget, new Date().toISOString().slice(0, 7)));
+      }
+      if (method === 'DELETE') {
+        this.budgets = this.budgets.filter((b) => b.id !== id);
+        return route.fulfill({ status: 204, body: '' });
+      }
     }
 
     if (path === '/finance/net-worth' && method === 'GET') {

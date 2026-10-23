@@ -414,3 +414,88 @@ test('scans receipt image and populates entry form', async ({ app, api }) => {
 });
 
 
+
+test.describe('budgets', () => {
+  const dialog = (page: import('@playwright/test').Page) => page.getByRole('dialog');
+  const budgetRow = (page: import('@playwright/test').Page) => page.getByTestId('budget-row');
+
+  test('budgets: create, see progress, edit, remove', async ({ app, api }) => {
+    api.seedCategory('Food');
+    await gotoApp(app, TAB.finance);
+    await expect(app.getByText('No budgets yet')).toBeVisible();
+
+    // Escape closes the modal without saving.
+    await app.getByRole('button', { name: 'Add budget' }).click();
+    await expect(dialog(app)).toBeVisible();
+    await app.keyboard.press('Escape');
+    await expect(dialog(app)).toHaveCount(0);
+
+    await app.getByRole('button', { name: 'Add budget' }).click();
+    await chooseOption(selectField(dialog(app), 'Scope'), 'Food');
+    await chooseOption(selectField(dialog(app), 'Scope'), 'Overall');
+    await dialog(app).getByLabel('Monthly limit').fill('500');
+    await dialog(app).getByLabel('Monthly limit').press('Enter');
+    await expect(dialog(app)).toHaveCount(0);
+
+    const row = budgetRow(app);
+    await expect(row).toContainText('Overall');
+    await expect(row).toContainText('0.00 / 500.00');
+    await expect(row).toContainText('On track');
+
+    // Spending moves the bar (the query is invalidated by the new entry).
+    await app.getByPlaceholder('15.50').fill('450');
+    await app.getByRole('button', { name: 'Record' }).click();
+    await expect(row).toContainText('450.00 / 500.00');
+    await expect(row).toContainText('90 % used');
+
+    // Edit the limit below the spend.
+    await row.getByRole('button', { name: 'Edit budget' }).click();
+    const limit = dialog(app).getByLabel('Monthly limit');
+    await expect(limit).toHaveValue('500.00');
+    await limit.fill('400');
+    await limit.press('Enter');
+    await expect(row).toContainText('Over by 50.00');
+
+    // Previous month: heading changes and that month has no spend.
+    const heading = app.getByTestId('budget-month');
+    const before = await heading.textContent();
+    await app.getByRole('button', { name: 'Previous month' }).click();
+    await expect(heading).not.toHaveText(before!);
+    await expect(row).toContainText('0.00 / 400.00');
+    await app.getByRole('button', { name: 'Next month' }).click();
+    await expect(heading).toHaveText(before!);
+    await expect(app.getByRole('button', { name: 'Next month' })).toBeDisabled();
+
+    // Remove asks first.
+    await row.getByRole('button', { name: 'Remove budget' }).click();
+    await expect(row).toBeVisible();
+    await row.getByRole('button', { name: 'Confirm remove' }).click();
+    await expect(budgetRow(app)).toHaveCount(0);
+    expect(api.budgets).toHaveLength(0);
+  });
+
+  test('conveys state as text and exposes a progressbar', async ({ app, api }) => {
+    api.seedTransaction({ currency: 'USD', amount_minor: 8200, note: 'Spend' });
+    api.seedBudget({ limit_minor: 10000, currency: 'USD' });
+    await gotoApp(app, TAB.finance);
+
+    const row = budgetRow(app);
+    await expect(row).toContainText('82 % used');
+    const bar = row.getByRole('progressbar');
+    await expect(bar).toHaveAttribute('aria-valuenow', '82');
+    await expect(bar).toHaveAttribute('aria-valuemin', '0');
+    await expect(bar).toHaveAttribute('aria-valuemax', '100');
+    await expect(row.getByText(/Expected [\d.]+ by today · projected [\d.]+/)).toBeAttached();
+  });
+
+  test('shows the server error for a duplicate budget', async ({ app, api }) => {
+    api.seedBudget({ limit_minor: 10000, currency: 'USD' });
+    await gotoApp(app, TAB.finance);
+
+    await app.getByRole('button', { name: 'Add budget' }).click();
+    await dialog(app).getByLabel('Monthly limit').fill('100');
+    await dialog(app).getByLabel('Monthly limit').press('Enter');
+    await expect(dialog(app).getByText(/already have a budget/)).toBeVisible();
+    await expect(dialog(app)).toBeVisible();
+  });
+});
