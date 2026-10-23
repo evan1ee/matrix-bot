@@ -936,6 +936,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/finance/budgets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_budgets"];
+        put?: never;
+        post: operations["create_budget"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/finance/budgets/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["update_budget"];
+        post?: never;
+        delete: operations["delete_budget"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/finance/categories": {
         parameters: {
             query?: never;
@@ -2370,6 +2402,39 @@ export interface components {
             pending_tasks_count: number;
             upcoming_bills_count: number;
         };
+        BudgetDto: {
+            alerts_enabled: boolean;
+            /** Format: int64 */
+            category_id?: number | null;
+            category_name?: string | null;
+            currency: string;
+            /** Format: int64 */
+            currency_exponent: number;
+            /** Format: int64 */
+            id: number;
+            /** Format: int64 */
+            limit_minor: number;
+            scope: components["schemas"]["BudgetScopeDto"];
+        };
+        BudgetQuery: {
+            month?: string | null;
+        };
+        /** @enum {string} */
+        BudgetScopeDto: "overall" | "category";
+        /** @enum {string} */
+        BudgetStateDto: "ok" | "warning" | "exceeded";
+        BudgetStatusDto: {
+            budget: components["schemas"]["BudgetDto"];
+            month: string;
+            pace?: components["schemas"]["PaceDto"] | null;
+            /** Format: int64 */
+            percent_used: number;
+            /** Format: int64 */
+            remaining_minor: number;
+            /** Format: int64 */
+            spent_minor: number;
+            state: components["schemas"]["BudgetStateDto"];
+        };
         /**
          * @description Amounts and quantities arrive as decimal strings, never as JSON numbers —
          *     the same reason `finance::TransactionRequest` does: a JSON number is an
@@ -2520,6 +2585,13 @@ export interface components {
             tags?: string[] | null;
             title?: string | null;
             url: string;
+        };
+        CreateBudgetRequest: {
+            alerts_enabled?: boolean | null;
+            /** Format: int64 */
+            category_id?: number | null;
+            currency: string;
+            limit: string;
         };
         CreateFootprintRequest: {
             address?: string | null;
@@ -3115,6 +3187,12 @@ export interface components {
             blocks: components["schemas"]["OcrBlockDto"][];
             raw_text: string;
             structured?: components["schemas"]["ReceiptExtractionDto"] | null;
+        };
+        PaceDto: {
+            /** Format: int64 */
+            expected_minor: number;
+            /** Format: int64 */
+            projected_minor: number;
         };
         PasskeySummary: {
             /** Format: date-time */
@@ -3771,6 +3849,10 @@ export interface components {
             is_favorite?: boolean | null;
             tags?: string[] | null;
             title?: string | null;
+        };
+        UpdateBudgetRequest: {
+            alerts_enabled?: boolean | null;
+            limit?: string | null;
         };
         UpdateFootprintRequest: {
             address?: string | null;
@@ -6063,6 +6145,199 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    list_budgets: {
+        parameters: {
+            query?: {
+                month?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Budgets measured against the month */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BudgetStatusDto"][];
+                };
+            };
+            /** @description Invalid month */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    create_budget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateBudgetRequest"];
+            };
+        };
+        responses: {
+            /** @description Budget created */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BudgetStatusDto"];
+                };
+            };
+            /** @description Invalid input */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unknown category */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description A budget for that scope and currency exists */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    update_budget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Budget ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateBudgetRequest"];
+            };
+        };
+        responses: {
+            /** @description Budget updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BudgetStatusDto"];
+                };
+            };
+            /** @description Invalid input */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    delete_budget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Budget ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Budget deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
             };
         };
     };

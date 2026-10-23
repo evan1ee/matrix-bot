@@ -32,10 +32,10 @@ use crate::interface::http::todos::{TodoItem, TodoPriority};
 use crate::interface::http::webhooks::{TelegramMessageResult, TelegramQuery, TelegramResponse};
 use crate::interface::http::{
     account, admin, agent, ai, auth, bookmarks, briefing, finance, finance_analytics,
-    finance_categories, finance_net_worth, footprints, habits, health, identities, knowledge,
-    knowledge_transfer, life, life_activity, link, mcp, ocr, portfolio, portfolio_alerts,
-    portfolio_cash, portfolio_history, portfolio_prices, recurring_bills, reminders, rooms,
-    settings, sse, storage, todos, voice, webhooks,
+    finance_budgets, finance_categories, finance_net_worth, footprints, habits, health, identities,
+    knowledge, knowledge_transfer, life, life_activity, link, mcp, ocr, portfolio,
+    portfolio_alerts, portfolio_cash, portfolio_history, portfolio_prices, recurring_bills,
+    reminders, rooms, settings, sse, storage, todos, voice, webhooks,
 };
 
 #[derive(OpenApi)]
@@ -95,6 +95,10 @@ use crate::interface::http::{
         finance_categories::list_categories,
         finance_categories::create_category,
         finance_categories::delete_category,
+        finance_budgets::list_budgets,
+        finance_budgets::create_budget,
+        finance_budgets::update_budget,
+        finance_budgets::delete_budget,
         finance_analytics::get_analytics,
         finance_analytics::get_share,
         finance_analytics::upsert_share,
@@ -284,6 +288,14 @@ use crate::interface::http::{
             finance::CategoryRequest,
             finance::LedgerResponse,
             finance::CategoryDeletedResponse,
+            finance_budgets::BudgetDto,
+            finance_budgets::BudgetStatusDto,
+            finance_budgets::BudgetScopeDto,
+            finance_budgets::BudgetStateDto,
+            finance_budgets::PaceDto,
+            finance_budgets::BudgetQuery,
+            finance_budgets::CreateBudgetRequest,
+            finance_budgets::UpdateBudgetRequest,
             NetWorthResponse,
             CurrencyNetWorthBreakdown,
             MonthlyCashflowBucket,
