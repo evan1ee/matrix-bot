@@ -117,7 +117,7 @@ Shipped, not yet merged: monthly spending limits per category or overall, per cu
 | CRUD, status, evaluation inside the expense write's transaction | `FinanceService` (`application/finance/{budgets,budget_eval,transactions}.rs`) |
 | Alert delivery | `finance.budget_alert` job in `interface/jobs/budgets.rs` (shared DM loop in `interface/jobs/dm.rs`) |
 | Morning briefing section | `application/briefing/generator.rs` |
-| Chat | `!budget` (`interface/chat/budgets.rs`) |
+| Chat | `!budget` (`interface/chat/finance/budget.rs`) |
 | REST | `/api/v1/finance/budgets` ([`api.md`](../api.md)) |
 | AI tools | `get_budget_status`, `set_budget`, `remove_budget` (`llm/tools/budgets.rs`) |
 | Web | `BudgetPanel` in the finance module |
