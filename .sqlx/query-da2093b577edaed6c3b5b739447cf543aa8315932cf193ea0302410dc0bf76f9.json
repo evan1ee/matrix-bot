@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE todo_steps s SET position = o.rn::int\n        FROM (SELECT id, row_number() OVER (ORDER BY array_position($2::bigint[], id)) AS rn\n              FROM todo_steps WHERE todo_id = $1) o\n        WHERE s.id = o.id\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8Array"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "da2093b577edaed6c3b5b739447cf543aa8315932cf193ea0302410dc0bf76f9"
+}

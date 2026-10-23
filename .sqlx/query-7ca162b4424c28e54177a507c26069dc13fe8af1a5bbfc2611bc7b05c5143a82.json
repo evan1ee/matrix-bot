@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, room_id, owner_id, sender_name, text, priority, due_at, remind_before_minutes, completed, created_at\n        FROM todos\n        WHERE room_id = $1 AND owner_id = $2\n          AND ($3::boolean IS NULL OR completed = $3)\n        ORDER BY completed ASC, id DESC\n        LIMIT $4 OFFSET $5\n        ",
+  "query": "\n        SELECT id, room_id, owner_id, sender_name, text, priority, due_at, remind_before_minutes, completed, created_at,\n               tags, recurrence, recurrence_anchor, next_todo_id\n        FROM todos\n        WHERE id = $1 AND owner_id = $2\n        ",
   "describe": {
     "columns": [
       {
@@ -112,15 +112,56 @@
             "name": "created_at"
           }
         }
+      },
+      {
+        "ordinal": 10,
+        "name": "tags",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "tags"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "recurrence",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "recurrence"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "recurrence_anchor",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "recurrence_anchor"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "next_todo_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "next_todo_id"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Uuid",
-        "Bool",
         "Int8",
-        "Int8"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -133,8 +174,12 @@
       true,
       true,
       false,
+      true,
+      false,
+      false,
+      true,
       true
     ]
   },
-  "hash": "542c5d7d16eb78dd4d63f11e211a643c662d1589d50db20b0dd1b6fbefe9da8c"
+  "hash": "7ca162b4424c28e54177a507c26069dc13fe8af1a5bbfc2611bc7b05c5143a82"
 }

@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT COUNT(*)\n        FROM todos\n        WHERE owner_id = $1\n          AND ($2::boolean IS NULL OR completed = $2)\n          AND ($3::text IS NULL OR tags @> ARRAY[$3::text])\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bool",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "83e8255893647f5249d946a09633ac7cf9065e751659d6c2fd73eec87eacde5e"
+}

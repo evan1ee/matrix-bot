@@ -198,6 +198,10 @@ Well-formed model output is still not authoritative. Tool results are fed back a
 - **`evaluate_bill_due_adequacy { days_ahead? }`** (`llm/tools/bills.rs`): Calls `recurring_bills::due::evaluate_bill_cash_adequacy`. Groups recurring bills into urgency buckets (`DueToday`, `DueWithin3Days`, `DueWithin14Days`, `Later`) and evaluates cash reserve adequacy against liquid account balances.
 - **`evaluate_habit_consistency`** (`llm/tools/habits.rs`): Calls `habits::consistency::evaluate_habit_consistency`. Calculates completion rates normalized against each habit's `target_days_per_week` (clamped 1..=7), classifies trends (`Improving`, `Stable`, `AtRisk`), and detects slipping routines without false positives on non-daily/weekday habits.
 
+### Todo tools
+
+`add_todo`/`update_todo` accept `tags` (normalized by `domain::tags::Tag`) and `recurrence` (`none|daily|weekly|monthly|yearly`, requires a due date); `get_my_tasks` accepts a `tag` filter. `complete_todo` returns `{todo, next}`, where `next` is the spawned successor of a recurring todo or `null`. `llm/tools/todo_steps.rs` adds `add_todo_step { todo_id, text }` and `set_todo_step_done { todo_id, position, done }` (`position` is the 1-based number `show` displays); a missing step or another owner's todo reads as not found.
+
 ### Knowledge tools
 
 `llm/tools/knowledge.rs` exposes four tools over `services.knowledge_search` and `services.notes`:

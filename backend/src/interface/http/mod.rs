@@ -65,6 +65,7 @@ pub mod sse;
 pub mod static_files;
 pub mod storage;
 pub mod telegram_webhook;
+pub mod todo_steps;
 pub mod todos;
 pub mod voice;
 pub mod webhooks;

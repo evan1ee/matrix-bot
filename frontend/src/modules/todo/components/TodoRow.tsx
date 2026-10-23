@@ -6,7 +6,14 @@ import {
   Trash2,
   CheckCircle2,
   Circle,
+  ChevronRight,
+  ChevronDown,
 } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { fetchApi } from '../../../core/apiClient';
+import { TagInput } from './TagInput';
+import { RepeatSelect } from './RepeatSelect';
+import { StepList } from './StepList';
 import { CustomSelect } from '../../../components/CustomSelect';
 import { DateTimePicker } from '../../../components/DateTimePicker';
 import {
@@ -20,6 +27,7 @@ import {
   TodoItem,
   JoinedRoomInfo,
   TodoPatch,
+  TodoDetail,
   LEAD_OPTIONS,
   leadLabel,
   priorityBadgeClass,
@@ -43,7 +51,22 @@ export const TodoRow: React.FC<TodoRowProps> = ({ item, rooms, onToggle, onDelet
     item.remind_before_minutes ? String(item.remind_before_minutes) : ''
   );
   const [draftRoom, setDraftRoom] = useState('');
+  const [draftTags, setDraftTags] = useState(item.tags);
+  const [draftRecurrence, setDraftRecurrence] = useState(item.recurrence);
+  const [expanded, setExpanded] = useState(false);
   const [saving, setSaving] = useState(false);
+  const queryClient = useQueryClient();
+
+  // Loaded lazily: the list endpoint only carries step counts.
+  const { data: detail } = useQuery<TodoDetail>({
+    queryKey: ['todo-detail', item.id],
+    queryFn: () => fetchApi<TodoDetail>(`/todos/${item.id}`),
+    enabled: expanded,
+  });
+  const onStepsChange = (next: TodoDetail) => {
+    queryClient.setQueryData(['todo-detail', item.id], next);
+    queryClient.invalidateQueries({ queryKey: ['todos'] });
+  };
   const [rowError, setRowError] = useState<string | null>(null);
 
   // The task already has a reminder, so the server knows which room it goes to
@@ -57,6 +80,8 @@ export const TodoRow: React.FC<TodoRowProps> = ({ item, rooms, onToggle, onDelet
     setDraftDue(utcIsoToZonedInput(item.due_at, timezone));
     setDraftLead(item.remind_before_minutes ? String(item.remind_before_minutes) : '');
     setDraftRoom('');
+    setDraftTags(item.tags);
+    setDraftRecurrence(item.recurrence);
     setRowError(null);
     setEditing(true);
   };
@@ -90,8 +115,12 @@ export const TodoRow: React.FC<TodoRowProps> = ({ item, rooms, onToggle, onDelet
       await onSave({
         text: trimmed,
         priority: draftPriority,
-        due_at: dueIso,
+        // Omitted when untouched: the input has minute precision, so re-sending
+        // it would move a due date that carries seconds and re-anchor a repeat.
+        ...(draftDue !== utcIsoToZonedInput(item.due_at, timezone) ? { due_at: dueIso } : {}),
         remind_before_minutes: wantsReminder ? Number(draftLead) : null,
+        tags: draftTags,
+        recurrence: dueIso ? draftRecurrence : 'none',
         // Omitted entirely when unchanged, so the server keeps the room the
         // existing reminder already uses.
         ...(draftRoom ? { remind_room_id: draftRoom } : {}),
@@ -149,6 +178,17 @@ export const TodoRow: React.FC<TodoRowProps> = ({ item, rooms, onToggle, onDelet
           </label>
         </div>
 
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div className="sm:col-span-2">
+            <TagInput value={draftTags} onChange={setDraftTags} />
+          </div>
+          <RepeatSelect
+            value={draftRecurrence}
+            onChange={setDraftRecurrence}
+            hasDueDate={draftDue !== ''}
+          />
+        </div>
+
         {draftLead !== '' && needsRoom && (
           <label className="flex flex-col gap-1">
             <span className="text-xs font-medium text-neutral-600 dark:text-neutral-400 font-sans">Send to room</span>
@@ -190,83 +230,105 @@ export const TodoRow: React.FC<TodoRowProps> = ({ item, rooms, onToggle, onDelet
   }
 
   return (
-    <div
-      data-testid="todo-row"
-      className="flex items-center justify-between p-3 rounded-md hover:bg-neutral-100 dark:hover:bg-neutral-900/50 transition border border-transparent hover:border-neutral-200 dark:hover:border-neutral-800/80 group"
-    >
-      <div className="flex items-center gap-3 overflow-hidden mr-4">
-        <button
-          onClick={onToggle}
-          className="text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 transition shrink-0 cursor-pointer"
-        >
-          {item.completed ? (
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-500" />
-          ) : (
-            <Circle className="w-4 h-4" />
-          )}
-        </button>
-        <div className="space-y-0.5 truncate">
-          <p
-            className={`text-sm font-medium ${
-              item.completed
-                ? 'line-through text-neutral-400 dark:text-neutral-500'
-                : 'text-neutral-900 dark:text-neutral-100'
-            }`}
+    <div data-testid="todo-row">
+      <div className="flex items-center justify-between p-3 rounded-md hover:bg-neutral-100 dark:hover:bg-neutral-900/50 transition border border-transparent hover:border-neutral-200 dark:hover:border-neutral-800/80 group">
+        <div className="flex items-center gap-3 overflow-hidden mr-4">
+          <button
+            onClick={onToggle}
+            className="text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 transition shrink-0 cursor-pointer"
           >
-            {item.text}
-          </p>
-          <div className="flex items-center gap-2 flex-wrap text-xs font-mono text-neutral-500">
-            <span>by {item.sender_name}</span>
-            {item.due_at && (
-              <span
-                data-testid="due-date"
-                data-overdue={
-                  !item.completed && new Date(item.due_at) < new Date() ? 'true' : 'false'
-                }
-                className={`inline-flex items-center gap-1 ${
-                  !item.completed && new Date(item.due_at) < new Date()
-                    ? 'text-rose-600 dark:text-rose-400'
-                    : ''
-                }`}
-                title={`Due ${formatDateTimeInZone(item.due_at, timezone)}`}
-              >
-                <CalendarClock className="w-3 h-3" />
-                {formatDateTimeInZone(item.due_at, timezone)}
-              </span>
+            {item.completed ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-500" />
+            ) : (
+              <Circle className="w-4 h-4" />
             )}
-            {item.due_at && item.remind_before_minutes ? (
-              <span className="inline-flex items-center gap-1">
-                <Bell className="w-3 h-3" />
-                {leadLabel(item.remind_before_minutes)}
-              </span>
-            ) : null}
+          </button>
+          <div className="space-y-0.5 truncate">
+            <p
+              className={`text-sm font-medium ${
+                item.completed
+                  ? 'line-through text-neutral-400 dark:text-neutral-500'
+                  : 'text-neutral-900 dark:text-neutral-100'
+              }`}
+            >
+              {item.text}
+            </p>
+            <div className="flex items-center gap-2 flex-wrap text-xs font-mono text-neutral-500">
+              <span>by {item.sender_name}</span>
+              {item.due_at && (
+                <span
+                  data-testid="due-date"
+                  data-overdue={
+                    !item.completed && new Date(item.due_at) < new Date() ? 'true' : 'false'
+                  }
+                  className={`inline-flex items-center gap-1 ${
+                    !item.completed && new Date(item.due_at) < new Date()
+                      ? 'text-rose-600 dark:text-rose-400'
+                      : ''
+                  }`}
+                  title={`Due ${formatDateTimeInZone(item.due_at, timezone)}`}
+                >
+                  <CalendarClock className="w-3 h-3" />
+                  {formatDateTimeInZone(item.due_at, timezone)}
+                </span>
+              )}
+              {item.due_at && item.remind_before_minutes ? (
+                <span className="inline-flex items-center gap-1">
+                  <Bell className="w-3 h-3" />
+                  {leadLabel(item.remind_before_minutes)}
+                </span>
+              ) : null}
+              {item.recurrence !== 'none' && <span>↻ {item.recurrence}</span>}
+              {item.tags.map((tag) => (
+                <span key={tag} className="text-neutral-700 dark:text-neutral-300">
+                  #{tag}
+                </span>
+              ))}
+            </div>
           </div>
         </div>
-      </div>
 
-      <div className="flex items-center gap-3 shrink-0">
-        <span
-          className={`px-2 py-0.5 rounded text-[10px] uppercase font-mono font-medium border ${priorityBadgeClass(
-            item.priority
-          )}`}
-        >
-          {item.priority}
-        </span>
-        <button
-          onClick={beginEdit}
-          className="p-1.5 rounded text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-200 dark:hover:bg-neutral-900 transition"
-          title="Edit task"
-        >
-          <Pencil className="w-4 h-4" />
-        </button>
-        <button
-          onClick={onDelete}
-          className="p-1.5 rounded text-neutral-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-neutral-200 dark:hover:bg-neutral-900 transition"
-          title="Delete task"
-        >
-          <Trash2 className="w-4 h-4" />
-        </button>
+        <div className="flex items-center gap-3 shrink-0">
+          <button
+            type="button"
+            onClick={() => setExpanded((open) => !open)}
+            aria-expanded={expanded}
+            aria-label={expanded ? 'Hide checklist' : 'Show checklist'}
+            className="inline-flex items-center gap-1 p-1.5 rounded text-xs font-mono text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-200 dark:hover:bg-neutral-900 transition-colors duration-150 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-neutral-500"
+          >
+            {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+            {item.steps_total > 0 && (
+              <span>
+                {item.steps_done}/{item.steps_total}
+              </span>
+            )}
+          </button>
+          <span
+            className={`px-2 py-0.5 rounded text-[10px] uppercase font-mono font-medium border ${priorityBadgeClass(
+              item.priority
+            )}`}
+          >
+            {item.priority}
+          </span>
+          <button
+            onClick={beginEdit}
+            className="p-1.5 rounded text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-200 dark:hover:bg-neutral-900 transition"
+            title="Edit task"
+          >
+            <Pencil className="w-4 h-4" />
+          </button>
+          <button
+            onClick={onDelete}
+            className="p-1.5 rounded text-neutral-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-neutral-200 dark:hover:bg-neutral-900 transition"
+            title="Delete task"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
       </div>
+      {expanded && detail && (
+        <StepList todoId={item.id} steps={detail.steps} onChange={onStepsChange} />
+      )}
     </div>
   );
 };

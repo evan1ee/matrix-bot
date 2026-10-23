@@ -154,7 +154,7 @@ test.describe('editing an existing task', () => {
     await todoRow(app, 'Original text').getByTitle('Edit task').click();
 
     const form = todoEditForm(app);
-    await form.locator('input[type="text"]').fill('Renamed task');
+    await form.locator('input[type="text"]').first().fill('Renamed task');
     await chooseOption(selectField(form, 'Priority'), 'High Priority');
     await form.getByRole('button', { name: 'Save' }).click();
 
@@ -224,15 +224,15 @@ test.describe('editing an existing task', () => {
       .poll(() => api.todos.find((t) => t.id === todo.id)?.remind_before_minutes)
       .toBe(1440);
 
-    // The edit form round-trips through the picker, which has minute
-    // granularity — so compare against the stored date, not the seeded one,
-    // and assert the invariant that matters: trigger == due - lead.
+    // The due date was not touched, so it is not re-sent and keeps its seconds
+    // (re-sending the minute-precision picker value would re-anchor a repeat).
+    // The invariant that matters: trigger == due - lead.
     const saved = api.todos.find((t) => t.id === todo.id)!;
     const reminder = api.reminderForTodo(todo.id)!;
     expect(new Date(reminder.trigger_at).getTime()).toBe(
       new Date(saved.due_at!).getTime() - 1440 * 60_000
     );
-    expect(new Date(saved.due_at!).getTime()).toBe(Math.floor(due.getTime() / 60_000) * 60_000);
+    expect(saved.due_at).toBe(due.toISOString());
     expect(reminder.room_id).toBe('!general:mbm.one');
   });
 
@@ -284,7 +284,7 @@ test.describe('editing an existing task', () => {
 
     await todoRow(app, 'Keep me as I am').getByTitle('Edit task').click();
     const form = todoEditForm(app);
-    await form.locator('input[type="text"]').fill('Should not persist');
+    await form.locator('input[type="text"]').first().fill('Should not persist');
     await form.getByRole('button', { name: 'Cancel' }).click();
 
     await expect(todoEditForm(app)).toHaveCount(0);
@@ -298,7 +298,7 @@ test.describe('editing an existing task', () => {
 
     await todoRow(app, 'Has text').getByTitle('Edit task').click();
     const form = todoEditForm(app);
-    await form.locator('input[type="text"]').fill('   ');
+    await form.locator('input[type="text"]').first().fill('   ');
     await form.getByRole('button', { name: 'Save' }).click();
 
     await expect(form.getByText('Task text cannot be empty.')).toBeVisible();
@@ -312,7 +312,7 @@ test.describe('editing an existing task', () => {
     await todoRow(app, 'Server will refuse').getByTitle('Edit task').click();
     const form = todoEditForm(app);
     api.failNext = { path: /^\/todos\/\d+$/, status: 400, error: 'Nope, not allowed' };
-    await form.locator('input[type="text"]').fill('Renamed');
+    await form.locator('input[type="text"]').first().fill('Renamed');
     await form.getByRole('button', { name: 'Save' }).click();
 
     await expect(form.getByText('Nope, not allowed')).toBeVisible();

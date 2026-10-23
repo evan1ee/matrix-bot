@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, room_id, owner_id, sender_name, text, priority, due_at, remind_before_minutes, completed, created_at\n        FROM todos\n        WHERE room_id = $1 AND completed = TRUE\n        ",
+  "query": "\n        SELECT id, room_id, owner_id, sender_name, text, priority, due_at, remind_before_minutes, completed, created_at,\n               tags, recurrence, recurrence_anchor, next_todo_id\n        FROM todos\n        WHERE room_id = $1\n        ORDER BY completed ASC, id ASC\n        LIMIT $2 OFFSET $3\n        ",
   "describe": {
     "columns": [
       {
@@ -112,11 +112,57 @@
             "name": "created_at"
           }
         }
+      },
+      {
+        "ordinal": 10,
+        "name": "tags",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "tags"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "recurrence",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "recurrence"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "recurrence_anchor",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "recurrence_anchor"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "next_todo_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "next_todo_id"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Text"
+        "Text",
+        "Int8",
+        "Int8"
       ]
     },
     "nullable": [
@@ -129,8 +175,12 @@
       true,
       true,
       false,
+      true,
+      false,
+      false,
+      true,
       true
     ]
   },
-  "hash": "8c243c375b84d3b74dccf15f1df8583fe1899da7152c58c21d94f716c5c24d61"
+  "hash": "8435063103a7739e3313dfa5286ab404d2bbb3ed6a5a17acf9b09cde3095fa53"
 }

@@ -499,6 +499,9 @@ mod tests {
                     due_at: Some(Utc::now()),
                     remind_before_minutes: None,
                     remind_room_id: None,
+                    tags: vec![],
+                    recurrence: crate::domain::reminders::RecurrencePattern::None,
+                    recurrence_anchor: None,
                 },
             )
             .await
@@ -585,6 +588,9 @@ mod tests {
                     due_at: Some(due),
                     remind_before_minutes: Some(60),
                     remind_room_id: Some("!room:x".to_string()),
+                    tags: vec![],
+                    recurrence: crate::domain::reminders::RecurrencePattern::None,
+                    recurrence_anchor: None,
                 },
             )
             .await

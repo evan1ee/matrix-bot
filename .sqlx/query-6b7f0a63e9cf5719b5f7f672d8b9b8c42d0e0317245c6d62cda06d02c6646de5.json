@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO todos (room_id, owner_id, sender_name, text, priority, due_at, remind_before_minutes, completed)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, FALSE)\n        RETURNING id, room_id, owner_id, sender_name, text, priority, due_at, remind_before_minutes, completed, created_at\n        ",
+  "query": "\n        SELECT id, room_id, owner_id, sender_name, text, priority, due_at, remind_before_minutes, completed, created_at,\n               tags, recurrence, recurrence_anchor, next_todo_id\n        FROM todos\n        WHERE id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -112,16 +112,54 @@
             "name": "created_at"
           }
         }
+      },
+      {
+        "ordinal": 10,
+        "name": "tags",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "tags"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "recurrence",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "recurrence"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "recurrence_anchor",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "recurrence_anchor"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "next_todo_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "next_todo_id"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Uuid",
-        "Text",
-        "Text",
-        "Text",
-        "Timestamptz",
         "Int8"
       ]
     },
@@ -135,8 +173,12 @@
       true,
       true,
       false,
+      true,
+      false,
+      false,
+      true,
       true
     ]
   },
-  "hash": "01d1ed3803e01217a85968537ec95b8470977a313382de394dbda50466dbd8db"
+  "hash": "6b7f0a63e9cf5719b5f7f672d8b9b8c42d0e0317245c6d62cda06d02c6646de5"
 }

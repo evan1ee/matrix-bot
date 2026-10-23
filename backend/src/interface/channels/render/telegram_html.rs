@@ -337,12 +337,17 @@ mod tests {
             remind_before_minutes: None,
             completed: false,
             created_at: None,
+            tags: vec![],
+            recurrence: crate::domain::reminders::RecurrencePattern::None,
+            recurrence_anchor: None,
+            next_todo_id: None,
         };
         let html = crate::interface::chat::todos::view::format_todo_list(
             "Room Tasks",
             &[item(1, "buy <milk>"), item(2, "call mum")],
             1,
             &chrono_tz::UTC,
+            &Default::default(),
         );
         let out = html_to_telegram(&html);
         assert!(out.contains("<b>Room Tasks (Page 1):</b>"), "{out}");

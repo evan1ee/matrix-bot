@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO todo_steps (todo_id, owner_id, position, text) \n             SELECT id, owner_id, 0, 'step' FROM todos WHERE owner_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "afde25727301dae645fcf2000deb3dc50dfc0379b8bd004f32afbb78333d08d5"
+}

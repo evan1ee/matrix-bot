@@ -50,7 +50,7 @@ Recorded in `docs/superpowers/HANDOFF.md` in Task 10.
 |---|---|
 | `backend/src/domain/tags/mod.rs` (new) | `Tag`, `TagError`, `parse_tags`, `normalize_tags_lenient` |
 | `backend/src/domain/knowledge/note.rs` | switch to `domain::tags` |
-| `backend/migrations/0012_todo_tags_recurrence_steps.sql` (new) | DDL from spec §4.1 |
+| `backend/migrations/0013_todo_tags_recurrence_steps.sql` (new) | DDL from spec §4.1 |
 | `backend/src/domain/todos/mod.rs` | new `TodoItem`/`NewTodo`/`TodoPatch` fields, validation, `TodoError` |
 | `backend/src/domain/todos/recurrence.rs` (new) | pure `successor` |
 | `backend/src/domain/todos/steps.rs` (new) | `TodoStep`, `TodoWithSteps`, step validation |
@@ -105,7 +105,7 @@ Recorded in `docs/superpowers/HANDOFF.md` in Task 10.
 ### Task 2: Schema, todo domain fields and repository
 
 **Files:**
-- Create: `backend/migrations/0012_todo_tags_recurrence_steps.sql`, `backend/src/domain/todos/steps.rs`
+- Create: `backend/migrations/0013_todo_tags_recurrence_steps.sql`, `backend/src/domain/todos/steps.rs`
 - Modify: `backend/src/domain/todos/mod.rs`, `backend/src/domain/accounts/mod.rs:167-191`, `backend/src/infrastructure/postgres/repositories/todos.rs`, every `TodoItem { … }` / `NewTodo { … }` literal (find with `rg "NewTodo \{|TodoItem \{" backend/src`), `.sqlx/`
 - Test: `repositories/todos.rs` tests, `domain/todos` tests
 

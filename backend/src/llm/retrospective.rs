@@ -203,7 +203,7 @@ pub async fn generate_weekly_retrospective(
     };
 
     // 2. Tasks
-    let all_tasks = todos_repo::list_all_user(pool, owner_id, None, 200, 0).await?;
+    let all_tasks = todos_repo::list_all_user(pool, owner_id, None, None, 200, 0).await?;
     let completed_tasks_count = all_tasks.iter().filter(|t| t.completed).count();
     let active_tasks_count = all_tasks.iter().filter(|t| !t.completed).count();
 

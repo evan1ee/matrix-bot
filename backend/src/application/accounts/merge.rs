@@ -383,6 +383,13 @@ mod tests {
 
         // Put one row in every owned table
         add_todo(&pool, &from, "todo").await;
+        sqlx::query!(
+            "INSERT INTO todo_steps (todo_id, owner_id, position, text) \n             SELECT id, owner_id, 0, 'step' FROM todos WHERE owner_id = $1",
+            from.as_uuid()
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
         sqlx::query!("INSERT INTO reminders (room_id, owner_id, sender_name, message, trigger_at) VALUES ('!r:x', $1, 'a', 'm', CURRENT_TIMESTAMP)", from.as_uuid()).execute(&pool).await.unwrap();
         sqlx::query!("INSERT INTO transactions (room_id, owner_id, sender_name, direction, amount_minor, currency, occurred_at) VALUES ('web', $1, 'a', 'expense', 100, 'USD', CURRENT_TIMESTAMP)", from.as_uuid()).execute(&pool).await.unwrap();
         sqlx::query!("INSERT INTO recurring_bills (room_id, owner_id, sender_name, name, category, amount_minor, currency, next_due_at) VALUES ('web', $1, 'a', 'rent', 'home', 100, 'USD', CURRENT_TIMESTAMP)", from.as_uuid()).execute(&pool).await.unwrap();
@@ -451,7 +458,7 @@ mod tests {
         sqlx::query!("INSERT INTO knowledge_embeddings (owner_id, item_type, item_id, content_snippet, embedding) VALUES ($1, 'note', 1, 'body', array_fill(0::real, ARRAY[384])::vector)", from.as_uuid()).execute(&pool).await.unwrap();
 
         let preview = MergeService::preview(&pool, &from).await.unwrap();
-        assert_eq!(preview.total(), 23, "one row per owned table");
+        assert_eq!(preview.total(), 24, "one row per owned table");
 
         MergeService::merge(&pool, &from, &into).await.unwrap();
 

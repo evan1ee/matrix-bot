@@ -300,6 +300,21 @@ impl ReminderService {
             repositories::reminders::find_pending_for_source(&self.pool, source, source_id).await?;
         Ok(item)
     }
+
+    /// Room of the most recent reminder of any status for the source, so a
+    /// successor can remind where its predecessor did even after it fired.
+    pub async fn last_room_for_source(
+        &self,
+        owner_id: &AccountId,
+        source: ReminderSource,
+        source_id: i64,
+    ) -> Result<Option<String>, AppError> {
+        let room = repositories::reminder_sources::last_room_for_source(
+            &self.pool, owner_id, source, source_id,
+        )
+        .await?;
+        Ok(room)
+    }
 }
 
 #[cfg(test)]

@@ -25,5 +25,6 @@ pub mod rooms;
 pub mod secrets;
 pub mod settings;
 pub mod storage;
+pub mod tags;
 pub mod todos;
 pub mod webhooks;

@@ -1,10 +1,14 @@
 //! HTML view rendering and listing sub-handlers for the To-Do module.
 
+use std::collections::HashMap;
+
 use chrono_tz::Tz;
 use tracing::error;
 
+use super::tags::{parse_list_args, tags_code};
 use crate::application::todos::TodoService;
 use crate::domain::accounts::AccountId;
+use crate::domain::reminders::RecurrencePattern;
 use crate::domain::todos::TodoItem;
 use crate::interface::channels::message::{Action, Reply};
 use crate::utils::{format_datetime, html_escape, priority_badge};
@@ -30,6 +34,9 @@ pub fn done_actions(owner_id: &AccountId, items: &[TodoItem]) -> Vec<Action> {
         .collect()
 }
 
+/// Done and total step counts per todo id, for the rows of one page.
+pub type Progress = HashMap<i64, (i64, i64)>;
+
 /// The list as a reply: the HTML is `format_todo_list` unchanged.
 pub fn list_reply(
     owner_id: &AccountId,
@@ -37,11 +44,36 @@ pub fn list_reply(
     items: &[TodoItem],
     page: i64,
     tz: &Tz,
+    progress: &Progress,
 ) -> Reply {
-    Reply::html(format_todo_list(title, items, page, tz))
+    Reply::html(format_todo_list(title, items, page, tz, progress))
         .with_actions(done_actions(owner_id, items))
 }
 
+/// `list_reply` with step progress fetched once for the whole page. A failed
+/// lookup only drops the `3/5` counts; the list itself still renders.
+pub async fn page_reply(
+    todos: &TodoService,
+    owner_id: &AccountId,
+    title: &str,
+    items: &[TodoItem],
+    page: i64,
+    tz: &Tz,
+) -> Reply {
+    let ids: Vec<i64> = items.iter().map(|item| item.id).collect();
+    let progress = todos
+        .step_progress(owner_id, &ids)
+        .await
+        .unwrap_or_else(|err| {
+            error!("Failed to load step progress: {:?}", err);
+            Progress::new()
+        });
+    list_reply(owner_id, title, items, page, tz, &progress)
+}
+
+/// The room view. Unfiltered it shows every member's tasks; with a `#tag` it
+/// shows only the caller's own tasks in this room, since the tag filter is
+/// owner-scoped in the service.
 pub async fn handle_list_room(
     todos: &TodoService,
     owner_id: &AccountId,
@@ -49,12 +81,22 @@ pub async fn handle_list_room(
     args_body: &str,
     tz: &Tz,
 ) -> Option<Reply> {
-    let rest = args_body.split_whitespace().nth(1).unwrap_or("1");
-    let page: i64 = rest.parse().unwrap_or(1).max(1);
-    let offset = (page - 1) * PAGE_SIZE;
+    let args = match parse_list_args(args_body) {
+        Ok(args) => args,
+        Err(reply) => return Some(Reply::html(reply)),
+    };
+    let offset = (args.page - 1) * PAGE_SIZE;
 
-    match todos.list_room(room_id, PAGE_SIZE, offset).await {
-        Ok(items) => Some(list_reply(owner_id, "Room Tasks", &items, page, tz)),
+    let fetched = match &args.tag {
+        Some(tag) => {
+            todos
+                .list(owner_id, Some(room_id), None, Some(tag), PAGE_SIZE, offset)
+                .await
+        }
+        None => todos.list_room(room_id, PAGE_SIZE, offset).await,
+    };
+    match fetched {
+        Ok(items) => Some(page_reply(todos, owner_id, "Room Tasks", &items, args.page, tz).await),
         Err(err) => {
             error!("Failed to fetch room todos: {:?}", err);
             Some("❌ Database error loading room tasks.".to_string().into())
@@ -69,18 +111,27 @@ pub async fn handle_list_user(
     args_body: &str,
     tz: &Tz,
 ) -> Option<Reply> {
-    let rest = args_body.split_whitespace().nth(1).unwrap_or("1");
-    let page: i64 = rest.parse().unwrap_or(1).max(1);
-    let offset = (page - 1) * PAGE_SIZE;
+    let args = match parse_list_args(args_body) {
+        Ok(args) => args,
+        Err(reply) => return Some(Reply::html(reply)),
+    };
+    let offset = (args.page - 1) * PAGE_SIZE;
 
-    match todos.list(owner_id, None, None, PAGE_SIZE, offset).await {
-        Ok(items) => Some(list_reply(
-            owner_id,
-            &format!("Your Tasks ({})", html_escape(sender_name)),
-            &items,
-            page,
-            tz,
-        )),
+    match todos
+        .list(owner_id, None, None, args.tag.as_ref(), PAGE_SIZE, offset)
+        .await
+    {
+        Ok(items) => Some(
+            page_reply(
+                todos,
+                owner_id,
+                &format!("Your Tasks ({})", html_escape(sender_name)),
+                &items,
+                args.page,
+                tz,
+            )
+            .await,
+        ),
         Err(err) => {
             error!("Failed to fetch user todos: {:?}", err);
             Some("❌ Database error loading tasks.".to_string().into())
@@ -88,7 +139,28 @@ pub async fn handle_list_user(
     }
 }
 
-pub fn format_todo_list(title: &str, items: &[TodoItem], page: i64, tz: &Tz) -> String {
+/// ` <code>#a #b</code> ↻ monthly · 3/5`, each part only when present.
+fn row_extras(item: &TodoItem, progress: &Progress) -> String {
+    let mut extras = String::new();
+    if !item.tags.is_empty() {
+        extras.push_str(&format!(" {}", tags_code(&item.tags)));
+    }
+    if item.recurrence != RecurrencePattern::None {
+        extras.push_str(&format!(" ↻ {}", item.recurrence.as_str()));
+    }
+    if let Some((done, total)) = progress.get(&item.id) {
+        extras.push_str(&format!(" · {done}/{total}"));
+    }
+    extras
+}
+
+pub fn format_todo_list(
+    title: &str,
+    items: &[TodoItem],
+    page: i64,
+    tz: &Tz,
+    progress: &Progress,
+) -> String {
     if items.is_empty() {
         if page > 1 {
             return format!(
@@ -116,21 +188,23 @@ pub fn format_todo_list(title: &str, items: &[TodoItem], page: i64, tz: &Tz) -> 
 
         if item.completed {
             html.push_str(&format!(
-                "• [<b>#{}</b>] <del>{}</del> ✅ {}{} <i>(by {})</i><br/>",
+                "• [<b>#{}</b>] <del>{}</del> ✅ {}{} <i>(by {})</i>{}<br/>",
                 item.id,
                 html_escape(&item.text),
                 badge,
                 due_note,
-                html_escape(&item.sender_name)
+                html_escape(&item.sender_name),
+                row_extras(item, progress)
             ));
         } else {
             html.push_str(&format!(
-                "• [<b>#{}</b>] {} {}{} <i>(by {})</i><br/>",
+                "• [<b>#{}</b>] {} {}{} <i>(by {})</i>{}<br/>",
                 item.id,
                 html_escape(&item.text),
                 badge,
                 due_note,
-                html_escape(&item.sender_name)
+                html_escape(&item.sender_name),
+                row_extras(item, progress)
             ));
         }
     }
@@ -166,6 +240,10 @@ mod tests {
             remind_before_minutes: None,
             completed: false,
             created_at: None,
+            tags: vec![],
+            recurrence: crate::domain::reminders::RecurrencePattern::None,
+            recurrence_anchor: None,
+            next_todo_id: None,
         }
     }
 
@@ -212,7 +290,14 @@ mod tests {
     #[test]
     fn the_list_reply_keeps_its_html_byte_for_byte_and_carries_the_actions() {
         let items = vec![open_item(1), open_item(2)];
-        let reply = list_reply(&owner(), "Room Tasks", &items, 1, &chrono_tz::UTC);
+        let reply = list_reply(
+            &owner(),
+            "Room Tasks",
+            &items,
+            1,
+            &chrono_tz::UTC,
+            &Progress::new(),
+        );
         assert_eq!(
             reply.html_body(),
             "📋 <b>Room Tasks (Page 1):</b><br/>\
@@ -222,7 +307,7 @@ mod tests {
         assert_eq!(reply.content.actions.len(), 2);
         assert_eq!(
             reply.html_body(),
-            format_todo_list("Room Tasks", &items, 1, &chrono_tz::UTC)
+            format_todo_list("Room Tasks", &items, 1, &chrono_tz::UTC, &Progress::new())
         );
     }
 
@@ -237,7 +322,37 @@ mod tests {
 
     #[test]
     fn an_empty_list_has_no_actions() {
-        let reply = list_reply(&owner(), "Room Tasks", &[], 1, &chrono_tz::UTC);
+        let reply = list_reply(
+            &owner(),
+            "Room Tasks",
+            &[],
+            1,
+            &chrono_tz::UTC,
+            &Progress::new(),
+        );
         assert!(reply.content.actions.is_empty());
+    }
+
+    #[test]
+    fn rows_show_tags_repeat_and_step_progress_only_when_present() {
+        let mut tagged = open_item(1);
+        tagged.tags = vec![
+            crate::domain::tags::Tag::parse("home").unwrap(),
+            crate::domain::tags::Tag::parse("work").unwrap(),
+        ];
+        tagged.recurrence = RecurrencePattern::Monthly;
+        let plain = open_item(2);
+        let progress = Progress::from([(1, (3, 5))]);
+
+        let html = format_todo_list("T", &[tagged, plain], 1, &chrono_tz::UTC, &progress);
+
+        assert!(
+            html.contains("<i>(by Ann)</i> <code>#home #work</code> ↻ monthly · 3/5<br/>"),
+            "{html}"
+        );
+        assert!(
+            html.contains("task 2 🟡 <b>[MED]</b> <i>(by Ann)</i><br/>"),
+            "{html}"
+        );
     }
 }

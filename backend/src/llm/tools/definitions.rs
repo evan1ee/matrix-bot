@@ -1,6 +1,6 @@
 use super::{
     bills, bookmarks, finance, habits, knowledge, life, portfolio, reminder, settings, todo,
-    webhooks,
+    todo_steps, webhooks,
 };
 use crate::infrastructure::inference::llm::ToolDefinition;
 
@@ -8,6 +8,7 @@ use crate::infrastructure::inference::llm::ToolDefinition;
 pub fn all_tool_definitions() -> Vec<ToolDefinition> {
     [
         todo::tool_definitions(),
+        todo_steps::tool_definitions(),
         finance::tool_definitions(),
         reminder::tool_definitions(),
         portfolio::tool_definitions(),

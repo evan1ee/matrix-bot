@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, room_id, owner_id, sender_name, text, priority, due_at, remind_before_minutes, completed, created_at\n        FROM todos\n        WHERE id = $1 AND owner_id = $2\n        ",
+  "query": "\n        UPDATE todos\n        SET completed = $1\n        WHERE id = $2\n        RETURNING id, room_id, owner_id, sender_name, text, priority, due_at, remind_before_minutes, completed, created_at,\n               tags, recurrence, recurrence_anchor, next_todo_id\n        ",
   "describe": {
     "columns": [
       {
@@ -112,12 +112,56 @@
             "name": "created_at"
           }
         }
+      },
+      {
+        "ordinal": 10,
+        "name": "tags",
+        "type_info": "TextArray",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "tags"
+          }
+        }
+      },
+      {
+        "ordinal": 11,
+        "name": "recurrence",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "recurrence"
+          }
+        }
+      },
+      {
+        "ordinal": 12,
+        "name": "recurrence_anchor",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "recurrence_anchor"
+          }
+        }
+      },
+      {
+        "ordinal": 13,
+        "name": "next_todo_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "todos",
+            "name": "next_todo_id"
+          }
+        }
       }
     ],
     "parameters": {
       "Left": [
-        "Int8",
-        "Uuid"
+        "Bool",
+        "Int8"
       ]
     },
     "nullable": [
@@ -130,8 +174,12 @@
       true,
       true,
       false,
+      true,
+      false,
+      false,
+      true,
       true
     ]
   },
-  "hash": "4a1064d36de586dd23e7c2f1c1c79aaa5dfac7e514ed5c67bd6f726decdbe4b0"
+  "hash": "176812e4ce5264ea1b1ae1cb416aa5d6cded7f6297466f187870a2b95956edfb"
 }

@@ -9,7 +9,7 @@ use super::{
     finance_categories, finance_net_worth, footprints, habits, identities, knowledge,
     knowledge_transfer, life, life_activity, link, mcp, ocr, openapi, portfolio, portfolio_alerts,
     portfolio_cash, portfolio_history, portfolio_prices, recurring_bills, reminders, rooms,
-    settings, sse, storage, todos, voice, webhooks,
+    settings, sse, storage, todo_steps, todos, voice, webhooks,
 };
 
 /// The API route table.
@@ -125,9 +125,20 @@ fn routes_productivity() -> Router<auth::ApiState> {
     Router::new()
         .route("/briefing/trigger", post(briefing::trigger_briefing))
         .route("/todos", get(todos::list_todos).post(todos::create_todo))
+        // Static `tags` and `order` segments outrank the `:id` / `:step_id` params in
+        // matchit; `static_segments_win_over_id_params` pins that down.
+        .route("/todos/tags", get(todos::list_todo_tags))
         .route(
             "/todos/:id",
-            patch(todos::update_todo).delete(todos::delete_todo),
+            get(todos::get_todo)
+                .patch(todos::update_todo)
+                .delete(todos::delete_todo),
+        )
+        .route("/todos/:id/steps", post(todo_steps::add_step))
+        .route("/todos/:id/steps/order", put(todo_steps::reorder_steps))
+        .route(
+            "/todos/:id/steps/:step_id",
+            patch(todo_steps::update_step).delete(todo_steps::remove_step),
         )
         .route(
             "/reminders",

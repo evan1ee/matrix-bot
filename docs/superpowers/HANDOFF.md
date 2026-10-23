@@ -69,6 +69,8 @@ Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in sequence:
 
 - Tech-debt register: [reviews/2026-10-10-tech-debt-audit.md](reviews/2026-10-10-tech-debt-audit.md). Phases 0 and 1 are done (except TD-05 beyond the admin module). Phase 2 next: TD-10 (reqwest 0.12, own branch), TD-13.
 
+- **Todo tags, recurrence and checklist steps:** implemented on branch `feat/todo-tags-recurrence-steps` (migration `0013`), merged into local `master` and not yet pushed. Spec and plan: `specs/` and `plans/` `2026-10-18-todo-tags-recurrence-steps.md`. Follow-ups from the spec's non-goals: projects/lists; tag rename, colours or metadata; custom intervals ("every 2 weeks", "weekdays"); recurrence measured from completion; steps with their own due date, priority, reminder or nesting; drag-and-drop step reordering.
+
 1. **Quote-Based AI Confirmation Without Taint (Fixed):**
    - Implemented authentic AI reply tracking via in-memory bounded cache (`AiReplyTracker`) in `LlmService`. Sent AI response message IDs are recorded by channel adapters (Matrix `show_reply` capturing both placeholder and replacement event IDs, and Telegram worker). Inbound quotes are verified against `(room_key, event_id, owner_id)`. Quoting genuine AI confirmation prompts avoids turn taint and allows held action execution without infinite confirmation loops, while webhook alerts, foreign messages, and cross-room/cross-owner quotes strictly remain tainted.
 
@@ -171,6 +173,17 @@ Format: `Ruling: <decision> — <why> — <cost if wrong>`. New rulings go here 
 - *Ruling: the live turn outlives navigation (owner's decision): the stream reader, its `AbortController` and the parts live in a module-level store under `frontend/src/modules/ai/`; only Stop or closing the tab stops a turn, one live turn per tab — cost if wrong: a turn the user forgot about keeps running until it ends or hits 180 s.*
 - *Ruling: while a live turn exists the AI view shows only the stored rows it had when the turn began (`LiveTurn.baseline`, empty for a new or different conversation), and the stored rows take over only when the store drops the turn, after `finish()` fetched them — the server stores the prompt, tool rows and tool-round preamble text (`turn.rs`) mid-turn, so neither a row count nor "an assistant row appeared" can tell the final reply has arrived — cost if wrong: a turn whose history was not loaded when it started hides that history until the turn ends.*
 - *Ruling: the HTTP prompt cap stays 4000 bytes on both chat endpoints while `llm::MAX_PROMPT_LENGTH` is 16384 — both pre-existing and out of scope here — cost if wrong: CJK prompts are refused near 1,333 characters because the frontend counts characters; fix as a separate change.*
+
+### Rulings (2026-10-18 — Todo tags, recurrence and steps)
+
+- *Ruling: `PATCH /todos/:id` and `set_completed` share one locked completion path in `TodoService` (row `FOR UPDATE`, flip, spawn successor, publish the event in the same transaction, then commit) — a second path would double-spawn or skip the event on done→undo→done — cost if wrong: duplicate or missing recurring successors.*
+- *Ruling: `todos.recurrence_anchor` stores the schedule's anchor date, set when recurrence turns on or `due_at` changes on a recurring todo and cleared on `none`; the successor is computed from it, strictly after now — late completion never drifts the schedule — cost if wrong: recurring todos drift to the completion date.*
+- *Ruling: `next_todo_id` on the completed row is the spawn-once guard and is returned on the PATCH response; it names the successor, which itself arrives with the next list fetch or SSE refresh — cost if wrong: the web UI cannot jump straight to the successor without a list refresh.*
+- *Ruling: the new `TodoItem` fields (`tags`, `recurrence`, `recurrence_anchor`, `next_todo_id`) carry `#[serde(default)]` — queued jobs, outbox events and clients serialized before `0013` must still deserialize — cost if wrong: in-flight payloads fail to parse across the deploy.*
+- *Ruling: tag add/remove from chat goes through the locked `TodoService::edit_tags(owner, id, add, remove)`, never an interface-layer read-modify-write — AGENTS §4.3 outranks the spec's interface-layer wording, and concurrent edits across channels otherwise lose tags — cost if wrong: one extra service method.*
+- *Ruling: chat `!todo ... due <duration>` is relative-only (`2d`, `3h`); absolute dates stay on REST/MCP/AI tools — the chat grammar stays unambiguous across time zones — cost if wrong: users must use the web UI for a fixed date.*
+- *Ruling: a missing step and another owner's todo or step both return `AppError::NotFound` (404), never 400 or 403 — spec §6.2 and no ownership oracle — cost if wrong: HTTP clients see 400 for a missing step.*
+- *Ruling: tags share one rule, `domain::tags::Tag` (Unicode letters/digits, `_`, `-`, at most 50 chars, lowercased), used by notes and todos and (de)serialized via `try_from`/`into` String so no stored or wire value bypasses `Tag::parse` — widening is backward compatible for existing note tags — cost if wrong: note and todo tag rules diverge.*
 
 ---
 

@@ -1,14 +1,29 @@
 //! Todo application service.
 
+mod completion;
+mod steps;
+mod tags;
+
+pub use completion::CompletionOutcome;
+pub use steps::STEP_NOT_FOUND;
+
 use sqlx::PgPool;
 
 use crate::application::reminders::ReminderService;
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
 use crate::domain::events::SystemEvent;
+use crate::domain::reminders::RecurrencePattern;
 use crate::domain::reminders::{ReminderPlan, ReminderSource, SyncOutcome};
-use crate::domain::todos::{wanted_trigger, NewTodo, TodoItem, TodoPatch};
+use crate::domain::tags::Tag;
+use crate::domain::todos::{wanted_trigger, NewTodo, TodoError, TodoItem};
 use crate::infrastructure::postgres::repositories::{self, outbox};
+
+impl From<TodoError> for AppError {
+    fn from(err: TodoError) -> Self {
+        AppError::Validation(err.to_string())
+    }
+}
 
 #[derive(Clone)]
 pub struct TodoService {
@@ -27,6 +42,13 @@ impl TodoService {
         input: NewTodo,
     ) -> Result<(TodoItem, SyncOutcome), AppError> {
         input.validate()?;
+        // A recurring series is anchored to the due date it starts from.
+        let input = NewTodo {
+            recurrence_anchor: (input.recurrence != RecurrencePattern::None)
+                .then_some(input.due_at)
+                .flatten(),
+            ..input
+        };
 
         let remind_room = input.remind_room_id.clone();
         let mut tx = self.pool.begin().await?;
@@ -48,63 +70,6 @@ impl TodoService {
     ) -> Result<Option<TodoItem>, AppError> {
         let item = repositories::todos::find_owned(&self.pool, owner_id, id).await?;
         Ok(item)
-    }
-
-    pub async fn update(
-        &self,
-        owner_id: &AccountId,
-        id: i64,
-        patch: TodoPatch,
-    ) -> Result<(TodoItem, SyncOutcome), AppError> {
-        patch.validate()?;
-
-        let remind_room = patch.remind_room_id.clone();
-        let mut tx = self.pool.begin().await?;
-        let updated = repositories::todos::update(&mut *tx, owner_id, id, &patch)
-            .await?
-            .ok_or_else(|| {
-                AppError::NotFound("Todo item not found or access denied".to_string())
-            })?;
-        outbox::publish(&mut tx, &SystemEvent::TodoUpdated(updated.clone())).await?;
-        tx.commit().await?;
-
-        let sync_outcome = self
-            .sync_reminder_for_todo(&updated, remind_room.as_deref())
-            .await?;
-
-        Ok((updated, sync_outcome))
-    }
-
-    pub async fn set_completed(
-        &self,
-        owner_id: &AccountId,
-        id: i64,
-        completed: bool,
-    ) -> Result<TodoItem, AppError> {
-        let existing = self.find_owned(owner_id, id).await?.ok_or_else(|| {
-            AppError::NotFound("Todo item not found or access denied".to_string())
-        })?;
-
-        if existing.completed == completed {
-            return Ok(existing);
-        }
-
-        let mut tx = self.pool.begin().await?;
-        let updated = repositories::todos::set_completed(&mut *tx, id, completed)
-            .await?
-            .ok_or_else(|| AppError::NotFound("Todo item not found".to_string()))?;
-        outbox::publish(&mut tx, &SystemEvent::TodoUpdated(updated.clone())).await?;
-        tx.commit().await?;
-
-        if completed {
-            self.reminders
-                .cancel_due_reminder(ReminderSource::Todo, id)
-                .await?;
-        } else {
-            self.sync_reminder_for_todo(&updated, None).await?;
-        }
-
-        Ok(updated)
     }
 
     pub async fn delete(&self, owner_id: &AccountId, id: i64) -> Result<(), AppError> {
@@ -188,16 +153,18 @@ impl TodoService {
         owner_id: &AccountId,
         room_id: Option<&str>,
         completed: Option<bool>,
+        tag: Option<&Tag>,
         limit: i64,
         offset: i64,
     ) -> Result<Vec<TodoItem>, AppError> {
+        let tag = tag.map(Tag::as_str);
         let items = if let Some(room) = room_id {
             repositories::todos::list_room_user(
-                &self.pool, room, owner_id, completed, limit, offset,
+                &self.pool, room, owner_id, completed, tag, limit, offset,
             )
             .await?
         } else {
-            repositories::todos::list_all_user(&self.pool, owner_id, completed, limit, offset)
+            repositories::todos::list_all_user(&self.pool, owner_id, completed, tag, limit, offset)
                 .await?
         };
 
@@ -209,14 +176,26 @@ impl TodoService {
         owner_id: &AccountId,
         room_id: Option<&str>,
         completed: Option<bool>,
+        tag: Option<&Tag>,
     ) -> Result<i64, AppError> {
+        let tag = tag.map(Tag::as_str);
         let count = if let Some(room) = room_id {
-            repositories::todos::count_room_user(&self.pool, room, owner_id, completed).await?
+            repositories::todos::count_room_user(&self.pool, room, owner_id, completed, tag).await?
         } else {
-            repositories::todos::count_all_user(&self.pool, owner_id, completed).await?
+            repositories::todos::count_all_user(&self.pool, owner_id, completed, tag).await?
         };
 
         Ok(count)
+    }
+
+    /// The owner's tags over active todos with their todo counts. A stored
+    /// value that no longer parses predates validation and is skipped.
+    pub async fn list_tags(&self, owner_id: &AccountId) -> Result<Vec<(Tag, i64)>, AppError> {
+        let rows = repositories::todos::list_tags(&self.pool, owner_id).await?;
+        Ok(rows
+            .into_iter()
+            .filter_map(|(raw, count)| Tag::parse(&raw).ok().map(|tag| (tag, count)))
+            .collect())
     }
 
     pub async fn list_room(
@@ -286,8 +265,14 @@ impl TodoService {
 mod tests {
     use crate::application::AppServices;
     use crate::domain::accounts::AccountId;
-    use crate::domain::todos::{NewTodo, TodoPriority};
+    use crate::domain::reminders::RecurrencePattern;
+    use crate::domain::tags::Tag;
+    use crate::domain::todos::{NewTodo, TodoPatch, TodoPriority};
     use crate::infrastructure::postgres::repositories;
+
+    fn tag(raw: &str) -> Tag {
+        Tag::parse(raw).unwrap()
+    }
 
     fn new_todo(text: &str) -> NewTodo {
         NewTodo {
@@ -298,6 +283,9 @@ mod tests {
             due_at: None,
             remind_before_minutes: None,
             remind_room_id: None,
+            tags: vec![],
+            recurrence: crate::domain::reminders::RecurrencePattern::None,
+            recurrence_anchor: None,
         }
     }
 
@@ -342,7 +330,14 @@ mod tests {
             .await
             .is_err());
 
-        assert_eq!(services.todos.count(&owner, None, None).await.unwrap(), 0);
+        assert_eq!(
+            services
+                .todos
+                .count(&owner, None, None, None)
+                .await
+                .unwrap(),
+            0
+        );
         assert!(repositories::outbox::event_types_for(&pool, &owner)
             .await
             .unwrap()
@@ -369,5 +364,160 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(types.iter().filter(|t| *t == "TodoDeleted").count(), 2);
+    }
+
+    /// Given recurrence and a due date, When the todo is created, Then the series is anchored to it.
+    #[tokio::test]
+    async fn create_anchors_a_recurring_todo_to_its_due_date() {
+        let (_pool, services, owner) = setup("todo_anchor_create").await;
+        let due = crate::utils::time::now_at_storage_precision();
+        let input = NewTodo {
+            due_at: Some(due),
+            recurrence: RecurrencePattern::Monthly,
+            ..new_todo("rent")
+        };
+        let (item, _) = services.todos.create(&owner, input).await.unwrap();
+        assert_eq!(item.recurrence_anchor, Some(due));
+
+        let (plain, _) = services
+            .todos
+            .create(&owner, new_todo("plain"))
+            .await
+            .unwrap();
+        assert_eq!(plain.recurrence_anchor, None);
+    }
+
+    /// Given a todo, When recurrence is turned on, the due date moved, or recurrence
+    /// cleared, Then the anchor follows the rule (and ignores unrelated edits).
+    #[tokio::test]
+    async fn update_maintains_the_recurrence_anchor() {
+        let (_pool, services, owner) = setup("todo_anchor_update").await;
+        let due = crate::utils::time::now_at_storage_precision();
+        let later = due + chrono::Duration::days(3);
+        let input = NewTodo {
+            due_at: Some(due),
+            ..new_todo("rent")
+        };
+        let (item, _) = services.todos.create(&owner, input).await.unwrap();
+        assert_eq!(item.recurrence_anchor, None);
+
+        let on = TodoPatch {
+            recurrence: Some(RecurrencePattern::Weekly),
+            ..Default::default()
+        };
+        let (item, _) = services.todos.update(&owner, item.id, on).await.unwrap();
+        assert_eq!(item.recurrence_anchor, Some(due));
+
+        let rename = TodoPatch {
+            text: Some("rent!".to_string()),
+            ..Default::default()
+        };
+        let (item, _) = services
+            .todos
+            .update(&owner, item.id, rename)
+            .await
+            .unwrap();
+        assert_eq!(item.recurrence_anchor, Some(due));
+
+        let moved = TodoPatch {
+            due_at: Some(Some(later)),
+            ..Default::default()
+        };
+        let (item, _) = services.todos.update(&owner, item.id, moved).await.unwrap();
+        assert_eq!(item.recurrence_anchor, Some(later));
+
+        let off = TodoPatch {
+            recurrence: Some(RecurrencePattern::None),
+            ..Default::default()
+        };
+        let (item, _) = services.todos.update(&owner, item.id, off).await.unwrap();
+        assert_eq!(item.recurrence_anchor, None);
+    }
+
+    /// Given a tagged todo, When a patch replaces the tag set, Then the new
+    /// set is stored and TodoUpdated is published.
+    #[tokio::test]
+    async fn update_replaces_tag_set_and_publishes_updated() {
+        let (pool, services, owner) = setup("todo_tags_replace").await;
+        let input = NewTodo {
+            tags: vec![tag("home")],
+            ..new_todo("sweep")
+        };
+        let (item, _) = services.todos.create(&owner, input).await.unwrap();
+
+        let patch = TodoPatch {
+            tags: Some(vec![tag("work"), tag("urgent")]),
+            ..Default::default()
+        };
+        let (updated, _) = services.todos.update(&owner, item.id, patch).await.unwrap();
+
+        assert_eq!(updated.tags, vec![tag("urgent"), tag("work")]);
+        assert_eq!(
+            repositories::outbox::event_types_for(&pool, &owner)
+                .await
+                .unwrap(),
+            vec!["TodoCreated", "TodoUpdated"]
+        );
+    }
+
+    /// Given two owners with tagged todos, When each lists tags, Then each
+    /// sees only their own, counted over active todos.
+    #[tokio::test]
+    async fn list_tags_is_owner_scoped() {
+        let (pool, services, alice) = setup("todo_tags_alice").await;
+        let bob = AccountId::from_seed("todo_tags_bob");
+        crate::db::pool::seed_account(&pool, &bob).await;
+        for (owner, text, tags) in [
+            (&alice, "a1", vec![tag("home"), tag("work")]),
+            (&alice, "a2", vec![tag("home")]),
+            (&bob, "b1", vec![tag("secret")]),
+        ] {
+            let input = NewTodo {
+                tags,
+                ..new_todo(text)
+            };
+            services.todos.create(owner, input).await.unwrap();
+        }
+
+        assert_eq!(
+            services.todos.list_tags(&alice).await.unwrap(),
+            vec![(tag("home"), 2), (tag("work"), 1)]
+        );
+        assert_eq!(
+            services.todos.list_tags(&bob).await.unwrap(),
+            vec![(tag("secret"), 1)]
+        );
+    }
+
+    /// Given tagged todos, When listing and counting with a tag filter, Then
+    /// only matching todos are returned.
+    #[tokio::test]
+    async fn list_and_count_filter_by_tag() {
+        let (_pool, services, owner) = setup("todo_tags_filter").await;
+        for (text, tags) in [("x", vec![tag("home")]), ("y", vec![tag("work")])] {
+            let input = NewTodo {
+                tags,
+                ..new_todo(text)
+            };
+            services.todos.create(&owner, input).await.unwrap();
+        }
+        let home = tag("home");
+
+        let items = services
+            .todos
+            .list(&owner, None, None, Some(&home), 50, 0)
+            .await
+            .unwrap();
+        let count = services
+            .todos
+            .count(&owner, None, None, Some(&home))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            items.iter().map(|i| i.text.as_str()).collect::<Vec<_>>(),
+            ["x"]
+        );
+        assert_eq!(count, 1);
     }
 }

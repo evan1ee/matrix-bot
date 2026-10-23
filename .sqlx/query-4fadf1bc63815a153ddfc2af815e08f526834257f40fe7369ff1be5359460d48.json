@@ -1,0 +1,79 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE todo_steps\n        SET text = COALESCE($3, text), done = COALESCE($4, done)\n        WHERE todo_id = $1 AND id = $2\n        RETURNING id, todo_id, position, text, done\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "todo_steps",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "todo_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "todo_steps",
+            "name": "todo_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "position",
+        "type_info": "Int4",
+        "origin": {
+          "Table": {
+            "table": "todo_steps",
+            "name": "position"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "text",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "todo_steps",
+            "name": "text"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "done",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "todo_steps",
+            "name": "done"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Int8",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "4fadf1bc63815a153ddfc2af815e08f526834257f40fe7369ff1be5359460d48"
+}

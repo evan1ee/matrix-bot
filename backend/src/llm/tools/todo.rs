@@ -3,9 +3,56 @@ use chrono::{DateTime, Duration, TimeZone, Utc};
 use chrono_tz::Tz;
 
 use crate::domain::accounts::AccountId;
-use crate::domain::todos::{NewTodo, TodoPatch, TodoPriority};
+use crate::domain::reminders::RecurrencePattern;
+use crate::domain::tags::{parse_tags, Tag};
+use crate::domain::todos::{NewTodo, TodoItem, TodoPatch, TodoPriority};
 use crate::infrastructure::inference::llm::ToolDefinition;
 use serde_json::json;
+
+/// A task as `get_my_tasks` reports it: the item plus checklist progress.
+#[derive(serde::Serialize)]
+struct TaskView {
+    #[serde(flatten)]
+    item: TodoItem,
+    steps_done: i64,
+    steps_total: i64,
+}
+
+/// Strict: an unknown value is an error for the model, never a silent default.
+fn parse_recurrence(raw: &str) -> Result<RecurrencePattern, String> {
+    match raw {
+        "none" => Ok(RecurrencePattern::None),
+        "daily" => Ok(RecurrencePattern::Daily),
+        "weekly" => Ok(RecurrencePattern::Weekly),
+        "monthly" => Ok(RecurrencePattern::Monthly),
+        "yearly" => Ok(RecurrencePattern::Yearly),
+        other => Err(format!(
+            "Invalid recurrence '{other}': use none, daily, weekly, monthly or yearly"
+        )),
+    }
+}
+
+fn arg_recurrence(args: &serde_json::Value) -> Result<Option<RecurrencePattern>, String> {
+    match args.get("recurrence") {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(v) => v
+            .as_str()
+            .ok_or_else(|| "Field 'recurrence' must be a string".to_string())
+            .and_then(parse_recurrence)
+            .map(Some),
+    }
+}
+
+fn arg_tags(args: &serde_json::Value) -> Result<Option<Vec<Tag>>, String> {
+    match args.get("tags") {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(v) => {
+            let raw: Vec<String> = serde_json::from_value(v.clone())
+                .map_err(|_| "Field 'tags' must be an array of strings".to_string())?;
+            parse_tags(&raw).map(Some).map_err(|e| e.to_string())
+        }
+    }
+}
 
 fn parse_due_at(due_str: &str, tz: &Tz) -> Option<DateTime<Utc>> {
     if let Ok(dt) = DateTime::parse_from_rfc3339(due_str) {
@@ -39,12 +86,36 @@ pub async fn execute_tool(
             async {
                 let acct = *owner_id;
                 let completed = args.get("completed").and_then(|v| v.as_bool());
+                let tag = args
+                    .get("tag")
+                    .and_then(|v| v.as_str())
+                    .map(Tag::parse)
+                    .transpose()
+                    .map_err(|e| e.to_string())?;
                 let items = services
                     .todos
-                    .list(&acct, None, completed, 50, 0)
+                    .list(&acct, None, completed, tag.as_ref(), 50, 0)
                     .await
                     .map_err(|e| e.to_string())?;
-                serde_json::to_string(&items).map_err(|e| e.to_string())
+                let ids: Vec<i64> = items.iter().map(|t| t.id).collect();
+                let progress = services
+                    .todos
+                    .step_progress(&acct, &ids)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let views: Vec<TaskView> = items
+                    .into_iter()
+                    .map(|item| {
+                        let (steps_done, steps_total) =
+                            progress.get(&item.id).copied().unwrap_or((0, 0));
+                        TaskView {
+                            item,
+                            steps_done,
+                            steps_total,
+                        }
+                    })
+                    .collect();
+                serde_json::to_string(&views).map_err(|e| e.to_string())
             }
             .await,
         ),
@@ -76,6 +147,8 @@ pub async fn execute_tool(
                     None
                 };
                 let remind_before = args.get("remind_before_minutes").and_then(|v| v.as_i64());
+                let tags = arg_tags(args)?.unwrap_or_default();
+                let recurrence = arg_recurrence(args)?.unwrap_or_default();
 
                 let rooms = &services.rooms;
                 let acct = *owner_id;
@@ -103,6 +176,9 @@ pub async fn execute_tool(
                             due_at,
                             remind_before_minutes: remind_before,
                             remind_room_id: None,
+                            tags,
+                            recurrence,
+                            recurrence_anchor: None,
                         },
                     )
                     .await
@@ -126,7 +202,7 @@ pub async fn execute_tool(
                 {
                     let active_tasks = services
                         .todos
-                        .list(&acct, None, Some(false), 50, 0)
+                        .list(&acct, None, Some(false), None, 50, 0)
                         .await
                         .map_err(|e| e.to_string())?;
                     let matched = active_tasks
@@ -144,13 +220,14 @@ pub async fn execute_tool(
                     );
                 };
 
-                let updated = services
+                let outcome = services
                     .todos
                     .set_completed(&acct, target_id, true)
                     .await
                     .map_err(|e| e.to_string())?;
 
-                serde_json::to_string(&updated).map_err(|e| e.to_string())
+                serde_json::to_string(&json!({ "todo": outcome.todo, "next": outcome.next }))
+                    .map_err(|e| e.to_string())
             }
             .await,
         ),
@@ -185,6 +262,9 @@ pub async fn execute_tool(
                     None
                 };
 
+                let tags = arg_tags(args)?;
+                let recurrence = arg_recurrence(args)?;
+
                 let acct = *owner_id;
                 let (updated, _) = services
                     .todos
@@ -195,6 +275,8 @@ pub async fn execute_tool(
                             text: text.map(ToString::to_string),
                             priority,
                             due_at,
+                            tags,
+                            recurrence,
                             ..Default::default()
                         },
                     )
@@ -244,6 +326,10 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
                     "completed": {
                         "type": "boolean",
                         "description": "Optional filter: true for completed tasks, false for active tasks"
+                    },
+                    "tag": {
+                        "type": "string",
+                        "description": "Optional filter: only tasks carrying this tag"
                     }
                 },
                 "required": [],
@@ -272,6 +358,17 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
                     "remind_before_minutes": {
                         "type": "integer",
                         "description": "Minutes before due_date to alert (e.g. 15, 60)"
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "maxItems": 10,
+                        "description": "Tags (letters, digits, - and _ only)"
+                    },
+                    "recurrence": {
+                        "type": "string",
+                        "enum": ["none", "daily", "weekly", "monthly", "yearly"],
+                        "description": "Repeat schedule; completing a repeating task creates the next one (needs a due date)"
                     },
                     "room": {
                         "type": "string",
@@ -323,6 +420,17 @@ pub fn tool_definitions() -> Vec<ToolDefinition> {
                     "due_date": {
                         "type": "string",
                         "description": "New due date in ISO 8601 format"
+                    },
+                    "tags": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "maxItems": 10,
+                        "description": "Replaces the task's whole tag set (letters, digits, - and _ only)"
+                    },
+                    "recurrence": {
+                        "type": "string",
+                        "enum": ["none", "daily", "weekly", "monthly", "yearly"],
+                        "description": "New repeat schedule"
                     }
                 },
                 "required": ["id"],

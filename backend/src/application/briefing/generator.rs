@@ -40,7 +40,7 @@ pub async fn generate_briefing(
     let tickers: Vec<TickerPerformance> = fetch_all_tickers_performance(&holdings).await;
 
     // 2. Pending tasks
-    let todos = todos_repo::list_all_user(pool, owner_id, Some(false), 50, 0)
+    let todos = todos_repo::list_all_user(pool, owner_id, Some(false), None, 50, 0)
         .await
         .unwrap_or_default();
 
