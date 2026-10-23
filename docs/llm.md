@@ -182,6 +182,14 @@ Well-formed model output is still not authoritative. Tool results are fed back a
 - **`evaluate_bill_due_adequacy { days_ahead? }`** (`llm/tools/bills.rs`): Calls `recurring_bills::due::evaluate_bill_cash_adequacy`. Groups recurring bills into urgency buckets (`DueToday`, `DueWithin3Days`, `DueWithin14Days`, `Later`) and evaluates cash reserve adequacy against liquid account balances.
 - **`evaluate_habit_consistency`** (`llm/tools/habits.rs`): Calls `habits::consistency::evaluate_habit_consistency`. Calculates completion rates normalized against each habit's `target_days_per_week` (clamped 1..=7), classifies trends (`Improving`, `Stable`, `AtRisk`), and detects slipping routines without false positives on non-daily/weekday habits.
 
+### Budget tools
+
+`llm/tools/budgets.rs` exposes three tools over `services.finance`; the owner always comes from the authenticated context, and database errors reach the model only as a generic message.
+
+- **`get_budget_status { month? }`**: every budget measured against the month (`YYYY-MM`, default the current one) with spent, remaining, percent used and state.
+- **`set_budget { amount, currency?, category?, alerts_enabled? }`**: creates or updates the budget for that scope; `category` is resolved case-insensitively and never created; an omitted `alerts_enabled` keeps the stored value.
+- **`remove_budget { category?, currency? }`**: deletes the budget for that scope; no category means the overall budget.
+
 ### Knowledge tools
 
 `llm/tools/knowledge.rs` exposes four tools over `services.knowledge_search` and `services.notes`:
