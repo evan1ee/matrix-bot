@@ -7,13 +7,13 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tracing::{debug, warn};
 
-use super::{message, Outbound, CHANNEL_RETRY};
+use super::dm::{dm_linked_identities, owner_ready};
+use super::{Outbound, CHANNEL_RETRY};
 use crate::application::portfolio::TriggeredAlert;
 use crate::application::{AppError, AppServices};
-use crate::domain::channels::{LinkedIdentity, PlatformIdentity, PlatformUserId};
+use crate::domain::channels::LinkedIdentity;
 use crate::domain::jobs::JobType;
 use crate::domain::portfolio::alerts::{AlertCondition, PriceAlert};
-use crate::interface::channels::message::Target;
 use crate::jobs::{JobContext, JobError, JobHandler};
 use crate::utils::html::html_escape;
 
@@ -79,24 +79,6 @@ impl CheckAlertsHandler {
         Self { services, outbound }
     }
 
-    /// Whether `owner` can receive an alert right now: either they have at
-    /// least one linked identity on a connected channel, or they have no
-    /// linked identities on any channel configured on this deployment (web-only).
-    pub(crate) async fn is_owner_ready(
-        &self,
-        owner: &crate::domain::accounts::AccountId,
-    ) -> Result<bool, AppError> {
-        let identities = self.services.identity.list(owner).await?;
-        let configured: Vec<_> = identities
-            .into_iter()
-            .filter(|id| self.outbound.is_configured(id.channel))
-            .collect();
-        Ok(configured.is_empty()
-            || configured
-                .iter()
-                .any(|id| self.outbound.is_connected(id.channel)))
-    }
-
     /// Partitions the owners of active alerts on `symbol` into those ready to
     /// be evaluated now and whether any owner had to be deferred because all
     /// of their configured channel identities are currently disconnected.
@@ -116,7 +98,7 @@ impl CheckAlertsHandler {
             if ready.contains(&owner) || deferred.contains(&owner) {
                 continue;
             }
-            if self.is_owner_ready(&owner).await? {
+            if owner_ready(&self.services, self.outbound.as_ref(), &owner).await? {
                 ready.insert(owner);
             } else {
                 deferred.insert(owner);
@@ -135,28 +117,7 @@ impl CheckAlertsHandler {
         identities: Vec<LinkedIdentity>,
     ) {
         let (plain, html) = format_alert_notification(&hit.alert, hit.price_minor);
-        for linked in identities {
-            if !self.outbound.is_configured(linked.channel)
-                || !self.outbound.is_connected(linked.channel)
-            {
-                continue;
-            }
-            let user_id = match PlatformUserId::parse(linked.channel, &linked.user_id) {
-                Ok(id) => id,
-                Err(err) => {
-                    warn!(channel = %linked.channel, user_id = %linked.user_id, error = %err, "Alert DM not sent");
-                    continue;
-                }
-            };
-            let identity = PlatformIdentity::new(linked.channel, user_id, linked.display_name);
-            if let Err(err) = self
-                .outbound
-                .send(message(Target::Direct(identity), &plain, &html))
-                .await
-            {
-                warn!(channel = %linked.channel, user_id = %linked.user_id, error = %err, "Alert DM not sent");
-            }
-        }
+        dm_linked_identities(self.outbound.as_ref(), identities, &plain, &html).await;
     }
 
     #[cfg(test)]
@@ -310,7 +271,7 @@ mod tests {
 
     use super::*;
     use crate::domain::accounts::AccountId;
-    use crate::domain::channels::Channel;
+    use crate::domain::channels::{Channel, PlatformIdentity, PlatformUserId};
     use crate::domain::jobs::JobId;
     use crate::domain::portfolio::alerts::AlertCondition;
     use crate::interface::channels::adapter::ChannelError;
