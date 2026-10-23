@@ -5,7 +5,7 @@ use crate::domain::finance::{Direction, NewTransaction};
 use crate::infrastructure::postgres::repositories::{self, finance as repo};
 use crate::utils::time::now_at_storage_precision;
 
-async fn setup(seed: &str) -> (sqlx::PgPool, AppServices, AccountId) {
+pub(super) async fn setup(seed: &str) -> (sqlx::PgPool, AppServices, AccountId) {
     let pool = crate::db::pool::test_pool().await;
     crate::db::migrate::run_migrations_unlocked(&pool).await;
     let owner = AccountId::from_seed(seed);
@@ -14,7 +14,7 @@ async fn setup(seed: &str) -> (sqlx::PgPool, AppServices, AccountId) {
     (pool, services, owner)
 }
 
-fn budget(category: Option<&str>, currency: &str, limit_minor: i64) -> NewBudget {
+pub(super) fn budget(category: Option<&str>, currency: &str, limit_minor: i64) -> NewBudget {
     NewBudget::new(category, currency, limit_minor, true).unwrap()
 }
 

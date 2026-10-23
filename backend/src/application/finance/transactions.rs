@@ -1,6 +1,7 @@
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
 use crate::domain::events::SystemEvent;
+use crate::domain::finance::budget::RecordedTransaction;
 use crate::domain::finance::{
     Direction, FinanceError, ListTransactionsFilter, NewTransaction, Transaction, TransactionPatch,
     MAX_CATEGORY_LEN, MAX_NOTE_LEN,
@@ -16,12 +17,22 @@ impl FinanceService {
         owner: &AccountId,
         input: NewTransaction<'_>,
     ) -> Result<Transaction, AppError> {
+        Ok(self.record_transaction(owner, input).await?.transaction)
+    }
+
+    /// Like [`Self::create_transaction`], and also returns the budgets the write
+    /// pushed past a threshold, for replies that mention them.
+    pub async fn record_transaction(
+        &self,
+        owner: &AccountId,
+        input: NewTransaction<'_>,
+    ) -> Result<RecordedTransaction, AppError> {
         let mut dbtx = self.pool.begin().await?;
-        let tx = self
-            .create_transaction_in_tx(&mut dbtx, owner, input)
+        let recorded = self
+            .record_transaction_in_tx(&mut dbtx, owner, input)
             .await?;
         dbtx.commit().await?;
-        Ok(tx)
+        Ok(recorded)
     }
 
     pub async fn create_transaction_in_tx(
@@ -30,6 +41,18 @@ impl FinanceService {
         owner: &AccountId,
         input: NewTransaction<'_>,
     ) -> Result<Transaction, AppError> {
+        Ok(self
+            .record_transaction_in_tx(dbtx, owner, input)
+            .await?
+            .transaction)
+    }
+
+    async fn record_transaction_in_tx(
+        &self,
+        dbtx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        owner: &AccountId,
+        input: NewTransaction<'_>,
+    ) -> Result<RecordedTransaction, AppError> {
         if let Some(note) = input.note {
             if note.len() > MAX_NOTE_LEN {
                 return Err(FinanceError::NoteTooLong { max: MAX_NOTE_LEN }.into());
@@ -42,7 +65,11 @@ impl FinanceService {
 
         let tx = repo::create_transaction(dbtx, owner, &input, category_id).await?;
         outbox::publish(dbtx, &SystemEvent::TransactionCreated(tx.clone())).await?;
-        Ok(tx)
+        let budgets = self.evaluate_budgets_in_tx(dbtx, owner, &tx).await?;
+        Ok(RecordedTransaction {
+            transaction: tx,
+            budgets,
+        })
     }
 
     /// Convenience helper to record an expense transaction, optionally linking a receipt storage key.
@@ -170,6 +197,9 @@ impl FinanceService {
         .await?
         .ok_or(FinanceError::TransactionNotFound)?;
         outbox::publish(&mut tx, &SystemEvent::TransactionUpdated(updated.clone())).await?;
+        // Only the new values are evaluated; a budget the row left is not alerted.
+        self.evaluate_budgets_in_tx(&mut tx, owner, &updated)
+            .await?;
         tx.commit().await?;
         Ok(updated)
     }

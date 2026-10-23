@@ -303,6 +303,14 @@ pub async fn record_alert(
     Ok(inserted.is_some())
 }
 
+/// Test-only: how many threshold alerts have been recorded in this schema.
+#[cfg(test)]
+pub async fn count_alerts(ex: impl PgExecutor<'_>) -> sqlx::Result<i64> {
+    sqlx::query_scalar("SELECT COUNT(*) FROM finance_budget_alerts")
+        .fetch_one(ex)
+        .await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

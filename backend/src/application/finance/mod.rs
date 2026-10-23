@@ -4,6 +4,7 @@
 //! categories, spending analytics, and public sharing.
 
 mod analytics;
+mod budget_eval;
 mod budgets;
 mod categories;
 mod transactions;
@@ -54,6 +55,8 @@ impl FinanceService {
     }
 }
 
+#[cfg(test)]
+mod budget_eval_tests;
 #[cfg(test)]
 mod budget_tests;
 #[cfg(test)]
