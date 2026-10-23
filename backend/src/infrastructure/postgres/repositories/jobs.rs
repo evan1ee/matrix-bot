@@ -56,6 +56,7 @@ fn payload_json(payload: &JobPayload) -> sqlx::Result<serde_json::Value> {
         JobPayload::MediaProcessReceipt(p) => serde_json::to_value(p),
         JobPayload::AgentExecute(p) => serde_json::to_value(p),
         JobPayload::KnowledgeEmbed(p) => serde_json::to_value(p),
+        JobPayload::BudgetAlert(p) => serde_json::to_value(p),
         JobPayload::Empty => Ok(serde_json::json!({})),
     };
     value.map_err(|e| sqlx::Error::Encode(Box::new(e)))
@@ -362,6 +363,33 @@ pub async fn count_with_type(exec: impl PgExecutor<'_>, job_type: &str) -> sqlx:
     )
     .fetch_one(exec)
     .await
+}
+
+/// Test-only: the dedupe keys of every job of `job_type`, oldest first.
+#[cfg(test)]
+pub async fn dedupe_keys_with_type(
+    exec: impl PgExecutor<'_>,
+    job_type: &str,
+) -> sqlx::Result<Vec<String>> {
+    sqlx::query_scalar("SELECT dedupe_key FROM jobs WHERE job_type = $1 ORDER BY id")
+        .bind(job_type)
+        .fetch_all(exec)
+        .await
+}
+
+/// Test-only: makes every later `jobs` insert in this test's schema raise, so a
+/// service's real `enqueue` fails (a dedupe conflict would be silently ignored).
+#[cfg(test)]
+pub async fn fail_every_enqueue(pool: &sqlx::PgPool) {
+    sqlx::raw_sql(
+        "CREATE FUNCTION jobs_test_fail() RETURNS trigger LANGUAGE plpgsql AS \
+         $$ BEGIN RAISE EXCEPTION 'job enqueue forced to fail'; END $$; \
+         CREATE TRIGGER jobs_test_fail BEFORE INSERT ON jobs \
+         FOR EACH ROW EXECUTE FUNCTION jobs_test_fail()",
+    )
+    .execute(pool)
+    .await
+    .expect("install the failing-enqueue trigger");
 }
 
 /// Pushes `heartbeat_at` and `completed_at` `secs` into the past.

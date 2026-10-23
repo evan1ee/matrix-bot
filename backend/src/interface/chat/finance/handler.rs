@@ -1,6 +1,7 @@
 use chrono::{Datelike, TimeZone, Utc};
 use tracing::error;
 
+use super::budget::{budget_lines, handle_budget};
 use super::category::handle_category;
 use crate::application::AppServices;
 use crate::domain::accounts::AccountId;
@@ -36,10 +37,17 @@ pub async fn handle_finance_command(
         ("income", rest)
     } else if let Some(rest) = strip_command(&lower, body, "finance") {
         ("expense", rest)
+    } else if let Some(rest) = strip_command(&lower, body, "budget") {
+        ("budget", rest)
     } else {
         let rest = strip_command(&lower, body, "category")?;
         ("category", rest)
     };
+
+    if keyword == "budget" {
+        let default_currency = services.settings.get_or_default(owner_id).await.currency;
+        return Some(handle_budget(services, owner_id, rest, &default_currency).await);
+    }
 
     if keyword == "category" {
         return handle_category(&services.finance, owner_id, rest).await;
@@ -142,8 +150,15 @@ pub async fn handle_finance_command(
         create_missing_category: false,
     };
 
-    match services.finance.create_transaction(owner_id, input).await {
-        Ok(tx) => {
+    match services.finance.record_transaction(owner_id, input).await {
+        Ok(recorded) => {
+            let tx = recorded.transaction;
+            let budgets = budget_lines(&recorded.budgets);
+            let budgets = if budgets.is_empty() {
+                budgets
+            } else {
+                format!("\n{budgets}")
+            };
             let cat_str = tx
                 .category_name
                 .as_deref()
@@ -156,12 +171,13 @@ pub async fn handle_finance_command(
                 .unwrap_or_default();
 
             Some(format!(
-                "✅ Logged {} <b>{} {}</b>{}{}",
+                "✅ Logged {} <b>{} {}</b>{}{}{}",
                 tx.direction.as_str(),
                 format_amount(tx.amount_minor, tx.currency_exponent as u32),
                 tx.currency,
                 cat_str,
-                note_str
+                note_str,
+                budgets
             ))
         }
         Err(crate::application::AppError::Validation(msg)) => {

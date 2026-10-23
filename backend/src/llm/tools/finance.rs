@@ -263,9 +263,9 @@ pub async fn execute_tool(
                     room_id.to_string()
                 };
 
-                let tx = services
+                let recorded = services
                     .finance
-                    .create_transaction(
+                    .record_transaction(
                         &acct,
                         NewTransaction {
                             direction,
@@ -283,9 +283,15 @@ pub async fn execute_tool(
                         },
                     )
                     .await
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|e| super::budgets::model_error("record_finance_entry", e))?;
 
-                serde_json::to_string(&tx).map_err(|e| e.to_string())
+                let mut result =
+                    serde_json::to_value(&recorded.transaction).map_err(|e| e.to_string())?;
+                let attention = super::budgets::attention_json(&recorded.budgets);
+                if !attention.is_empty() {
+                    result["budgets"] = serde_json::Value::Array(attention);
+                }
+                Ok(result.to_string())
             }
             .await,
         ),

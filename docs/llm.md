@@ -202,6 +202,14 @@ Well-formed model output is still not authoritative. Tool results are fed back a
 
 `add_todo`/`update_todo` accept `tags` (normalized by `domain::tags::Tag`) and `recurrence` (`none|daily|weekly|monthly|yearly`, requires a due date); `get_my_tasks` accepts a `tag` filter. `complete_todo` returns `{todo, next}`, where `next` is the spawned successor of a recurring todo or `null`. `llm/tools/todo_steps.rs` adds `add_todo_step { todo_id, text }` and `set_todo_step_done { todo_id, position, done }` (`position` is the 1-based number `show` displays); a missing step or another owner's todo reads as not found.
 
+### Budget tools
+
+`llm/tools/budgets.rs` exposes three tools over `services.finance`; the owner always comes from the authenticated context, and database errors reach the model only as a generic message.
+
+- **`get_budget_status { month? }`**: every budget measured against the month (`YYYY-MM`, default the current one) with spent, remaining, percent used and state.
+- **`set_budget { amount, currency?, category?, alerts_enabled? }`**: creates or updates the budget for that scope; `category` is resolved case-insensitively and never created; an omitted `alerts_enabled` keeps the stored value.
+- **`remove_budget { category?, currency? }`**: deletes the budget for that scope; no category means the overall budget.
+
 ### Knowledge tools
 
 `llm/tools/knowledge.rs` exposes four tools over `services.knowledge_search` and `services.notes`:

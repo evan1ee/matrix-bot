@@ -5,6 +5,7 @@ import { Wallet, BarChart2, Receipt } from 'lucide-react';
 import { PublicTransparencyView } from './components/PublicTransparencyView';
 import { NetWorthStatStrip } from './components/NetWorthStatStrip';
 import { TransactionList } from './components/TransactionList';
+import { BudgetPanel } from './components/BudgetPanel';
 import { AddTransactionModal } from './components/AddTransactionModal';
 import {
   nowInZone,
@@ -66,6 +67,7 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
     queryClient.invalidateQueries({ queryKey: ['transactions'] });
     queryClient.invalidateQueries({ queryKey: ['finance-summary'] });
     queryClient.invalidateQueries({ queryKey: ['finance-analytics'] });
+    queryClient.invalidateQueries({ queryKey: ['finance-budgets'] });
   };
 
   const createMutation = useMutation({
@@ -199,6 +201,8 @@ export const FinanceMainView: React.FC<{ autoFocus?: boolean }> = ({ autoFocus }
             categoryError={categoryError}
             autoFocus={autoFocus}
           />
+
+          <BudgetPanel categories={categories ?? []} defaultCurrency={defaultCurrency} />
 
           {/* Ledger */}
           <TransactionList

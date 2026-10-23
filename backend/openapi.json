@@ -2911,6 +2911,263 @@
         }
       }
     },
+    "/api/v1/finance/budgets": {
+      "get": {
+        "tags": [
+          "finance"
+        ],
+        "operationId": "list_budgets",
+        "parameters": [
+          {
+            "name": "month",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Budgets measured against the month",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/BudgetStatusDto"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid month",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "finance"
+        ],
+        "operationId": "create_budget",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateBudgetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Budget created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetStatusDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown category",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "A budget for that scope and currency exists",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/finance/budgets/{id}": {
+      "put": {
+        "tags": [
+          "finance"
+        ],
+        "operationId": "update_budget",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Budget ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateBudgetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Budget updated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BudgetStatusDto"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "finance"
+        ],
+        "operationId": "delete_budget",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Budget ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Budget deleted"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/finance/categories": {
       "get": {
         "tags": [
@@ -9411,6 +9668,10 @@
           "holdings_count"
         ],
         "properties": {
+          "budgets_attention_count": {
+            "type": "integer",
+            "minimum": 0
+          },
           "habits_completed_count": {
             "type": "integer",
             "minimum": 0
@@ -9430,6 +9691,115 @@
           "upcoming_bills_count": {
             "type": "integer",
             "minimum": 0
+          }
+        }
+      },
+      "BudgetDto": {
+        "type": "object",
+        "required": [
+          "id",
+          "scope",
+          "currency",
+          "currency_exponent",
+          "limit_minor",
+          "alerts_enabled"
+        ],
+        "properties": {
+          "alerts_enabled": {
+            "type": "boolean"
+          },
+          "category_id": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "category_name": {
+            "type": "string",
+            "nullable": true
+          },
+          "currency": {
+            "type": "string"
+          },
+          "currency_exponent": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "limit_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "scope": {
+            "$ref": "#/components/schemas/BudgetScopeDto"
+          }
+        }
+      },
+      "BudgetQuery": {
+        "type": "object",
+        "properties": {
+          "month": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "BudgetScopeDto": {
+        "type": "string",
+        "enum": [
+          "overall",
+          "category"
+        ]
+      },
+      "BudgetStateDto": {
+        "type": "string",
+        "enum": [
+          "ok",
+          "warning",
+          "exceeded"
+        ]
+      },
+      "BudgetStatusDto": {
+        "type": "object",
+        "required": [
+          "budget",
+          "month",
+          "spent_minor",
+          "remaining_minor",
+          "percent_used",
+          "state"
+        ],
+        "properties": {
+          "budget": {
+            "$ref": "#/components/schemas/BudgetDto"
+          },
+          "month": {
+            "type": "string"
+          },
+          "pace": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/PaceDto"
+              }
+            ],
+            "nullable": true
+          },
+          "percent_used": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "remaining_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "spent_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "state": {
+            "$ref": "#/components/schemas/BudgetStateDto"
           }
         }
       },
@@ -9815,6 +10185,30 @@
             "nullable": true
           },
           "url": {
+            "type": "string"
+          }
+        }
+      },
+      "CreateBudgetRequest": {
+        "type": "object",
+        "required": [
+          "currency",
+          "limit"
+        ],
+        "properties": {
+          "alerts_enabled": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "category_id": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "currency": {
+            "type": "string"
+          },
+          "limit": {
             "type": "string"
           }
         }
@@ -11676,6 +12070,23 @@
               }
             ],
             "nullable": true
+          }
+        }
+      },
+      "PaceDto": {
+        "type": "object",
+        "required": [
+          "expected_minor",
+          "projected_minor"
+        ],
+        "properties": {
+          "expected_minor": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "projected_minor": {
+            "type": "integer",
+            "format": "int64"
           }
         }
       },
@@ -13603,6 +14014,19 @@
             "nullable": true
           },
           "title": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "UpdateBudgetRequest": {
+        "type": "object",
+        "properties": {
+          "alerts_enabled": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "limit": {
             "type": "string",
             "nullable": true
           }

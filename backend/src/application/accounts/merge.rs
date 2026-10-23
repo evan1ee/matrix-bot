@@ -405,6 +405,13 @@ mod tests {
         .await
         .unwrap();
         sqlx::query!(
+            "INSERT INTO finance_budgets (owner_id, currency, currency_exponent, limit_minor) VALUES ($1, 'USD', 2, 10000)",
+            from.as_uuid()
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query!(
             "INSERT INTO user_settings (owner_id, timezone, currency) VALUES ($1, 'UTC', 'USD')",
             from.as_uuid()
         )

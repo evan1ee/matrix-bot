@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::accounts::AccountId;
 use crate::domain::channels::{Channel, ConversationAddress};
+use crate::domain::finance::budget::{Budget, Month};
 use crate::domain::finance::{Category, Transaction};
 use crate::domain::portfolio::{Holding, PortfolioAuditEntry, PriceAlert};
 use crate::domain::recurring_bills::RecurringBill;
@@ -53,6 +54,25 @@ pub enum SystemEvent {
     CategoryDeleted {
         id: i64,
         owner_id: AccountId,
+    },
+    BudgetCreated(Budget),
+    BudgetUpdated(Budget),
+    BudgetDeleted {
+        id: i64,
+        owner_id: AccountId,
+    },
+    /// A budget reached the 80 % or 100 % line for `month`. Carries the display
+    /// fields so a consumer needs no further lookup.
+    BudgetThresholdCrossed {
+        owner_id: AccountId,
+        budget_id: i64,
+        month: Month,
+        threshold: i16,
+        spent_minor: i64,
+        limit_minor: i64,
+        currency: String,
+        currency_exponent: i64,
+        scope_name: String,
     },
     /// Carries `owner_id` alongside the settings because `UserSettings` holds
     /// only the two preferences — the row is keyed by owner, not identified by
@@ -227,6 +247,10 @@ impl SystemEvent {
             SystemEvent::TransactionDeleted { owner_id, .. } => owner_id,
             SystemEvent::CategoryCreated(x) => &x.owner_id,
             SystemEvent::CategoryDeleted { owner_id, .. } => owner_id,
+            SystemEvent::BudgetCreated(x) => &x.owner_id,
+            SystemEvent::BudgetUpdated(x) => &x.owner_id,
+            SystemEvent::BudgetDeleted { owner_id, .. } => owner_id,
+            SystemEvent::BudgetThresholdCrossed { owner_id, .. } => owner_id,
             SystemEvent::SettingsUpdated { owner_id, .. } => owner_id,
             SystemEvent::PortfolioHoldingCreated(x) => &x.owner_id,
             SystemEvent::PortfolioHoldingUpdated(x) => &x.owner_id,
@@ -292,6 +316,10 @@ impl SystemEvent {
             SystemEvent::TransactionDeleted { .. } => "TransactionDeleted",
             SystemEvent::CategoryCreated(_) => "CategoryCreated",
             SystemEvent::CategoryDeleted { .. } => "CategoryDeleted",
+            SystemEvent::BudgetCreated(_) => "BudgetCreated",
+            SystemEvent::BudgetUpdated(_) => "BudgetUpdated",
+            SystemEvent::BudgetDeleted { .. } => "BudgetDeleted",
+            SystemEvent::BudgetThresholdCrossed { .. } => "BudgetThresholdCrossed",
             SystemEvent::SettingsUpdated { .. } => "SettingsUpdated",
             SystemEvent::PortfolioHoldingCreated(_) => "PortfolioHoldingCreated",
             SystemEvent::PortfolioHoldingUpdated(_) => "PortfolioHoldingUpdated",
@@ -495,7 +523,10 @@ mod tests {
     fn one_of_each(o: AccountId) -> Vec<SystemEvent> {
         use crate::domain::{
             bookmarks::Bookmark,
-            finance::{Category, Direction, Transaction},
+            finance::{
+                budget::{Budget, BudgetScope},
+                Category, Direction, Transaction,
+            },
             footprints::Footprint,
             habits::Habit,
             life::{LifeDayLog, LifeProfile},
@@ -518,6 +549,17 @@ mod tests {
             source_kind: None,
             source_id: None,
             created_at: None,
+        };
+        let budget = || Budget {
+            id: 1,
+            owner_id: o,
+            scope: BudgetScope::Overall,
+            currency: "EUR".to_string(),
+            currency_exponent: 2,
+            limit_minor: 100,
+            alerts_enabled: true,
+            created_at: now,
+            updated_at: now,
         };
         let transaction = || Transaction {
             id: 1,
@@ -684,6 +726,20 @@ mod tests {
                 created_at: None,
             }),
             SystemEvent::CategoryDeleted { id: 1, owner_id: o },
+            SystemEvent::BudgetCreated(budget()),
+            SystemEvent::BudgetUpdated(budget()),
+            SystemEvent::BudgetDeleted { id: 1, owner_id: o },
+            SystemEvent::BudgetThresholdCrossed {
+                owner_id: o,
+                budget_id: 1,
+                month: Month::parse("2026-10").unwrap(),
+                threshold: 80,
+                spent_minor: 80,
+                limit_minor: 100,
+                currency: "EUR".to_string(),
+                currency_exponent: 2,
+                scope_name: s(),
+            },
             SystemEvent::SettingsUpdated {
                 owner_id: o,
                 settings: UserSettings::default(),
@@ -805,7 +861,7 @@ mod tests {
 
     /// Bump when a variant is added; `event_type` and `owner_id` have no
     /// wildcard, so the compiler already forces their arms.
-    const VARIANT_COUNT: usize = 51;
+    const VARIANT_COUNT: usize = 55;
 
     #[test]
     fn event_type_matches_the_serde_tag_for_every_variant() {

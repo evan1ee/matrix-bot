@@ -33,6 +33,7 @@ pub mod briefing;
 pub mod error;
 pub mod finance;
 pub mod finance_analytics;
+pub mod finance_budgets;
 pub mod finance_categories;
 pub mod finance_net_worth;
 pub mod footprints;

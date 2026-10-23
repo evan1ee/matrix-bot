@@ -4,6 +4,8 @@
 //! categories, spending analytics, and public sharing.
 
 mod analytics;
+mod budget_eval;
+mod budgets;
 mod categories;
 mod transactions;
 
@@ -27,6 +29,12 @@ impl From<FinanceError> for AppError {
             FinanceError::CategoryExists => {
                 AppError::Conflict("You already have a category with that name".to_string())
             }
+            FinanceError::BudgetNotFound => {
+                AppError::NotFound("Budget not found or access denied".to_string())
+            }
+            FinanceError::BudgetExists => AppError::Conflict(
+                "You already have a budget for that category and currency".to_string(),
+            ),
             other => AppError::Validation(other.to_string()),
         }
     }
@@ -47,5 +55,9 @@ impl FinanceService {
     }
 }
 
+#[cfg(test)]
+mod budget_eval_tests;
+#[cfg(test)]
+mod budget_tests;
 #[cfg(test)]
 mod tests;

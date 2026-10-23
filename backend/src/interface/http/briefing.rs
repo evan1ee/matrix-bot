@@ -39,6 +39,8 @@ pub struct BriefingSummary {
     pub habits_total_count: usize,
     pub upcoming_bills_count: usize,
     pub holdings_count: usize,
+    #[serde(default)]
+    pub budgets_attention_count: usize,
 }
 
 impl From<crate::application::briefing::models::BriefingSummary> for BriefingSummary {
@@ -49,6 +51,7 @@ impl From<crate::application::briefing::models::BriefingSummary> for BriefingSum
             habits_total_count: s.habits_total_count,
             upcoming_bills_count: s.upcoming_bills_count,
             holdings_count: s.holdings_count,
+            budgets_attention_count: s.budgets_attention_count,
         }
     }
 }

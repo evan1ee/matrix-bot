@@ -1,0 +1,139 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH b AS (\n            UPDATE finance_budgets\n            SET limit_minor = COALESCE($3, limit_minor),\n                alerts_enabled = COALESCE($4, alerts_enabled),\n                updated_at = now()\n            WHERE owner_id = $1 AND id = $2\n            RETURNING *\n        )\n        SELECT b.id AS \"id!\", b.owner_id AS \"owner_id!\", b.category_id,\n               c.name AS \"category_name?\", b.currency AS \"currency!\",\n               b.currency_exponent AS \"currency_exponent!\", b.limit_minor AS \"limit_minor!\",\n               b.alerts_enabled AS \"alerts_enabled!\", b.created_at AS \"created_at!\",\n               b.updated_at AS \"updated_at!\"\n        FROM b LEFT JOIN finance_categories c ON c.id = b.category_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "finance_budgets",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "owner_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "finance_budgets",
+            "name": "owner_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "category_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "finance_budgets",
+            "name": "category_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "category_name?",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "finance_categories",
+            "name": "name"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "currency!",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "finance_budgets",
+            "name": "currency"
+          }
+        }
+      },
+      {
+        "ordinal": 5,
+        "name": "currency_exponent!",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "finance_budgets",
+            "name": "currency_exponent"
+          }
+        }
+      },
+      {
+        "ordinal": 6,
+        "name": "limit_minor!",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "finance_budgets",
+            "name": "limit_minor"
+          }
+        }
+      },
+      {
+        "ordinal": 7,
+        "name": "alerts_enabled!",
+        "type_info": "Bool",
+        "origin": {
+          "Table": {
+            "table": "finance_budgets",
+            "name": "alerts_enabled"
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "finance_budgets",
+            "name": "created_at"
+          }
+        }
+      },
+      {
+        "ordinal": 9,
+        "name": "updated_at!",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "finance_budgets",
+            "name": "updated_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "Int8",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "f36e3b544a64261476a1197cb80e57e31051f57176511cbb09af0d2ade57b7e0"
+}

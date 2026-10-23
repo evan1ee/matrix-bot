@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO finance_budget_alerts (budget_id, month_start, threshold)\n        VALUES ($1, $2, $3)\n        ON CONFLICT DO NOTHING\n        RETURNING budget_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "budget_id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "finance_budget_alerts",
+            "name": "budget_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Int8",
+        "Date",
+        "Int2"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "cd2ea563017a56dd3a4f32018fa0d19c8d056d3c9c8359bc8b96fa6d34e485c7"
+}

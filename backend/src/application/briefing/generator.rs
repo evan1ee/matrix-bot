@@ -4,7 +4,10 @@ use chrono::{DateTime, Duration, LocalResult, TimeZone, Utc};
 
 use super::models::{BriefingPayload, BriefingSummary, TickerPerformance};
 use super::ticker::{fetch_all_tickers_performance, format_ticker_html, format_ticker_plain};
+use crate::application::finance::FinanceService;
 use crate::domain::accounts::AccountId;
+use crate::domain::finance::budget::{BudgetState, BudgetStatus};
+use crate::domain::finance::money::format_amount;
 use crate::domain::habits::HabitWithStatus;
 use crate::domain::recurring_bills::RecurringBill;
 use crate::domain::settings::UserSettings;
@@ -57,6 +60,19 @@ pub async fn generate_briefing(
 
     let upcoming_bills = filter_upcoming_bills(&bills, now_utc);
 
+    // 5. Budgets at or over 80 % this month (status rule lives in FinanceService)
+    let budgets = match FinanceService::new(pool.clone())
+        .budget_status(owner_id, None)
+        .await
+    {
+        Ok(all) => all,
+        Err(error) => {
+            tracing::warn!(%error, %owner_id, "briefing: budget status failed; omitting section");
+            Vec::new()
+        }
+    };
+    let budgets = budgets_needing_attention(&budgets);
+
     // Build statistics summary
     let habits_completed_count = habits.iter().filter(|h| h.completed_today).count();
     let summary = BriefingSummary {
@@ -65,6 +81,7 @@ pub async fn generate_briefing(
         habits_total_count: habits.len(),
         upcoming_bills_count: upcoming_bills.len(),
         holdings_count: holdings.len(),
+        budgets_attention_count: budgets.len(),
     };
 
     let (html_content, plain_text) = format_briefing_content(
@@ -73,8 +90,8 @@ pub async fn generate_briefing(
         &todos,
         &habits,
         &upcoming_bills,
+        &budgets,
         now_utc,
-        settings,
     );
 
     Ok(BriefingPayload {
@@ -113,14 +130,46 @@ fn filter_upcoming_bills(bills: &[RecurringBill], now: DateTime<Utc>) -> Vec<&Re
         .collect()
 }
 
+fn budgets_needing_attention(all: &[BudgetStatus]) -> Vec<&BudgetStatus> {
+    all.iter().filter(|b| b.state != BudgetState::Ok).collect()
+}
+
+/// Section: budgets in Warning or Exceeded state; nothing when there are none.
+fn append_budgets(html: &mut String, plain: &mut String, budgets: &[&BudgetStatus]) {
+    if budgets.is_empty() {
+        return;
+    }
+    html.push_str("<br/>💰 <b>预算提醒 · Budgets</b><br/>");
+    plain.push_str(
+        "
+💰 预算提醒 · Budgets
+",
+    );
+    for b in budgets {
+        let limit = format_amount(b.budget.limit_minor, b.budget.currency_exponent as u32);
+        let line = format!(
+            "{}: {} % of {} {} used",
+            b.budget.scope.label(),
+            b.percent_used,
+            limit,
+            b.budget.currency
+        );
+        html.push_str(&format!("• {}<br/>", html_escape(&line)));
+        plain.push_str(&format!(
+            "• {line}
+"
+        ));
+    }
+}
+
 fn format_briefing_content(
     header_date: &str,
     tickers: &[TickerPerformance],
     todos: &[TodoItem],
     habits: &[HabitWithStatus],
     bills: &[&RecurringBill],
+    budgets: &[&BudgetStatus],
     now_utc: DateTime<Utc>,
-    _settings: &UserSettings,
 ) -> (String, String) {
     let mut html = String::with_capacity(1024);
     let mut plain = String::with_capacity(1024);
@@ -251,6 +300,8 @@ fn format_briefing_content(
         }
     }
 
+    append_budgets(&mut html, &mut plain, budgets);
+
     // Friendly closing
     html.push_str("<br/>祝你今天工作与生活顺利高效！✨");
     plain.push_str("\n祝你今天工作与生活顺利高效！✨\n");
@@ -261,6 +312,7 @@ fn format_briefing_content(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::finance::budget::{Budget, BudgetScope, Month};
 
     #[test]
     fn test_format_briefing_header() {
@@ -276,7 +328,6 @@ mod tests {
 
     #[test]
     fn test_format_briefing_content_structure() {
-        let settings = UserSettings::default();
         let now = Utc::now();
         let tickers = vec![TickerPerformance {
             symbol: "NVDA".to_string(),
@@ -287,19 +338,80 @@ mod tests {
             change_1m_pct: Some(15.0),
         }];
 
-        let (html, plain) = format_briefing_content(
-            "2026-09-18 07:00 (UTC)",
-            &tickers,
-            &[],
-            &[],
-            &[],
-            now,
-            &settings,
-        );
+        let (html, plain) =
+            format_briefing_content("2026-09-18 07:00 (UTC)", &tickers, &[], &[], &[], &[], now);
 
         assert!(html.contains("早安简报"));
         assert!(html.contains("NVDA"));
         assert!(html.contains("+3.5%"));
         assert!(plain.contains("NVDA"));
+    }
+
+    fn budget_status(
+        label: Option<&str>,
+        spent: i64,
+        percent: i64,
+        state: BudgetState,
+    ) -> BudgetStatus {
+        let now = Utc.with_ymd_and_hms(2026, 10, 15, 0, 0, 0).unwrap();
+        BudgetStatus {
+            budget: Budget {
+                id: 1,
+                owner_id: AccountId::generate(),
+                scope: match label {
+                    Some(name) => BudgetScope::Category {
+                        id: 1,
+                        name: name.to_string(),
+                    },
+                    None => BudgetScope::Overall,
+                },
+                currency: "EUR".to_string(),
+                currency_exponent: 2,
+                limit_minor: 30_000,
+                alerts_enabled: true,
+                created_at: now,
+                updated_at: now,
+            },
+            month: Month::containing(now, chrono_tz::UTC),
+            spent_minor: spent,
+            remaining_minor: 30_000 - spent,
+            percent_used: percent,
+            state,
+            pace: None,
+        }
+    }
+
+    /// Given one Warning and one Ok budget, When the briefing is formatted, Then
+    /// only the Warning budget gets a line.
+    #[test]
+    fn briefing_lists_budgets_needing_attention() {
+        let budgets = vec![
+            budget_status(Some("Food"), 24_600, 82, BudgetState::Warning),
+            budget_status(Some("Fun"), 3_000, 10, BudgetState::Ok),
+        ];
+        assert_eq!(budgets_needing_attention(&budgets).len(), 1);
+        let (html, plain) = format_briefing_content(
+            "h",
+            &[],
+            &[],
+            &[],
+            &[],
+            &budgets_needing_attention(&budgets),
+            Utc::now(),
+        );
+        assert!(html.contains("Food: 82 % of 300.00 EUR used"));
+        assert!(plain.contains("Food: 82 % of 300.00 EUR used"));
+        assert!(!plain.contains("Fun"));
+    }
+
+    #[test]
+    fn briefing_omits_budget_section_when_all_ok() {
+        let budgets = vec![budget_status(Some("Fun"), 3_000, 10, BudgetState::Ok)];
+        let attention = budgets_needing_attention(&budgets);
+        assert!(attention.is_empty());
+        let (html, plain) =
+            format_briefing_content("h", &[], &[], &[], &[], &attention, Utc::now());
+        assert!(!html.contains("Budgets"));
+        assert!(!plain.contains("Budgets"));
     }
 }

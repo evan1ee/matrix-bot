@@ -113,6 +113,34 @@ Follow `docs/superpowers/runbooks/postgres-foundation-cutover.md` in sequence:
    - **Next (phase 2):** conversation list and switching, a non-destructive "New chat" (today it deletes the conversation), and the model chip's hard-coded `gpt-4o-mini` fallback label. Phase 3: regenerate, edit-and-resend, copy.
    - **Known follow-ups:** `llm::MAX_PROMPT_LENGTH` is 16384 while the HTTP handlers cap the prompt at 4000 bytes (pre-existing); the frontend counts characters, so CJK prompts are refused near 1,333 characters. `get_ai_config` merges config in the handler and AI handlers call `llm_repo` directly instead of `LlmService` (AGENTS section 2, rule 2). A turn that panics, or is dropped past the 5 s timeout grace, stores no stopped marker.
 
+### Finance budgets (2026-10, branch `feat/finance-budgets`)
+
+Merged into local master (not pushed): monthly spending limits per category or overall, per currency.
+
+| Piece | Where |
+|---|---|
+| Domain rules (`Month`, `Threshold` 80/100, `BudgetStatus`, pace) | `domain/finance/budget.rs` |
+| Schema `finance_budgets`, `finance_budget_alerts` (`finance_budgets` in `OWNED_TABLES`) | migration `0014_finance_budgets.sql` (renumbered from `0012` at merge, after `0012_ai_message_tool_outcome` and `0013_todo_tags_recurrence_steps`) |
+| CRUD, status, evaluation inside the expense write's transaction | `FinanceService` (`application/finance/{budgets,budget_eval,transactions}.rs`) |
+| Alert delivery | `finance.budget_alert` job in `interface/jobs/budgets.rs` (shared DM loop in `interface/jobs/dm.rs`) |
+| Morning briefing section | `application/briefing/generator.rs` |
+| Chat | `!budget` (`interface/chat/finance/budget.rs`) |
+| REST | `/api/v1/finance/budgets` ([`api.md`](../api.md)) |
+| AI tools | `get_budget_status`, `set_budget`, `remove_budget` (`llm/tools/budgets.rs`) |
+| Web | `BudgetPanel` in the finance module |
+
+Design: [`specs/2026-10-18-finance-budgets.md`](specs/2026-10-18-finance-budgets.md); plan: [`plans/2026-10-18-finance-budgets.md`](plans/2026-10-18-finance-budgets.md).
+
+**Follow-ups**
+
+- AI tools in `llm/tools/finance.rs` and the other tool files still return `AppError::to_string()` to the model, which leaks `database error:` text; `budgets::model_error` could be shared and used everywhere.
+- Web minors: the budget edit modal sends unchanged fields (can overwrite a concurrent alerts change), a failed delete is unhandled (the row stays in the confirming state), the modal has no focus trap or focus return, and status colours are hard-coded instead of tokens.
+- Test thin spots: DST-gap fallback in `Month` bounds; `find_by_scope_for_update` with `Some(id)`; cross-owner update/delete `NotFound` and `BudgetDeleted` event tests; merge test lacks case-insensitive name and currency-mismatch cases; alert handler lacks failed-send-continues, threshold 100 and missing-account cases; REST tests lack limit edge cases and route wiring.
+- Behaviour: editing an unrelated field of an expense (e.g. its note) re-evaluates budgets and can fire a late alert when spend already exceeds a budget created after the spend; at most once per budget/month/threshold. Chat unknown-category detection uses `msg.contains`, and a 3-letter all-caps category name is read as a currency.
+- Account merge can abort when the merged-away account has two categories whose names differ only in case (e.g. "Food" and "food") each with a budget in the same currency and the surviving account has one case-variant category: step 1b of `reconcile_colliding_owned_rows` remaps both budgets to the same target category and violates `idx_finance_budgets_scope`, rolling the merge back (no data loss; the user renames a category and retries). Smallest fix: in step 1b also delete the old account's budgets that would collide with each other after remapping, keeping the lowest id per (target category, currency). Root cause: `finance_categories` uniqueness is case-sensitive but merge/resolve match on `LOWER(name)`.
+- REST `POST /finance/budgets` resolves `category_id` → name → id case-insensitively (`owned_category_name` → `resolve_category_in_tx`), so with both "Food" and "food" present a `category_id` can attach to the wrong case-variant (same root cause as above).
+- The budget alert job (`interface/jobs/budgets.rs`) formats live numbers at delivery time and does not re-check `alerts_enabled`: a Warning job delivered after spend passed 100 % reads "Budget warning … (105 %)", and turning alerts off between enqueue and delivery still sends the DM. Spec chose live numbers deliberately; revisit if confusing.
+
 ---
 
 ## 5. Settled rulings
@@ -184,6 +212,20 @@ Format: `Ruling: <decision> — <why> — <cost if wrong>`. New rulings go here 
 - *Ruling: chat `!todo ... due <duration>` is relative-only (`2d`, `3h`); absolute dates stay on REST/MCP/AI tools — the chat grammar stays unambiguous across time zones — cost if wrong: users must use the web UI for a fixed date.*
 - *Ruling: a missing step and another owner's todo or step both return `AppError::NotFound` (404), never 400 or 403 — spec §6.2 and no ownership oracle — cost if wrong: HTTP clients see 400 for a missing step.*
 - *Ruling: tags share one rule, `domain::tags::Tag` (Unicode letters/digits, `_`, `-`, at most 50 chars, lowercased), used by notes and todos and (de)serialized via `try_from`/`into` String so no stored or wire value bypasses `Tag::parse` — widening is backward compatible for existing note tags — cost if wrong: note and todo tag rules diverge.*
+
+### Rulings (2026-10-18 — Finance budgets)
+
+- *Ruling: inline budget feedback comes from `FinanceService::record_transaction` returning `RecordedTransaction { transaction, budgets }`; `create_transaction` and `create_transaction_in_tx` keep their signatures and drop the statuses — keeps recurring bills, portfolio cash, OCR and REST callers untouched — cost if wrong: a caller that later wants statuses switches to `record_transaction`.*
+- *Ruling: account merge step 1b deletes `from`'s budgets whose remapped scope collides with one of `into`'s, then remaps the rest (`reconcile_colliding_owned_rows`, right after the transactions remap) — a single `UPDATE … NOT EXISTS` moved a colliding budget across still pointing at `from`'s duplicate category; the surviving account's budget wins either way — cost if wrong: none.*
+- *Ruling: the DM loop and owner-readiness check in `interface/jobs/portfolio.rs` moved to a shared `interface/jobs/dm.rs` used by price and budget alerts — second real use — cost if wrong: none.*
+- *Ruling: budget tools live in `llm/tools/budgets.rs`, wired into `executor.rs` and `definitions.rs`, because `finance.rs` was already over 500 lines — cost if wrong: none.*
+- *Ruling: the briefing builds `FinanceService::new(pool.clone())` and calls `budget_status` instead of reading repositories, so the status rule lives once — cost if wrong: none.*
+- *Ruling: `Month` serialises as the string `"YYYY-MM"` everywhere (events, REST, job payload) — cost if wrong: none.*
+- *Ruling: evaluation locks the matching budget rows `FOR UPDATE` (ordered by id; `lock_matching`) before summing month spend — under READ COMMITTED a second concurrent expense then re-reads after the first commits, so a crossing split across concurrent writes is never missed — cost if wrong: concurrent expenses in one owner and currency serialise for one transaction.*
+- *Ruling: one `BudgetThresholdCrossed` event and one `finance.budget_alert` job per budget per write, carrying the highest newly inserted threshold — consistent with "only the 100 % alert is enqueued" when one write jumps past both — cost if wrong: an SSE listener never sees the 80 % event when a single write jumps past 100 %.*
+- *Ruling: the migration was written as `0012_finance_budgets.sql` (migrations ended at `0011` on the branch) and renumbered to `0014_finance_budgets.sql` when merging into master, which had by then taken `0012_ai_message_tool_outcome` and `0013_todo_tags_recurrence_steps` — numbering follows the merge order — cost if wrong: none once merged.*
+- *Ruling: `alerts_enabled` is `Option<bool>` end to end (domain `NewBudget`, service, chat, REST, AI tools): `None` keeps the stored value on update and means `true` on create — `!budget set` must never silently re-enable alerts the user turned off — cost if wrong: a caller wanting "always set" passes `Some(true)`.*
+- *Ruling: the web panel says "Limit reached" at exactly 100 % (state `exceeded` begins at the limit; `remaining_minor` is 0 there) — the alert fires at 100 % and spend has not yet gone past the limit — cost if wrong: wording only.*
 
 ---
 

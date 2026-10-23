@@ -18,6 +18,8 @@ use crate::jobs::{JobError, JobHandler};
 
 pub mod agent;
 pub mod briefing;
+pub mod budgets;
+pub(crate) mod dm;
 pub mod knowledge;
 pub mod media;
 pub mod portfolio;
@@ -106,6 +108,10 @@ pub fn handlers(
             outbound.clone(),
         )),
         Arc::new(portfolio::RefreshPricesHandler::new(services.clone())),
+        Arc::new(budgets::BudgetAlertHandler::new(
+            services.clone(),
+            outbound.clone(),
+        )),
         Arc::new(media::ProcessReceiptHandler::new(
             services.clone(),
             outbound.clone(),

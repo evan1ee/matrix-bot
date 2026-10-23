@@ -26,10 +26,21 @@ export const financeModule: FrontendModule = {
       queryClient.invalidateQueries({ queryKey: ['finance-summary'] });
       queryClient.invalidateQueries({ queryKey: ['finance-analytics'] });
       queryClient.invalidateQueries({ queryKey: ['net-worth'] });
+      queryClient.invalidateQueries({ queryKey: ['finance-budgets'] });
+    }
+    if (
+      event.type === 'BudgetCreated' ||
+      event.type === 'BudgetUpdated' ||
+      event.type === 'BudgetDeleted' ||
+      event.type === 'BudgetThresholdCrossed'
+    ) {
+      queryClient.invalidateQueries({ queryKey: ['finance-budgets'] });
     }
     if (event.type === 'CategoryCreated' || event.type === 'CategoryDeleted') {
       queryClient.invalidateQueries({ queryKey: ['finance-categories'] });
       queryClient.invalidateQueries({ queryKey: ['finance-analytics'] });
+      // Deleting a category removes its budget.
+      queryClient.invalidateQueries({ queryKey: ['finance-budgets'] });
     }
   },
 };

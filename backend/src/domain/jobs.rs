@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::domain::accounts::AccountId;
 use crate::domain::channels::ConversationAddress;
+use crate::domain::finance::budget::{Month, Threshold};
 use crate::domain::knowledge::search::KnowledgeItemType;
 use crate::domain::reminders::MAX_DELIVERY_ATTEMPTS;
 use crate::domain::storage::StorageKey;
@@ -39,10 +40,11 @@ pub enum JobType {
     AgentExecuteRun,
     KnowledgeEmbedItem,
     KnowledgeBackfillEmbeddings,
+    BudgetAlertSend,
 }
 
 impl JobType {
-    pub const ALL: [JobType; 8] = [
+    pub const ALL: [JobType; 9] = [
         JobType::ReminderFire,
         JobType::BriefingSend,
         JobType::PortfolioCheckAlerts,
@@ -51,6 +53,7 @@ impl JobType {
         JobType::AgentExecuteRun,
         JobType::KnowledgeEmbedItem,
         JobType::KnowledgeBackfillEmbeddings,
+        JobType::BudgetAlertSend,
     ];
 
     pub fn as_str(self) -> &'static str {
@@ -63,6 +66,7 @@ impl JobType {
             JobType::AgentExecuteRun => "agent.execute_run",
             JobType::KnowledgeEmbedItem => "knowledge.embed_item",
             JobType::KnowledgeBackfillEmbeddings => "knowledge.backfill_embeddings",
+            JobType::BudgetAlertSend => "finance.budget_alert",
         }
     }
 
@@ -142,8 +146,18 @@ pub struct KnowledgeEmbedPayload {
     pub item_id: i64,
 }
 
+/// `finance.budget_alert`: the budget, month and threshold (80 or 100) that was
+/// crossed; the account is the job's `account_id` column.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BudgetAlertPayload {
+    pub budget_id: i64,
+    pub month: Month,
+    pub threshold: i16,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum JobPayload {
+    BudgetAlert(BudgetAlertPayload),
     ReminderFire(ReminderFirePayload),
     BriefingSend(BriefingSendPayload),
     MediaProcessReceipt(ProcessReceiptPayload),
@@ -350,6 +364,24 @@ impl NewJob {
         )
     }
 
+    /// One alert per (budget, month, threshold): the `finance_budget_alerts` row
+    /// already guarantees a single enqueue, the key is the second line of defence.
+    pub fn budget_alert(
+        owner: AccountId,
+        budget_id: i64,
+        month: Month,
+        threshold: Threshold,
+    ) -> Self {
+        let pct = threshold.pct();
+        let key = format!("budget:{budget_id}:{month}:{pct}");
+        let payload = JobPayload::BudgetAlert(BudgetAlertPayload {
+            budget_id,
+            month,
+            threshold: pct,
+        });
+        Self::new(JobType::BudgetAlertSend, Some(owner), payload, 3, 60, key)
+    }
+
     pub fn with_priority(mut self, p: i16) -> Self {
         self.priority = p;
         self
@@ -474,6 +506,26 @@ mod tests {
         assert_eq!((a.max_attempts(), a.backoff_seconds()), (5, 30));
         assert_eq!(a.job_type(), JobType::ReminderFire);
         assert_eq!(a.account_id(), Some(&owner()));
+    }
+
+    #[test]
+    fn new_job_budget_alert_dedupe_key() {
+        let month = Month::parse("2026-10").unwrap();
+        let job = NewJob::budget_alert(owner(), 7, month, Threshold::Warning);
+        assert_eq!(job.dedupe_key(), Some("budget:7:2026-10:80"));
+        assert_eq!(job.job_type().as_str(), "finance.budget_alert");
+        assert_eq!((job.max_attempts(), job.backoff_seconds()), (3, 60));
+        assert_eq!(job.account_id(), Some(&owner()));
+        assert_eq!(
+            job.payload(),
+            &JobPayload::BudgetAlert(BudgetAlertPayload {
+                budget_id: 7,
+                month,
+                threshold: 80
+            })
+        );
+        let exceeded = NewJob::budget_alert(owner(), 7, month, Threshold::Exceeded);
+        assert_eq!(exceeded.dedupe_key(), Some("budget:7:2026-10:100"));
     }
 
     #[test]

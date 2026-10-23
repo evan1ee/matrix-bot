@@ -5,6 +5,7 @@ use crate::interface::channels::message::Reply;
 use crate::db::Database;
 use crate::interface::chat::{BotModule, CommandContext, CommandHelp};
 
+pub mod budget;
 pub mod category;
 pub mod handler;
 
@@ -59,6 +60,28 @@ impl BotModule for FinanceModule {
                 name: "finance".to_string(),
                 usage: "!finance [summary|list]".to_string(),
                 description: "View financial ledger and summary".to_string(),
+            },
+            CommandHelp {
+                name: "budget".to_string(),
+                usage: "!budget [YYYY-MM]".to_string(),
+                description: "Monthly budget status with spend pace (e.g. !budget 2026-09)"
+                    .to_string(),
+            },
+            CommandHelp {
+                name: "budget set".to_string(),
+                usage: "!budget set <amount> [CUR] [category]".to_string(),
+                description: "Set or update a monthly limit; no category means overall".to_string(),
+            },
+            CommandHelp {
+                name: "budget rm".to_string(),
+                usage: "!budget rm [category] [CUR]".to_string(),
+                description: "Remove a budget (CUR only needed with several currencies)"
+                    .to_string(),
+            },
+            CommandHelp {
+                name: "budget alerts".to_string(),
+                usage: "!budget alerts <on|off> [category] [CUR]".to_string(),
+                description: "Toggle the 80 % / 100 % alerts for one budget".to_string(),
             },
             CommandHelp {
                 name: "category".to_string(),

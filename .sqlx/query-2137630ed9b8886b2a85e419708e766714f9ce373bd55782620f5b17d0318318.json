@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO transactions (room_id, owner_id, sender_name, direction, amount_minor, currency, currency_exponent, category_id, source_kind, occurred_at) VALUES ('r', $1, 's', $2, $3, $4, 2, $5, $6, $7)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int8",
+        "Text",
+        "Int8",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2137630ed9b8886b2a85e419708e766714f9ce373bd55782620f5b17d0318318"
+}

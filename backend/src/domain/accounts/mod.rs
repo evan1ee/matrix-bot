@@ -175,6 +175,7 @@ pub const OWNED_TABLES: &[&str] = &[
     "portfolio_daily_snapshots",
     "portfolio_price_alerts",
     "finance_categories",
+    "finance_budgets",
     "finance_shares",
     "user_settings",
     "bookmarks",

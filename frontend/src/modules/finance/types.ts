@@ -82,3 +82,11 @@ export interface CurrencySummary {
   net_minor: number;
   categories: CategoryTotal[];
 }
+
+export type BudgetStatus = components["schemas"]["BudgetStatusDto"];
+
+export type BudgetState = components["schemas"]["BudgetStateDto"];
+
+export type CreateBudgetBody = components["schemas"]["CreateBudgetRequest"];
+
+export type UpdateBudgetBody = components["schemas"]["UpdateBudgetRequest"];

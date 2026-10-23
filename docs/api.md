@@ -156,6 +156,19 @@ All are mounted under `/api/v1` and authenticate with `AuthUser` (session cookie
 | `GET /storage/:key` | Stream a stored binary. Allowed for a session whose account matches the key's `accounts/<id>/` prefix, or for an unexpired HMAC signature |
 | `POST /ocr/scan`, `POST /voice/transcribe` | Receipt OCR and speech-to-text for uploads from the web UI; each is unavailable (OCR answers `503`) while its inference service is unconfigured |
 
+## Finance budgets API
+
+Monthly spending limits, mounted under `/api/v1/finance/budgets` and authenticated with `AuthUser` (none is step-up sensitive). A limit is a decimal **string** parsed with the budget's currency exponent; money in responses is integer minor units. Every endpoint answers with `BudgetStatusDto` (the budget plus `spent_minor`, `remaining_minor`, `percent_used`, `state` of `ok`/`warning`/`exceeded`, and `pace` for the owner's current month only). Status is measured against the owner's calendar month in their saved timezone.
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /finance/budgets?month=YYYY-MM` | All budgets measured against the month (default: current). `400` for a malformed month |
+| `POST /finance/budgets` | Body `{ category_id?, currency, limit, alerts_enabled? }`; omit `category_id` for an overall budget. `201`; `400` for a non-positive or unparsable limit; `404` for a category that is not yours; `409` when the (category, currency) scope already has a budget |
+| `PUT /finance/budgets/:id` | Body `{ limit?, alerts_enabled? }`; omitted fields are unchanged. `404` for another owner's budget |
+| `DELETE /finance/budgets/:id` | `204`; `404` for another owner's budget |
+
+String fields are capped at 500 characters (`400`).
+
 ## Knowledge base and notes API
 
 Personal notes and semantic search endpoints are mounted under `/api/v1`:
