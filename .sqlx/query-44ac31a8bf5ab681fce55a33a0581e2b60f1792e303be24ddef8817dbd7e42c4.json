@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO finance_budgets (owner_id, currency, currency_exponent, limit_minor) VALUES ($1, 'USD', 2, 10000)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "44ac31a8bf5ab681fce55a33a0581e2b60f1792e303be24ddef8817dbd7e42c4"
+}

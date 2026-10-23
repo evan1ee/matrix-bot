@@ -398,6 +398,13 @@ mod tests {
         .await
         .unwrap();
         sqlx::query!(
+            "INSERT INTO finance_budgets (owner_id, currency, currency_exponent, limit_minor) VALUES ($1, 'USD', 2, 10000)",
+            from.as_uuid()
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query!(
             "INSERT INTO user_settings (owner_id, timezone, currency) VALUES ($1, 'UTC', 'USD')",
             from.as_uuid()
         )
@@ -451,7 +458,7 @@ mod tests {
         sqlx::query!("INSERT INTO knowledge_embeddings (owner_id, item_type, item_id, content_snippet, embedding) VALUES ($1, 'note', 1, 'body', array_fill(0::real, ARRAY[384])::vector)", from.as_uuid()).execute(&pool).await.unwrap();
 
         let preview = MergeService::preview(&pool, &from).await.unwrap();
-        assert_eq!(preview.total(), 23, "one row per owned table");
+        assert_eq!(preview.total(), 24, "one row per owned table");
 
         MergeService::merge(&pool, &from, &into).await.unwrap();
 
