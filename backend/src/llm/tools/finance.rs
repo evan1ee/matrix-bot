@@ -283,7 +283,7 @@ pub async fn execute_tool(
                         },
                     )
                     .await
-                    .map_err(|e| e.to_string())?;
+                    .map_err(|e| super::budgets::model_error("record_finance_entry", e))?;
 
                 let mut result =
                     serde_json::to_value(&recorded.transaction).map_err(|e| e.to_string())?;

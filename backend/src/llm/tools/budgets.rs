@@ -4,7 +4,7 @@
 
 use serde_json::{json, Value};
 
-use crate::application::AppServices;
+use crate::application::{AppError, AppServices};
 use crate::domain::accounts::AccountId;
 use crate::domain::finance::budget::{Budget, BudgetState, BudgetStatus, Month, NewBudget};
 use crate::domain::finance::money::{
@@ -26,6 +26,21 @@ pub async fn execute_tool(
         "set_budget" => Some(set(services, owner_id, args).await),
         "remove_budget" => Some(remove(services, owner_id, args).await),
         _ => None,
+    }
+}
+
+/// What the model may see of a service failure: user-facing text for rule violations, a
+/// fixed sentence for database and dependency failures (the detail is only logged).
+pub fn model_error(operation: &str, err: AppError) -> String {
+    match err {
+        AppError::Validation(m)
+        | AppError::NotFound(m)
+        | AppError::Forbidden(m)
+        | AppError::Conflict(m) => m,
+        other => {
+            tracing::error!(operation, error = %other, "budget tool failed");
+            "Could not complete the budget operation; please try again later.".to_string()
+        }
     }
 }
 
@@ -52,7 +67,7 @@ fn opt_str(args: &Value, key: &str) -> Result<Option<String>, String> {
 
 fn opt_bool(args: &Value, key: &str) -> Result<Option<bool>, String> {
     match args.get(key) {
-        None | Some(Value::Null) => Ok(None),
+        None => Ok(None),
         Some(Value::Bool(b)) => Ok(Some(*b)),
         Some(_) => Err(format!("'{key}' must be a boolean")),
     }
@@ -112,13 +127,13 @@ pub fn attention_json(statuses: &[BudgetStatus]) -> Vec<Value> {
 async fn get_status(s: &AppServices, owner: &AccountId, args: &Value) -> Result<String, String> {
     check_keys(args, &["month"])?;
     let month = opt_str(args, "month")?
-        .map(|m| Month::parse(&m).map_err(|e| e.to_string()))
+        .map(|m| Month::parse(&m).map_err(|e| format!("Invalid 'month': {e}")))
         .transpose()?;
     let list = s
         .finance
         .budget_status(owner, month)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| model_error("get_budget_status", e))?;
     let month_label = list.first().map(|x| x.month.to_string());
     Ok(json!({
         "month": month_label,
@@ -147,15 +162,16 @@ async fn set(s: &AppServices, owner: &AccountId, args: &Value) -> Result<String,
         Some(c) => c,
         None => s.settings.get_or_default(owner).await.currency,
     };
-    let currency = normalise_currency(&currency).map_err(|e| e.to_string())?;
-    let limit = parse_amount(&amount, exponent_for(&currency)).map_err(|e| e.to_string())?;
+    let currency = normalise_currency(&currency).map_err(|e| format!("Invalid 'currency': {e}"))?;
+    let limit = parse_amount(&amount, exponent_for(&currency))
+        .map_err(|e| format!("Invalid 'amount': {e}"))?;
     let new =
         NewBudget::new(category.as_deref(), &currency, limit, alerts).map_err(|e| e.to_string())?;
     let (budget, created) = s
         .finance
         .set_budget(owner, new)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| model_error("set_budget", e))?;
     Ok(json!({ "created": created, "budget": budget_json(&budget) }).to_string())
 }
 
@@ -167,11 +183,11 @@ async fn remove(s: &AppServices, owner: &AccountId, args: &Value) -> Result<Stri
         .finance
         .resolve_budget(owner, category.as_deref(), currency.as_deref())
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| model_error("remove_budget", e))?;
     s.finance
         .delete_budget(owner, budget.id)
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| model_error("remove_budget", e))?;
     Ok(json!({ "removed": budget_json(&budget) }).to_string())
 }
 
@@ -310,21 +326,41 @@ mod tests {
     #[tokio::test]
     async fn set_budget_tool_rejects_numeric_amount_type_and_bad_currency() {
         let (_pool, s, alice) = setup().await;
-        for args in [
-            json!({"amount": 300}),
-            json!({"amount": "300", "currency": "EURO"}),
-            json!({"amount": "300", "currency": 5}),
-            json!({"amount": "0"}),
-            json!({"amount": "abc"}),
-            json!({"amount": "300", "alerts_enabled": "yes"}),
-            json!({"amount": "300", "category": "x".repeat(501)}),
-            json!({"amount": "300", "category": "nonexistent"}),
-            json!({}),
-        ] {
-            assert!(
-                call(&s, &alice, "set_budget", args.clone()).await.is_err(),
-                "{args}"
-            );
+        let cases = [
+            (json!({"amount": 300}), "amount"),
+            (json!({"amount": "300", "currency": "EURO"}), "currency"),
+            (json!({"amount": "300", "currency": 5}), "currency"),
+            (
+                json!({"amount": "300", "currency": "E".repeat(501)}),
+                "currency",
+            ),
+            (json!({"amount": "0"}), "amount"),
+            (json!({"amount": "-5"}), "amount"),
+            (json!({"amount": "abc"}), "amount"),
+            (json!({"amount": "9".repeat(60)}), "amount"),
+            (
+                json!({"amount": "300", "alerts_enabled": "yes"}),
+                "alerts_enabled",
+            ),
+            (
+                json!({"amount": "300", "alerts_enabled": null}),
+                "alerts_enabled",
+            ),
+            (
+                json!({"amount": "300", "category": "x".repeat(501)}),
+                "category",
+            ),
+            (
+                json!({"amount": "300", "category": "nonexistent"}),
+                "category",
+            ),
+            (json!({}), "amount"),
+        ];
+        for (args, arg) in cases {
+            let err = call(&s, &alice, "set_budget", args.clone())
+                .await
+                .expect_err(&args.to_string());
+            assert!(err.contains(arg), "{args} -> {err}");
         }
         assert!(s.finance.list_budgets(&alice).await.unwrap().is_empty());
     }
@@ -398,6 +434,124 @@ mod tests {
         let v: serde_json::Value = serde_json::from_str(&out).unwrap();
         assert_eq!(v["budgets"][0]["state"], "warning", "{out}");
         assert_eq!(v["budgets"][0]["scope"], "Overall");
+    }
+
+    #[tokio::test]
+    async fn set_budget_tool_twice_is_idempotent() {
+        let (_pool, s, alice) = setup().await;
+        let args = json!({"amount": "100", "currency": "EUR", "alerts_enabled": false});
+        let first: Value =
+            serde_json::from_str(&call(&s, &alice, "set_budget", args.clone()).await.unwrap())
+                .unwrap();
+        let second: Value =
+            serde_json::from_str(&call(&s, &alice, "set_budget", args).await.unwrap()).unwrap();
+        assert_eq!(first["created"], true);
+        assert_eq!(second["created"], false);
+        // Omitting alerts_enabled on a later call keeps the stored flag.
+        call(
+            &s,
+            &alice,
+            "set_budget",
+            json!({"amount": "150", "currency": "EUR"}),
+        )
+        .await
+        .unwrap();
+        let list = s.finance.list_budgets(&alice).await.unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].limit_minor, 15000);
+        assert!(!list[0].alerts_enabled);
+    }
+
+    #[tokio::test]
+    async fn remove_budget_tool_cannot_touch_other_owners_budget() {
+        let (_pool, s, alice) = setup().await;
+        let bob = AccountId::from_seed("@bob:b");
+        call(
+            &s,
+            &alice,
+            "set_budget",
+            json!({"amount": "100", "currency": "EUR"}),
+        )
+        .await
+        .unwrap();
+        let err = call(&s, &bob, "remove_budget", json!({"currency": "EUR"}))
+            .await
+            .unwrap_err();
+        assert!(err.contains("not found"), "{err}");
+        assert_eq!(s.finance.list_budgets(&alice).await.unwrap().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn remove_budget_tool_nothing_matches_is_error() {
+        let (_pool, s, alice) = setup().await;
+        let err = call(&s, &alice, "remove_budget", json!({}))
+            .await
+            .unwrap_err();
+        assert!(err.contains("not found"), "{err}");
+    }
+
+    fn assert_no_internals(err: &str) {
+        let lower = err.to_lowercase();
+        for leak in [
+            "database error",
+            "sqlx",
+            "outbox",
+            "forced to fail",
+            "finance_",
+        ] {
+            assert!(!lower.contains(leak), "leaked '{leak}': {err}");
+        }
+    }
+
+    #[tokio::test]
+    async fn budget_tool_database_failure_does_not_leak_internals() {
+        let (pool, s, alice) = setup().await;
+        crate::infrastructure::postgres::repositories::outbox::fail_every_publish(&pool).await;
+        let err = call(
+            &s,
+            &alice,
+            "set_budget",
+            json!({"amount": "100", "currency": "EUR"}),
+        )
+        .await
+        .unwrap_err();
+        assert_no_internals(&err);
+        assert!(s.finance.list_budgets(&alice).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn record_finance_entry_evaluation_failure_returns_error_and_writes_nothing() {
+        let (pool, s, alice) = setup().await;
+        call(
+            &s,
+            &alice,
+            "set_budget",
+            json!({"amount": "100", "currency": "EUR"}),
+        )
+        .await
+        .unwrap();
+        crate::infrastructure::postgres::repositories::outbox::fail_threshold_crossed_publish(
+            &pool,
+        )
+        .await;
+        let err = super::super::finance::execute_tool(
+            &s,
+            &pool,
+            &alice,
+            "!r",
+            "record_finance_entry",
+            &json!({"amount": "90", "currency": "EUR"}),
+        )
+        .await
+        .expect("handled")
+        .unwrap_err();
+        assert_no_internals(&err);
+        let txs = s
+            .finance
+            .list_transactions(&alice, &Default::default())
+            .await
+            .unwrap();
+        assert!(txs.is_empty(), "expense must roll back");
     }
 
     #[test]
