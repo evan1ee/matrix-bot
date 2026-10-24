@@ -60,7 +60,9 @@ pub struct ReconciledCollisions {
 ///    `into`'s matching category (`LOWER(name)`) so moved transactions do not
 ///    lose their category when `from`'s duplicate category row is deleted.
 ///    Budgets follow in 1b: `from`'s budgets whose scope + currency `into`
-///    already has are deleted (`into`'s wins), the rest are remapped the same way.
+///    already has are deleted (`into`'s wins), as are `from`'s own case-variant
+///    duplicates that would remap onto one category (lowest id wins); the rest
+///    are remapped the same way.
 /// 2. Sums colliding `portfolio_cash_balances` (`(owner_id, currency)`).
 /// 3. Combines colliding `portfolio_holdings` (`(owner_id, symbol)` with same
 ///    `currency`) by summing quantities and computing weighted average cost.
@@ -103,6 +105,27 @@ pub async fn reconcile_colliding_owned_rows(
                WHERE o.owner_id = $1 AND o.currency = b.currency \
                  AND ((o.category_id IS NULL AND b.category_id IS NULL) \
                       OR LOWER(fc_o.name) = LOWER(fc_b.name)))",
+    ))
+    .bind(into.as_uuid())
+    .bind(from.as_uuid())
+    .execute(&mut *conn)
+    .await?;
+    // Category names are unique per exact spelling, so `from` may hold "Food" and
+    // "food" with a budget each; both remap to the one `into` category and would
+    // violate `idx_finance_budgets_scope`. Keep the lowest id per target + currency.
+    sqlx::query(AssertSqlSafe(
+        "DELETE FROM finance_budgets b \
+         USING finance_categories fc_b \
+         WHERE b.owner_id = $2 \
+           AND fc_b.id = b.category_id \
+           AND EXISTS ( \
+               SELECT 1 FROM finance_categories fc_into \
+               WHERE fc_into.owner_id = $1 AND LOWER(fc_into.name) = LOWER(fc_b.name)) \
+           AND EXISTS ( \
+               SELECT 1 FROM finance_budgets b2 \
+               JOIN finance_categories fc_b2 ON fc_b2.id = b2.category_id \
+               WHERE b2.owner_id = $2 AND b2.currency = b.currency AND b2.id < b.id \
+                 AND LOWER(fc_b2.name) = LOWER(fc_b.name))",
     ))
     .bind(into.as_uuid())
     .bind(from.as_uuid())
@@ -586,6 +609,76 @@ mod tests {
                 (None, 3_000),
             ]
         );
+    }
+
+    /// `finance_categories` is unique per exact name, so `from` can hold "Food" and
+    /// "food" with a budget each; both remap to `into`'s one "food" category.
+    #[tokio::test]
+    async fn merge_keeps_one_budget_when_case_variant_categories_collapse() {
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+
+        let from = AccountId::generate();
+        let into = AccountId::generate();
+        crate::db::pool::seed_account(&pool, &from).await;
+        crate::db::pool::seed_account(&pool, &into).await;
+
+        let mut cat = std::collections::HashMap::new();
+        for (owner, name) in [(&from, "Food"), (&from, "food"), (&into, "food")] {
+            let id = sqlx::query_scalar!(
+                "INSERT INTO finance_categories (owner_id, name) VALUES ($1, $2) RETURNING id",
+                owner.as_uuid(),
+                name
+            )
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            cat.insert((owner.as_uuid(), name), id);
+        }
+        // `into` has the category but no budget on it, so nothing is deleted as an
+        // `into` collision and both of `from`'s budgets reach the remap.
+        for (name, limit) in [("Food", 111_i64), ("food", 222)] {
+            sqlx::query!(
+                "INSERT INTO finance_budgets (owner_id, category_id, currency, \
+                 currency_exponent, limit_minor) VALUES ($1, $2, 'EUR', 2, $3)",
+                from.as_uuid(),
+                Some(cat[&(from.as_uuid(), name)]),
+                limit
+            )
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        let mut tx = pool.begin().await.unwrap();
+        reconcile_colliding_owned_rows(&mut tx, &from, &into)
+            .await
+            .unwrap();
+        move_rows(&mut tx, "finance_categories", "owner_id", &from, &into)
+            .await
+            .unwrap();
+        move_rows(&mut tx, "finance_budgets", "owner_id", &from, &into)
+            .await
+            .unwrap();
+        tx.commit().await.unwrap();
+
+        let rows = sqlx::query!(
+            r#"SELECT c.name AS "name?", b.limit_minor FROM finance_budgets b
+               LEFT JOIN finance_categories c ON c.id = b.category_id
+               WHERE b.owner_id = $1 ORDER BY c.name NULLS LAST"#,
+            into.as_uuid()
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        let got: Vec<(Option<String>, i64)> =
+            rows.into_iter().map(|r| (r.name, r.limit_minor)).collect();
+        assert_eq!(
+            got.len(),
+            1,
+            "one budget per category and currency: {got:?}"
+        );
+        assert_eq!(got[0].0.as_deref(), Some("food"));
     }
 
     /// Every table in the schema that has `column`.
