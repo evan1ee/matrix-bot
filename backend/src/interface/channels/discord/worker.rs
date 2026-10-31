@@ -53,6 +53,13 @@ pub enum Work {
         attachment: Attachment,
         caption: Option<String>,
     },
+    DirectAudio {
+        channel: ChannelId,
+        message: MessageId,
+        author: User,
+        attachment: Attachment,
+        caption: Option<String>,
+    },
 }
 
 /// How an interaction's outcome is shown.
@@ -164,6 +171,24 @@ async fn handle(work: Work, inbound: &Inbound, http: &Arc<Http>) {
                 return;
             };
             reply_dm(http, channel, message, reply).await;
+        }
+        Work::DirectAudio {
+            channel,
+            message,
+            author,
+            attachment,
+            caption,
+        } => {
+            super::audio::run(
+                inbound,
+                http,
+                channel,
+                message,
+                &author,
+                &attachment,
+                caption.as_deref(),
+            )
+            .await;
         }
         Work::DirectAttachment {
             channel,
@@ -303,7 +328,12 @@ async fn handle(work: Work, inbound: &Inbound, http: &Arc<Http>) {
     }
 }
 
-async fn reply_dm(http: &Arc<Http>, channel: ChannelId, message: MessageId, reply: Reply) {
+pub(super) async fn reply_dm(
+    http: &Arc<Http>,
+    channel: ChannelId,
+    message: MessageId,
+    reply: Reply,
+) {
     let mut out = OutgoingMessage::to(
         Target::Conversation(ConversationAddress::Discord(channel.get())),
         reply,

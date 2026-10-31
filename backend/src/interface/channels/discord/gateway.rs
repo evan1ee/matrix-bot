@@ -11,6 +11,7 @@ use serenity::all::{
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
+use super::audio::is_audio_attachment;
 use super::commands::{create_commands, defer_mode, DeferMode};
 use super::inbound::{from_command, from_component, from_direct_message, is_image_attachment};
 use super::outbound::{bounded, edit_response};
@@ -156,15 +157,24 @@ impl EventHandler for Gateway {
         if message.author.bot || message.guild_id.is_some() {
             return;
         }
-        if let Some(attachment) = message.attachments.iter().find(|a| is_image_attachment(a)) {
-            let caption = {
-                let trimmed = message.content.trim();
-                if trimmed.is_empty() {
-                    None
-                } else {
-                    Some(trimmed.to_owned())
-                }
+        let caption = Some(message.content.trim())
+            .filter(|c| !c.is_empty())
+            .map(str::to_owned);
+        // Audio first: a voice message is never a receipt.
+        if let Some(attachment) = message.attachments.iter().find(|a| is_audio_attachment(a)) {
+            let work = Work::DirectAudio {
+                channel: message.channel_id,
+                message: message.id,
+                author: message.author.clone(),
+                attachment: attachment.clone(),
+                caption,
             };
+            if self.queue.try_send(work).is_err() {
+                warn!("Discord work queue full; a direct voice message was dropped");
+            }
+            return;
+        }
+        if let Some(attachment) = message.attachments.iter().find(|a| is_image_attachment(a)) {
             let work = Work::DirectAttachment {
                 channel: message.channel_id,
                 message: message.id,

@@ -14,6 +14,7 @@
 //! - `adapter`: `DiscordAdapter`, its run loop and reconnect backoff (B7).
 
 pub mod adapter;
+pub mod audio;
 pub mod commands;
 pub mod gateway;
 pub mod inbound;
