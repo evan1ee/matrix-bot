@@ -18,6 +18,7 @@
 //! Everything here is pure and synchronous; adapters validate raw platform
 //! input through these constructors before it reaches a service.
 
+pub mod audio;
 mod link;
 pub use link::{decide_link, LinkDecision, LINK_TOKEN_TTL};
 
