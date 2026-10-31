@@ -427,3 +427,164 @@ pub async fn schedule_task(
 
     Ok(Json(ScheduledTaskResponse::from(task)))
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct SetTaskStateRequest {
+    pub enabled: bool,
+}
+
+fn parse_task_id(id: String) -> Result<TaskId, ApiError> {
+    TaskId::new(id)
+        .map_err(|e| ApiError::from(crate::application::AppError::Validation(e.to_string())))
+}
+
+#[utoipa::path(
+    patch,
+    path = "/api/v1/agent/tasks/{id}/state",
+    request_body = SetTaskStateRequest,
+    responses(
+        (status = 200, description = "Task paused or resumed", body = ScheduledTaskResponse),
+        (status = 404, description = "Task not found", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
+pub async fn set_task_state(
+    State(state): State<ApiState>,
+    user: AuthUser,
+    Path(id): Path<String>,
+    Json(body): Json<SetTaskStateRequest>,
+) -> Result<Json<ScheduledTaskResponse>, ApiError> {
+    let task = state
+        .services
+        .agent
+        .set_task_enabled(&user.account_id, &parse_task_id(id)?, body.enabled)
+        .await?;
+    Ok(Json(ScheduledTaskResponse::from(task)))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/v1/agent/tasks/{id}/trigger",
+    responses(
+        (status = 200, description = "Run started", body = AgentRunResponse),
+        (status = 404, description = "Task not found", body = ApiErrorResponse),
+        (status = 409, description = "Active run already running", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
+pub async fn trigger_task(
+    State(state): State<ApiState>,
+    user: AuthUser,
+    Path(id): Path<String>,
+) -> Result<Json<AgentRunResponse>, ApiError> {
+    let run = state
+        .services
+        .agent
+        .trigger_task_now(&user.account_id, &parse_task_id(id)?)
+        .await?;
+    Ok(Json(AgentRunResponse::from(run)))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/api/v1/agent/tasks/{id}",
+    responses(
+        (status = 204, description = "Task deleted"),
+        (status = 404, description = "Task not found", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
+pub async fn delete_task(
+    State(state): State<ApiState>,
+    user: AuthUser,
+    Path(id): Path<String>,
+) -> Result<StatusCode, ApiError> {
+    state
+        .services
+        .agent
+        .delete_task(&user.account_id, &parse_task_id(id)?)
+        .await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::Database;
+
+    async fn setup_state() -> (ApiState, crate::domain::accounts::AccountId) {
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let owner = crate::application::AppServices::new(&pool)
+            .identity
+            .provision_matrix_for_test("@agent_http:mbm.one")
+            .await;
+        let state = ApiState::new(
+            Database { pool },
+            None,
+            "https://matrix.org".to_string(),
+            reqwest::Client::new(),
+        );
+        (state, owner)
+    }
+
+    /// Given a scheduled task, When it is paused, triggered twice and deleted
+    /// over HTTP, Then the statuses are 200/200/409/204/404.
+    #[tokio::test]
+    async fn task_controls_http_flow() {
+        let (state, owner) = setup_state().await;
+        let user = AuthUser::for_account(owner);
+        let id = "weekly_digest".to_string();
+        let _scheduled = schedule_task(
+            State(state.clone()),
+            user.clone(),
+            Path(id.clone()),
+            Json(ScheduleTaskRequest {
+                cron_expression: "0 21 * * SUN".to_string(),
+                config: None,
+            }),
+        )
+        .await
+        .expect("schedule");
+
+        let paused = set_task_state(
+            State(state.clone()),
+            user.clone(),
+            Path(id.clone()),
+            Json(SetTaskStateRequest { enabled: false }),
+        )
+        .await
+        .expect("pause")
+        .0;
+        assert!(!paused.enabled);
+
+        let run = trigger_task(State(state.clone()), user.clone(), Path(id.clone()))
+            .await
+            .expect("trigger")
+            .0;
+        assert_eq!(run.task_name, "weekly_digest");
+        let conflict = trigger_task(State(state.clone()), user.clone(), Path(id.clone()))
+            .await
+            .expect_err("second trigger");
+        assert_eq!(conflict.status, StatusCode::CONFLICT);
+
+        let bad = set_task_state(
+            State(state.clone()),
+            user.clone(),
+            Path("Not Valid!".to_string()),
+            Json(SetTaskStateRequest { enabled: true }),
+        )
+        .await
+        .expect_err("invalid id");
+        assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+
+        let deleted = delete_task(State(state.clone()), user.clone(), Path(id.clone()))
+            .await
+            .expect("delete");
+        assert_eq!(deleted, StatusCode::NO_CONTENT);
+        let gone = delete_task(State(state), user, Path(id))
+            .await
+            .expect_err("delete again");
+        assert_eq!(gone.status, StatusCode::NOT_FOUND);
+    }
+}

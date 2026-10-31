@@ -147,6 +147,56 @@ pub async fn list_due_scheduled_tasks<'e>(
     Ok(rows.into_iter().map(Into::into).collect())
 }
 
+/// Pauses or resumes a task. `next_run_at` of `None` keeps the stored value
+/// (pause); resume passes a fresh future instant so missed ticks never replay.
+pub async fn set_scheduled_task_state<'e>(
+    conn: impl PgExecutor<'e>,
+    account_id: &AccountId,
+    task_id: &TaskId,
+    enabled: bool,
+    next_run_at: Option<DateTime<Utc>>,
+    now: DateTime<Utc>,
+) -> Result<Option<ScheduledTaskDefinition>, sqlx::Error> {
+    let row = sqlx::query_as!(
+        ScheduledTaskRow,
+        r#"
+        UPDATE scheduled_agent_tasks
+        SET enabled = $3,
+            next_run_at = COALESCE($4, next_run_at),
+            updated_at = $5
+        WHERE account_id = $1 AND task_id = $2
+        RETURNING
+            id, account_id, task_id, cron_expression, enabled,
+            config, last_run_at, next_run_at, created_at, updated_at
+        "#,
+        account_id.as_uuid(),
+        task_id.as_str(),
+        enabled,
+        next_run_at,
+        now,
+    )
+    .fetch_optional(conn)
+    .await?;
+
+    Ok(row.map(Into::into))
+}
+
+pub async fn delete_scheduled_task<'e>(
+    conn: impl PgExecutor<'e>,
+    account_id: &AccountId,
+    task_id: &TaskId,
+) -> Result<bool, sqlx::Error> {
+    let res = sqlx::query!(
+        "DELETE FROM scheduled_agent_tasks WHERE account_id = $1 AND task_id = $2",
+        account_id.as_uuid(),
+        task_id.as_str(),
+    )
+    .execute(conn)
+    .await?;
+
+    Ok(res.rows_affected() > 0)
+}
+
 pub async fn update_task_next_run<'e>(
     conn: impl PgExecutor<'e>,
     id: Uuid,

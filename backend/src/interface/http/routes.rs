@@ -407,7 +407,12 @@ fn routes_agent() -> Router<auth::ApiState> {
         .route("/agent/approvals/:id/approve", post(agent::approve_action))
         .route("/agent/approvals/:id/reject", post(agent::reject_action))
         .route("/agent/tasks", get(agent::list_tasks))
-        .route("/agent/tasks/:id", put(agent::schedule_task))
+        .route(
+            "/agent/tasks/:id",
+            put(agent::schedule_task).delete(agent::delete_task),
+        )
+        .route("/agent/tasks/:id/state", patch(agent::set_task_state))
+        .route("/agent/tasks/:id/trigger", post(agent::trigger_task))
 }
 
 fn routes_admin() -> Router<auth::ApiState> {

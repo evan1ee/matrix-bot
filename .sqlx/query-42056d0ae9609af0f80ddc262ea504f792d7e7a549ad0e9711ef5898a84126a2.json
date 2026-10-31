@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM scheduled_agent_tasks WHERE account_id = $1 AND task_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "42056d0ae9609af0f80ddc262ea504f792d7e7a549ad0e9711ef5898a84126a2"
+}

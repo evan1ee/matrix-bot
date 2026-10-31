@@ -195,4 +195,69 @@ mod tests {
         assert_eq!(list2.len(), 1);
         assert_eq!(list2[0].account_id, owner2);
     }
+
+    /// Given a task, When a stranger toggles or deletes it, Then nothing changes;
+    /// When the owner pauses with no next run, Then the schedule is kept.
+    #[tokio::test]
+    async fn task_state_and_delete_are_owner_scoped() {
+        let pool = setup_test_db().await;
+        let owner = AccountId::from_seed("acct_agent_state_1");
+        let stranger = AccountId::from_seed("acct_agent_state_2");
+        crate::db::pool::seed_account(&pool, &owner).await;
+        crate::db::pool::seed_account(&pool, &stranger).await;
+        let now = now_at_storage_precision();
+        let id = TaskId::new("weekly_digest").unwrap();
+        let due = now + chrono::Duration::hours(3);
+        upsert_scheduled_task(
+            &pool,
+            &ScheduledTaskDefinition {
+                id: Uuid::new_v4(),
+                account_id: owner,
+                task_id: id.clone(),
+                cron_expression: "0 21 * * SUN".to_string(),
+                enabled: true,
+                config: serde_json::json!({}),
+                last_run_at: None,
+                next_run_at: due,
+                created_at: now,
+                updated_at: now,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            set_scheduled_task_state(&pool, &stranger, &id, false, None, now)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(!delete_scheduled_task(&pool, &stranger, &id).await.unwrap());
+        let untouched = find_scheduled_task(&pool, &owner, &id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(untouched.enabled);
+
+        let paused = set_scheduled_task_state(&pool, &owner, &id, false, None, now)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!paused.enabled);
+        assert_eq!(paused.next_run_at, due);
+
+        let later = now + chrono::Duration::days(2);
+        let resumed = set_scheduled_task_state(&pool, &owner, &id, true, Some(later), now)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(resumed.enabled);
+        assert_eq!(resumed.next_run_at, later);
+
+        assert!(delete_scheduled_task(&pool, &owner, &id).await.unwrap());
+        assert!(find_scheduled_task(&pool, &owner, &id)
+            .await
+            .unwrap()
+            .is_none());
+    }
 }

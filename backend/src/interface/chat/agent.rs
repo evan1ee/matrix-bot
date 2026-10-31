@@ -5,7 +5,7 @@ use uuid::Uuid;
 
 use crate::application::AppServices;
 use crate::db::Database;
-use crate::domain::agent::{AgentRunId, ApprovalId};
+use crate::domain::agent::{AgentRunId, ApprovalId, TaskId};
 use crate::interface::channels::message::Reply;
 use crate::interface::chat::{error_reply, BotModule, CommandContext, CommandHelp};
 use crate::utils::html::html_escape;
@@ -58,6 +58,11 @@ impl BotModule for AgentModule {
                 description: "Cancel an active or specific agent run".to_string(),
             },
             CommandHelp {
+                name: "agent task".to_string(),
+                usage: "!agent task <pause|resume|run|delete> <task_id>".to_string(),
+                description: "Pause, resume, run now or delete a scheduled agent task".to_string(),
+            },
+            CommandHelp {
                 name: "agent list".to_string(),
                 usage: "!agent list".to_string(),
                 description: "List recent agent runs".to_string(),
@@ -87,6 +92,7 @@ impl BotModule for AgentModule {
             "reject" => handle_reject(ctx, services, rest).await,
             "cancel" => handle_cancel(ctx, services, rest).await,
             "list" => handle_list(ctx, services).await,
+            "task" => handle_task(ctx, services, rest).await,
             _ => Reply::html(format_help()),
         };
 
@@ -312,6 +318,56 @@ async fn handle_list(ctx: &CommandContext, services: &AppServices) -> Reply {
     }
 }
 
+async fn handle_task(ctx: &CommandContext, services: &AppServices, args: &str) -> Reply {
+    const USAGE: &str =
+        "❌ <b>Usage:</b> <code>!agent task &lt;pause|resume|run|delete&gt; &lt;task_id&gt;</code>";
+    let mut parts = args.split_whitespace();
+    let (Some(action), Some(raw_id), None) = (parts.next(), parts.next(), parts.next()) else {
+        return Reply::html(USAGE);
+    };
+    let task_id = match TaskId::new(raw_id) {
+        Ok(id) => id,
+        Err(_) => {
+            return Reply::html(format!(
+                "❌ <b>Invalid task ID:</b> <code>{}</code>",
+                html_escape(raw_id)
+            ))
+        }
+    };
+    let owner = &ctx.owner_id;
+    let shown = html_escape(task_id.as_str());
+
+    match action {
+        "pause" | "resume" => {
+            let enabled = action == "resume";
+            match services
+                .agent
+                .set_task_enabled(owner, &task_id, enabled)
+                .await
+            {
+                Ok(task) if enabled => Reply::html(format!(
+                    "▶️ <b>Task Resumed:</b> <code>{shown}</code> — next run {}",
+                    task.next_run_at.to_rfc3339()
+                )),
+                Ok(_) => Reply::html(format!("⏸️ <b>Task Paused:</b> <code>{shown}</code>")),
+                Err(err) => error_reply(err),
+            }
+        }
+        "run" => match services.agent.trigger_task_now(owner, &task_id).await {
+            Ok(run) => Reply::html(format!(
+                "🤖 <b>Task Started:</b> <code>{shown}</code> — run <code>{}</code>",
+                run.id
+            )),
+            Err(err) => error_reply(err),
+        },
+        "delete" => match services.agent.delete_task(owner, &task_id).await {
+            Ok(()) => Reply::html(format!("🗑️ <b>Task Deleted:</b> <code>{shown}</code>")),
+            Err(err) => error_reply(err),
+        },
+        _ => Reply::html(USAGE),
+    }
+}
+
 fn format_help() -> String {
     "<p>🤖 <b>Agent Commands:</b></p>\
      <ul>\
@@ -320,6 +376,7 @@ fn format_help() -> String {
      <li><code>!agent confirm &lt;approval_id&gt;</code> - Approve pending sensitive action</li>\
      <li><code>!agent reject &lt;approval_id&gt; [reason]</code> - Reject pending action</li>\
      <li><code>!agent cancel [id]</code> - Cancel active or specific run</li>\
+     <li><code>!agent task &lt;pause|resume|run|delete&gt; &lt;task_id&gt;</code> - Manage a scheduled task</li>\
      <li><code>!agent list</code> - View recent runs</li>\
      </ul>"
         .to_string()
@@ -380,5 +437,54 @@ mod tests {
             .await
             .unwrap();
         assert!(reply_cancel.html_body().contains("Agent Run Cancelled"));
+    }
+
+    /// Given a scheduled task, When pause/resume/run/delete are sent, Then each
+    /// replies for the owner; bad input gets usage or an invalid-id error.
+    #[tokio::test]
+    async fn agent_task_chat_commands() {
+        let (pool, services, owner) = setup_db().await;
+        let db = Database { pool };
+        let module = AgentModule::new();
+        services
+            .agent
+            .schedule_task(
+                &owner,
+                TaskId::new("weekly_digest").unwrap(),
+                "0 21 * * SUN",
+                serde_json::json!({}),
+                crate::utils::time::now_at_storage_precision() + chrono::Duration::days(1),
+            )
+            .await
+            .unwrap();
+
+        let send = |args: &'static str| {
+            let ctx = make_ctx(owner, "agent", args);
+            let (module, services, db) = (&module, &services, &db);
+            async move {
+                module
+                    .handle_command(&ctx, services, db)
+                    .await
+                    .unwrap()
+                    .html_body()
+                    .to_string()
+            }
+        };
+
+        assert!(send("task pause weekly_digest")
+            .await
+            .contains("Task Paused"));
+        assert!(send("task resume weekly_digest")
+            .await
+            .contains("Task Resumed"));
+        assert!(send("task run weekly_digest")
+            .await
+            .contains("Task Started"));
+        assert!(send("task delete weekly_digest")
+            .await
+            .contains("Task Deleted"));
+        assert!(send("task").await.contains("Usage"));
+        assert!(send("task pause").await.contains("Usage"));
+        assert!(send("task pause Bad!Id").await.contains("Invalid task ID"));
     }
 }

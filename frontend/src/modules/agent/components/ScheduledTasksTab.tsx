@@ -1,26 +1,49 @@
 import React, { useState } from 'react';
-import { Calendar, Clock, Edit2, Loader2, PlayCircle, Settings, ToggleLeft, ToggleRight } from 'lucide-react';
-import { useScheduledTasks, useUpdateScheduledTask } from '../api';
+import { Calendar, Clock, Edit2, Loader2, Pause, Play, PlayCircle, Trash2 } from 'lucide-react';
+import { useDeleteTask, useScheduledTasks, useSetTaskEnabled, useTriggerTask } from '../api';
 import { ScheduledTask } from '../types';
 import { TaskConfigModal } from './TaskConfigModal';
 import { formatDateTimeInZone, useSettings } from '../../../core/settings';
+import { showToast } from '../../../core/toast';
+
+const BUTTON =
+  'px-2.5 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 text-[11px] font-medium inline-flex items-center gap-1.5 transition-colors duration-150 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-neutral-900 dark:focus-visible:outline-neutral-100 disabled:opacity-50';
 
 export const ScheduledTasksTab: React.FC = () => {
   const { data: tasks = [], isLoading, isError } = useScheduledTasks();
-  const updateMutation = useUpdateScheduledTask();
+  const setEnabled = useSetTaskEnabled();
+  const trigger = useTriggerTask();
+  const remove = useDeleteTask();
   const { timezone } = useSettings();
 
   const [configuringTask, setConfiguringTask] = useState<ScheduledTask | null>(null);
+  const [confirmingDelete, setConfirmingDelete] = useState<string | null>(null);
 
-  const handleToggle = async (task: ScheduledTask) => {
-    await updateMutation.mutateAsync({
-      id: task.task_id,
-      data: {
-        cron_expression: task.cron_expression,
-        config: task.config,
-      },
+  const reportError = (title: string, err: unknown) =>
+    showToast({
+      title,
+      description: err instanceof Error ? err.message : 'Request failed',
+      type: 'error',
     });
-  };
+
+  const handleToggle = (task: ScheduledTask) =>
+    setEnabled.mutate(
+      { id: task.task_id, enabled: !task.enabled },
+      { onError: (err) => reportError('Could not update task', err) }
+    );
+
+  const handleRunNow = (task: ScheduledTask) =>
+    trigger.mutate(task.task_id, {
+      onSuccess: () =>
+        showToast({ title: 'Task started', description: task.task_id, type: 'success' }),
+      onError: (err) => reportError('Could not start task', err),
+    });
+
+  const handleDelete = (task: ScheduledTask) =>
+    remove.mutate(task.task_id, {
+      onSuccess: () => setConfirmingDelete(null),
+      onError: (err) => reportError('Could not delete task', err),
+    });
 
   if (isLoading) {
     return (
@@ -81,7 +104,7 @@ export const ScheduledTasksTab: React.FC = () => {
                         : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-500'
                     }`}
                   >
-                    {task.enabled ? 'Active' : 'Disabled'}
+                    {task.enabled ? 'Active' : 'Paused'}
                   </span>
                 </div>
 
@@ -117,14 +140,61 @@ export const ScheduledTasksTab: React.FC = () => {
               </div>
 
               <div className="flex items-center justify-end gap-2 pt-2 border-t border-neutral-100 dark:border-neutral-800">
-                <button
-                  type="button"
-                  onClick={() => setConfiguringTask(task)}
-                  className="px-2.5 py-1.5 rounded-md border border-neutral-200 dark:border-neutral-700 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 text-[11px] font-medium inline-flex items-center gap-1.5 transition-colors cursor-pointer"
-                >
-                  <Edit2 size={12} />
-                  Configure...
-                </button>
+                {confirmingDelete === task.task_id ? (
+                  <>
+                    <span className="mr-auto text-[11px] text-neutral-500">Delete this task?</span>
+                    <button type="button" onClick={() => setConfirmingDelete(null)} className={BUTTON}>
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDelete(task)}
+                      disabled={remove.isPending}
+                      className={`${BUTTON} text-red-600 dark:text-red-400`}
+                    >
+                      Confirm delete
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => handleToggle(task)}
+                      disabled={setEnabled.isPending}
+                      aria-label={`${task.enabled ? 'Pause' : 'Resume'} ${task.task_id}`}
+                      className={BUTTON}
+                    >
+                      {task.enabled ? <Pause size={12} /> : <Play size={12} />}
+                      {task.enabled ? 'Pause' : 'Resume'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRunNow(task)}
+                      disabled={trigger.isPending}
+                      aria-label={`Run ${task.task_id} now`}
+                      className={BUTTON}
+                    >
+                      {trigger.isPending && trigger.variables === task.task_id ? (
+                        <Loader2 size={12} className="animate-spin" />
+                      ) : (
+                        <PlayCircle size={12} />
+                      )}
+                      Run now
+                    </button>
+                    <button type="button" onClick={() => setConfiguringTask(task)} className={BUTTON}>
+                      <Edit2 size={12} />
+                      Configure...
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setConfirmingDelete(task.task_id)}
+                      aria-label={`Delete ${task.task_id}`}
+                      className={BUTTON}
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           ))}

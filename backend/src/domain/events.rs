@@ -213,6 +213,15 @@ pub enum SystemEvent {
         total_tokens: i32,
         error: Option<String>,
     },
+    AgentTaskUpdated {
+        owner_id: AccountId,
+        task_id: String,
+        enabled: bool,
+    },
+    AgentTaskDeleted {
+        owner_id: AccountId,
+        task_id: String,
+    },
     ConfigUpdated {
         actor_id: AccountId,
         key: String,
@@ -293,6 +302,8 @@ impl SystemEvent {
             SystemEvent::AgentStepCompleted { owner_id, .. } => owner_id,
             SystemEvent::AgentApprovalRequired { owner_id, .. } => owner_id,
             SystemEvent::AgentRunCompleted { owner_id, .. } => owner_id,
+            SystemEvent::AgentTaskUpdated { owner_id, .. } => owner_id,
+            SystemEvent::AgentTaskDeleted { owner_id, .. } => owner_id,
             SystemEvent::ConfigUpdated { actor_id, .. } => actor_id,
             SystemEvent::SecretChanged { actor_id, .. } => actor_id,
         }
@@ -362,6 +373,8 @@ impl SystemEvent {
             SystemEvent::AgentStepCompleted { .. } => "AgentStepCompleted",
             SystemEvent::AgentApprovalRequired { .. } => "AgentApprovalRequired",
             SystemEvent::AgentRunCompleted { .. } => "AgentRunCompleted",
+            SystemEvent::AgentTaskUpdated { .. } => "AgentTaskUpdated",
+            SystemEvent::AgentTaskDeleted { .. } => "AgentTaskDeleted",
             SystemEvent::ConfigUpdated { .. } => "ConfigUpdated",
             SystemEvent::SecretChanged { .. } => "SecretChanged",
         }

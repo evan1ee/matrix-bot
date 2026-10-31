@@ -166,4 +166,39 @@ test.describe('Autonomous Agent Module', () => {
     expect(updateReq).toBeDefined();
     expect((updateReq?.body as any)?.cron_expression).toBe('0 10 * * 1');
   });
+  test('pauses, resumes, runs now and deletes a scheduled task', async ({ app, api }) => {
+    await gotoApp(app);
+    await app.getByRole('button', { name: TAB.agent, exact: true }).click();
+    await app.getByRole('button', { name: 'Scheduled Tasks', exact: true }).click();
+
+    // Pause flips the badge and the button
+    await app.getByRole('button', { name: 'Pause WeeklyBookmarkDigestTask' }).click();
+    await expect(app.getByRole('button', { name: 'Resume WeeklyBookmarkDigestTask' })).toBeVisible();
+    await expect(app.getByText('Paused', { exact: true })).toBeVisible();
+    const pauseReq = api.requests.find(
+      (r) => r.method === 'PATCH' && r.url.includes('/agent/tasks/WeeklyBookmarkDigestTask/state')
+    );
+    expect((pauseReq?.body as any)?.enabled).toBe(false);
+
+    await app.getByRole('button', { name: 'Resume WeeklyBookmarkDigestTask' }).click();
+    await expect(app.getByRole('button', { name: 'Pause WeeklyBookmarkDigestTask' })).toBeVisible();
+
+    // Run now posts to the trigger endpoint
+    await app.getByRole('button', { name: 'Run WeeklyBookmarkDigestTask now' }).click();
+    await expect
+      .poll(() =>
+        api.requests.some(
+          (r) => r.method === 'POST' && r.url.includes('/agent/tasks/WeeklyBookmarkDigestTask/trigger')
+        )
+      )
+      .toBe(true);
+
+    // Delete needs a confirmation step
+    await app.getByRole('button', { name: 'Delete MonthlyFinancialAuditTask' }).click();
+    await app.getByRole('button', { name: 'Cancel' }).click();
+    await expect(app.getByText('MonthlyFinancialAuditTask')).toBeVisible();
+    await app.getByRole('button', { name: 'Delete MonthlyFinancialAuditTask' }).click();
+    await app.getByRole('button', { name: 'Confirm delete' }).click();
+    await expect(app.getByText('MonthlyFinancialAuditTask')).toHaveCount(0);
+  });
 });

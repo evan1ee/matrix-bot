@@ -133,3 +133,44 @@ export function useUpdateScheduledTask() {
     },
   });
 }
+
+export function useSetTaskEnabled() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
+      fetchApi<ScheduledTask>(`/agent/tasks/${encodeURIComponent(id)}/state`, {
+        method: 'PATCH',
+        body: JSON.stringify({ enabled }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: AGENT_KEYS.tasks });
+    },
+  });
+}
+
+export function useTriggerTask() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) =>
+      fetchApi<AgentRun>(`/agent/tasks/${encodeURIComponent(id)}/trigger`, {
+        method: 'POST',
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: AGENT_KEYS.runs });
+    },
+  });
+}
+
+export function useDeleteTask() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) =>
+      fetchApi<void>(`/agent/tasks/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: AGENT_KEYS.tasks });
+    },
+  });
+}

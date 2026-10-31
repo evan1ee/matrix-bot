@@ -81,12 +81,121 @@ mod tests {
     use serde_json::json;
 
     use crate::domain::accounts::AccountId;
-    use crate::domain::agent::{AgentRunId, RunStatus};
+    use crate::domain::agent::{AgentRunId, RunStatus, TaskId};
 
     async fn setup_test_db() -> crate::db::DbPool {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
         pool
+    }
+
+    async fn scheduled(
+        service: &AgentService,
+        owner: &AccountId,
+        stale_next_run: chrono::DateTime<chrono::Utc>,
+    ) -> TaskId {
+        let id = TaskId::new("weekly_digest").unwrap();
+        service
+            .schedule_task(owner, id.clone(), "0 21 * * SUN", json!({}), stale_next_run)
+            .await
+            .unwrap();
+        id
+    }
+
+    async fn event_types(pool: &sqlx::PgPool, owner: &AccountId) -> Vec<String> {
+        crate::infrastructure::postgres::repositories::outbox::event_types_for(pool, owner)
+            .await
+            .unwrap()
+    }
+
+    /// Given a task whose next run is long past, When it is paused and resumed,
+    /// Then resume schedules strictly in the future and the sweep skips it while paused.
+    #[tokio::test]
+    async fn resume_schedules_after_now_and_pause_stops_the_sweep() {
+        let pool = setup_test_db().await;
+        let owner = AccountId::from_seed("acct_agent_ctl_1");
+        crate::db::pool::seed_account(&pool, &owner).await;
+        let service = AgentService::new(pool.clone());
+        let now = crate::utils::time::now_at_storage_precision();
+        let id = scheduled(&service, &owner, now - chrono::Duration::days(30)).await;
+
+        let paused = service.set_task_enabled(&owner, &id, false).await.unwrap();
+        assert!(!paused.enabled);
+        assert!(paused.next_run_at < now);
+        service.enqueue_due_scheduled_tasks().await.unwrap();
+        assert!(service.get_active_run(&owner).await.unwrap().is_none());
+
+        let resumed = service.set_task_enabled(&owner, &id, true).await.unwrap();
+        assert!(resumed.enabled);
+        assert!(resumed.next_run_at > now);
+        assert_eq!(
+            event_types(&pool, &owner).await,
+            vec!["AgentTaskUpdated", "AgentTaskUpdated"]
+        );
+    }
+
+    /// Given a task, When it is triggered twice, Then the first creates a run
+    /// and the second conflicts; a paused task can still be triggered.
+    #[tokio::test]
+    async fn trigger_creates_one_run_and_conflicts_while_active() {
+        let pool = setup_test_db().await;
+        let owner = AccountId::from_seed("acct_agent_ctl_2");
+        crate::db::pool::seed_account(&pool, &owner).await;
+        let service = AgentService::new(pool.clone());
+        let now = crate::utils::time::now_at_storage_precision();
+        let id = scheduled(&service, &owner, now + chrono::Duration::days(1)).await;
+        service.set_task_enabled(&owner, &id, false).await.unwrap();
+
+        let run = service.trigger_task_now(&owner, &id).await.unwrap();
+        assert_eq!(run.task_name, "weekly_digest");
+        assert_eq!(run.status, RunStatus::Planning);
+
+        let err = service.trigger_task_now(&owner, &id).await.unwrap_err();
+        assert!(matches!(err, AppError::Conflict(_)));
+        assert_eq!(service.list_runs(&owner, 10).await.unwrap().len(), 1);
+        assert_eq!(
+            event_types(&pool, &owner).await,
+            vec!["AgentTaskUpdated", "AgentRunStarted"]
+        );
+    }
+
+    /// Given another account's task, When a stranger pauses, triggers or
+    /// deletes it, Then each is NotFound; the owner can delete it.
+    #[tokio::test]
+    async fn task_controls_are_owner_scoped_and_delete_publishes() {
+        let pool = setup_test_db().await;
+        let owner = AccountId::from_seed("acct_agent_ctl_3");
+        let stranger = AccountId::from_seed("acct_agent_ctl_4");
+        crate::db::pool::seed_account(&pool, &owner).await;
+        crate::db::pool::seed_account(&pool, &stranger).await;
+        let service = AgentService::new(pool.clone());
+        let now = crate::utils::time::now_at_storage_precision();
+        let id = scheduled(&service, &owner, now + chrono::Duration::days(1)).await;
+
+        assert!(matches!(
+            service.set_task_enabled(&stranger, &id, false).await,
+            Err(AppError::NotFound(_))
+        ));
+        assert!(matches!(
+            service.trigger_task_now(&stranger, &id).await,
+            Err(AppError::NotFound(_))
+        ));
+        assert!(matches!(
+            service.delete_task(&stranger, &id).await,
+            Err(AppError::NotFound(_))
+        ));
+
+        service.delete_task(&owner, &id).await.unwrap();
+        assert!(service
+            .list_scheduled_tasks(&owner)
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(event_types(&pool, &owner).await, vec!["AgentTaskDeleted"]);
+        assert!(matches!(
+            service.delete_task(&owner, &id).await,
+            Err(AppError::NotFound(_))
+        ));
     }
 
     #[tokio::test]

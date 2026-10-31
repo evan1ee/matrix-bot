@@ -3858,6 +3858,44 @@ export class FakeApi {
       return json(route, 200, this.agentTasks);
     }
 
+    if (path.startsWith('/agent/tasks/') && path.endsWith('/state') && method === 'PATCH') {
+      const id = decodeURIComponent(path.replace('/agent/tasks/', '').replace('/state', ''));
+      const task = this.agentTasks.find((t) => t.task_id === id);
+      if (!task) return json(route, 404, { error: 'Task not found', code: 404 });
+      task.enabled = Boolean(body?.enabled);
+      task.updated_at = new Date().toISOString();
+      return json(route, 200, task);
+    }
+
+    if (path.startsWith('/agent/tasks/') && path.endsWith('/trigger') && method === 'POST') {
+      const id = decodeURIComponent(path.replace('/agent/tasks/', '').replace('/trigger', ''));
+      const task = this.agentTasks.find((t) => t.task_id === id);
+      if (!task) return json(route, 404, { error: 'Task not found', code: 404 });
+      const now = new Date().toISOString();
+      const run = {
+        ...this.agentRuns[0],
+        id: `run-task-${this.agentRuns.length + 1}`,
+        scheduled_task_id: task.id,
+        task_name: task.task_id,
+        goal: `Scheduled execution for task '${task.task_id}'`,
+        status: 'planning',
+        current_step: 0,
+        started_at: now,
+        completed_at: null,
+        updated_at: now,
+      };
+      this.agentRuns.unshift(run);
+      return json(route, 200, run);
+    }
+
+    if (path.startsWith('/agent/tasks/') && method === 'DELETE') {
+      const id = decodeURIComponent(path.replace('/agent/tasks/', ''));
+      const index = this.agentTasks.findIndex((t) => t.task_id === id);
+      if (index < 0) return json(route, 404, { error: 'Task not found', code: 404 });
+      this.agentTasks.splice(index, 1);
+      return route.fulfill({ status: 204 });
+    }
+
     if (path.startsWith('/agent/tasks/') && method === 'PUT') {
       const id = decodeURIComponent(path.replace('/agent/tasks/', ''));
       const task = this.agentTasks.find((t) => t.task_id === id);
