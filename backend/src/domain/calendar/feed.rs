@@ -40,7 +40,12 @@ pub fn build_feed(input: &CalendarInput, now: DateTime<Utc>) -> String {
         .iter()
         .filter_map(|t| todo_entry(t, now))
         .chain(input.bills.iter().filter_map(|b| bill_entry(b, now)))
-        .chain(input.reminders.iter().filter_map(|r| reminder_entry(r, now)))
+        .chain(
+            input
+                .reminders
+                .iter()
+                .filter_map(|r| reminder_entry(r, now)),
+        )
         .collect();
     entries.sort_by_key(|e| e.start);
     entries.truncate(MAX_FEED_ITEMS);

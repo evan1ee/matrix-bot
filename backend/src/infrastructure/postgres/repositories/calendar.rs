@@ -189,8 +189,12 @@ mod tests {
         let kept = todos::create(&pool, &e, &todo("kept", soon)).await.unwrap();
         let done = todos::create(&pool, &e, &todo("done", soon)).await.unwrap();
         todos::set_completed(&pool, done.id, true).await.unwrap();
-        todos::create(&pool, &e, &todo("undated", None)).await.unwrap();
-        todos::create(&pool, &f, &todo("theirs", soon)).await.unwrap();
+        todos::create(&pool, &e, &todo("undated", None))
+            .await
+            .unwrap();
+        todos::create(&pool, &f, &todo("theirs", soon))
+            .await
+            .unwrap();
 
         let got = todos::list_open_dated(&pool, &e, 10).await.unwrap();
         assert_eq!(got.iter().map(|t| t.id).collect::<Vec<_>>(), vec![kept.id]);
@@ -208,7 +212,9 @@ mod tests {
         reminders::cancel(&pool, &g, cancelled.id).await.unwrap();
         reminders::create(&pool, &h, &reminder(None)).await.unwrap();
 
-        let got = reminders::list_pending_standalone(&pool, &g, 10).await.unwrap();
+        let got = reminders::list_pending_standalone(&pool, &g, 10)
+            .await
+            .unwrap();
         assert_eq!(got.iter().map(|r| r.id).collect::<Vec<_>>(), vec![plain.id]);
     }
 }

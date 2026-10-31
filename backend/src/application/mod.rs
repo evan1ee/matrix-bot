@@ -8,6 +8,7 @@ pub mod accounts;
 pub mod agent;
 pub mod bookmarks;
 pub mod briefing;
+pub mod calendar;
 pub mod config;
 pub mod finance;
 pub mod footprints;
@@ -37,6 +38,7 @@ use self::accounts::AccountService;
 use self::agent::AgentService;
 use self::bookmarks::BookmarkService;
 use self::briefing::BriefingService;
+use self::calendar::CalendarService;
 use self::config::AppConfigService;
 use self::finance::FinanceService;
 use self::footprints::FootprintService;
@@ -106,6 +108,7 @@ pub struct AppServices {
     pub accounts: AccountService,
     pub agent: AgentService,
     pub bookmarks: BookmarkService,
+    pub calendar: CalendarService,
     pub briefing: BriefingService,
     pub finance: FinanceService,
     pub footprints: FootprintService,
@@ -138,6 +141,7 @@ impl AppServices {
         let accounts = AccountService::new(pool.clone());
         let agent = AgentService::new(pool.clone());
         let bookmarks = BookmarkService::new(pool.clone());
+        let calendar = CalendarService::new(pool.clone());
         let settings = SettingsService::new(pool.clone());
         let briefing = BriefingService::new(pool.clone(), settings.clone(), accounts.clone());
         let finance = FinanceService::new(pool.clone());
@@ -184,6 +188,7 @@ impl AppServices {
             accounts,
             agent,
             bookmarks,
+            calendar,
             briefing,
             finance,
             footprints,
