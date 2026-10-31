@@ -236,7 +236,7 @@ High-impact capabilities brainstormed via multi-agent architectural analysis acr
    - Fix multi-currency blind addition in `domain/recurring_bills/due.rs:75`.
    - ~~Fix vector embedding deletion leak~~ (done, Blueprint 8).
 3. **Web AI Assistant Phase 2:** Implement multi-conversation thread switcher, dynamic model badge, and non-destructive new chat in `AiAssistantView.tsx`.
-4. **Roadmap execution (2026-10-31):** Phase A done for Blueprints 8 and 10 (plans: `plans/2026-10-31-knowledge-embedding-lifecycle.md`, `plans/2026-10-31-agent-task-controls.md`); Blueprint 1 (Web AI Phase 2/3) done too (plan: `plans/2026-10-31-web-ai-threads.md`), so Phase A is complete; Phase B: Blueprint 5 (receipt viewer) done (plan: `plans/2026-10-31-receipt-preservation-viewer.md`), Blueprint 4 (email receipts) done (plan: `plans/2026-10-31-email-receipt-ingestion.md`); Blueprint 3 (Telegram/Discord voice) not started; Phase C untouched. Follow the implementation blueprints in [`docs/superpowers/specs/2026-10-31-feature-blueprints.md`](specs/2026-10-31-feature-blueprints.md) across Phase A (critical data integrity & core usability), Phase B (omnichannel parity & financial automation), and Phase C (personal productivity & knowledge management).
+4. **Roadmap execution (2026-10-31):** Phase A done for Blueprints 8 and 10 (plans: `plans/2026-10-31-knowledge-embedding-lifecycle.md`, `plans/2026-10-31-agent-task-controls.md`); Blueprint 1 (Web AI Phase 2/3) done too (plan: `plans/2026-10-31-web-ai-threads.md`), so Phase A is complete; Phase B: Blueprint 5 (receipt viewer) done (plan: `plans/2026-10-31-receipt-preservation-viewer.md`), Blueprint 4 (email receipts) done (plan: `plans/2026-10-31-email-receipt-ingestion.md`); Blueprint 3 (Telegram/Discord voice) done (plan: `plans/2026-10-31-audio-ingress-parity.md`); Phase C untouched. Follow the implementation blueprints in [`docs/superpowers/specs/2026-10-31-feature-blueprints.md`](specs/2026-10-31-feature-blueprints.md) across Phase A (critical data integrity & core usability), Phase B (omnichannel parity & financial automation), and Phase C (personal productivity & knowledge management).
 
 ---
 
@@ -359,6 +359,17 @@ Plan: `plans/2026-10-31-email-receipt-ingestion.md`. Status: done and verified; 
 - *Ruling: job key is `email_receipt:{message_id}:{index}`; a fully duplicate message (IMAP re-fetch after a restart clears `RecentMessages`) stores an orphan object for the retention sweep but queues nothing and sends no second reply — cost if wrong: none.*
 - *Ruling: no "Email" origin badge on the web ledger — `source_kind` models only recurring bills and portfolio cash, so a badge needs a new source kind, a migration and an OpenAPI change; the Blueprint 5 paperclip already opens the receipt — cost if wrong: emailed expenses are not visually distinguishable.*
 - *Pre-existing, not changed: `ProcessReceiptHandler` parses the OCR amount through `f64` before converting to minor units, against the integer-money rule; it is shared with Matrix and Discord and wants its own fix.*
+
+### Rulings (2026-10-31 — Feature blueprints, Phase B: audio ingress parity)
+
+Plan: `plans/2026-10-31-audio-ingress-parity.md`. Status: done and verified; live Telegram/Discord downloads untested (no external service is contacted from tests). The gateway routing in `discord/gateway.rs` is not unit-tested (serenity handler).
+
+- *Ruling: parity with Matrix, not the spec's transcript routing — a caption starting `/note` or `!note` saves a note, anything else runs the AI turn with the user's tools; the spec's prefix-in-transcript and command-prefix matching were not built — cost if wrong: a user who wants a note must say so in the caption.*
+- *Ruling: direct chats only (Discord already ignored guilds; Telegram groups are ignored because a voice note cannot mention the bot) — cost if wrong: group voice notes are silently ignored.*
+- *Ruling: Matrix keeps its own `attachments.rs` flow (stage indicators make it a refactor with no user value here); only `capture_voice_note` gained a `source_channel` argument — cost if wrong: a small known duplication of the note-vs-turn branch.*
+- *Ruling: rate limit reuses `interface::http::rate_limit::InMemoryRateLimiter` (fixed window, 5 per 60 s per account) — cost if wrong: a burst straddling a window boundary allows up to 10.*
+- *Ruling: no frontend change and no Settings STT badge — `NoteCard` already shows `source_channel`, and voice notes carry the `voice` tag — cost if wrong: STT health is not visible in Settings.*
+- *Ruling: `SttUnavailable`/`TranscriptionFailed` are not domain errors; `process_audio` already turns every `SttServiceError` into a reply — cost if wrong: none.*
 
 ---
 

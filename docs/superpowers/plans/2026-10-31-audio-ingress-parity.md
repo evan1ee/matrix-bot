@@ -4,7 +4,7 @@
 
 **Goal:** A linked user's voice note on Telegram or Discord (DM) is transcribed and handled exactly like a Matrix voice note: an AI turn with the user's tools, or a saved note when the caption starts `/note`.
 
-**Architecture:** `process_audio` and `capture_voice_note` are already channel-neutral, so no new transcription path is written. A pure `domain/channels/audio.rs` validates the payload; `interface/channels/audio_ingress.rs` owns the shared flow (resolve identity → rate limit → note or AI turn) and a per-account rate limiter; the STT client and voice config reach it through a `VoiceRuntime` attached to `Inbound`. Telegram and Discord only detect the audio, download it within bounds and call the shared flow.
+**Architecture:** `process_audio` and `capture_voice_note` are already channel-neutral, so no new transcription path is written. A pure `domain/channels/audio.rs` validates the payload; `interface/channels/audio_ingress.rs` owns the shared flow (resolve identity → rate limit → note or AI turn) and uses the existing `InMemoryRateLimiter`; the STT client and voice config reach it through a `VoiceRuntime` attached to `Inbound`. Telegram and Discord only detect the audio, download it within bounds and call the shared flow.
 
 **Tech Stack:** Rust, `teloxide-core` 0.13, `serenity` 0.12.5, existing `SttClient`.
 
@@ -54,19 +54,9 @@
 - [ ] **Step 4:** Run the same command — expect PASS.
 - [ ] **Step 5:** `git add backend/src/domain/channels && git commit -m "feat: audio payload domain type for channel voice ingress"`
 
-### Task 2: Per-account rate limiter
+### Task 2: Per-account rate limiter (reuse, no new code)
 
-**Files:**
-- Create: `backend/src/interface/channels/audio_ingress.rs` (limiter only for now)
-- Modify: `backend/src/interface/channels/mod.rs`
-
-**Interfaces:**
-- Produces: `pub struct AudioRateLimit` (`Mutex<HashMap<AccountId, VecDeque<Instant>>>`) with `AudioRateLimit::new(max: usize, window: Duration)`, `fn allow(&self, owner: &AccountId, now: Instant) -> bool`; `pub const AUDIO_PER_MINUTE: usize = 5;`.
-
-- [ ] **Step 1:** Look for an existing keyed sliding-window limiter (`grep -rn "RateLimit" backend/src`); reuse it if it takes an arbitrary key, else proceed.
-- [ ] **Step 2:** Tests: `allows_five_then_refuses_the_sixth`, `a_second_account_is_independent`, `slots_free_after_the_window` (drive `now` forward), `empty_accounts_are_pruned` (map length returns to 0 after the window, so memory stays bounded).
-- [ ] **Step 3:** Run `cargo test -p matrix-bot audio_ingress` — FAIL, then implement (prune expired entries on every call; remove the key when its deque empties; poisoned lock allows the call), then PASS.
-- [ ] **Step 4:** Commit `feat: per-account audio transcription rate limit`.
+`interface/http/rate_limit.rs::InMemoryRateLimiter::new(max, window)` / `check(&str)` is already a string-keyed, memory-pruned limiter. `VoiceRuntime.limiter` (Task 4) is an `InMemoryRateLimiter::new(5, 60 s)` keyed by `owner.to_string()`; Task 4's `sixth_clip_is_refused_without_calling_stt` covers it. Cost if wrong: it is a fixed window, so a burst of 5 at the end of one window and 5 at the start of the next is allowed.
 
 ### Task 3: Channel-aware voice note capture
 
@@ -87,7 +77,7 @@
 
 **Interfaces:**
 - Consumes: Tasks 1–3.
-- Produces: `pub struct VoiceRuntime { pub config: VoiceConfig, pub stt: SttClient, pub ai: AiEnvConfig, pub limiter: AudioRateLimit }`; `Inbound::with_voice(self, VoiceRuntime) -> Self`; `pub async fn ingest_audio(inbound: &Inbound, sender: &PlatformIdentity, conversation: &ConversationAddress, payload: AudioPayload, caption: Option<&str>, progress: Option<&dyn ProgressSink>) -> Reply`.
+- Produces: `pub struct VoiceRuntime { pub config: VoiceConfig, pub stt: SttClient, pub ai: AiEnvConfig, pub limiter: InMemoryRateLimiter }`; `Inbound::with_voice(self, VoiceRuntime) -> Self`; `pub async fn ingest_audio(inbound: &Inbound, sender: &PlatformIdentity, conversation: &ConversationAddress, payload: AudioPayload, caption: Option<&str>, progress: Option<&dyn ProgressSink>) -> Reply`.
 - `ingest_audio` order: resolve sender (`Unlinked` → `Reply::html(UNLINKED_REPLY)`, error → `Reply::html` generic notice) → `limiter.allow` (else a "too many voice notes, try again in a minute" reply) → caption starting `/note` or `!note` → `capture_voice_note(.., conversation.channel name, conversation.to_storage(), ..)` else `process_audio(.., conversation.to_storage(), ..)`. No `voice` runtime → the same "voice unavailable" reply `process_audio` gives for `NotConfigured`.
 
 - [ ] **Step 1:** Integration tests with `test_pool()` and a local stub STT server returning `{"text":"buy milk"}`: `unlinked_sender_gets_the_link_prompt_and_stt_is_not_called` (stub counts requests), `note_caption_creates_a_note_for_the_owner`, `sixth_clip_is_refused_without_calling_stt`, `unconfigured_stt_replies_instead_of_panicking`. The plain-voice AI path is covered by `process_audio`'s own tests; assert only that the caption-less call reaches STT.
@@ -126,6 +116,6 @@
 **Files:**
 - Modify: `backend/src/app.rs:261-267`, `docs/architecture.md` (one paragraph under channels), `docs/superpowers/HANDOFF.md` (status row, the rulings above)
 
-- [ ] **Step 1:** In `app.rs` build `VoiceRuntime` from `config.voice_enabled`, `voice_language`, `stt_base_url`, `stt_api_key`, `stt_model`, `config.ai.clone()` and `AudioRateLimit::new(AUDIO_PER_MINUTE, Duration::from_secs(60))`; chain `.with_voice(..)` on `Inbound::new`.
+- [ ] **Step 1:** In `app.rs` build `VoiceRuntime` from `config.voice_enabled`, `voice_language`, `stt_base_url`, `stt_api_key`, `stt_model`, `config.ai.clone()` and `InMemoryRateLimiter::new(5, Duration::from_secs(60))`; chain `.with_voice(..)` on `Inbound::new`.
 - [ ] **Step 2:** Run the §8 gates: `cargo fmt --all -- --check`, `cargo check -p matrix-bot --all-targets`, `cargo clippy -p matrix-bot --all-targets -- -D warnings`, `cargo test -p matrix-bot --all-targets` (needs `TEST_DATABASE_URL`; see the test-Postgres memory), `git diff --check`. `cargo sqlx prepare --check` and `generate-openapi` need no run (no queries or DTOs changed); confirm with `git status`.
 - [ ] **Step 3:** Update docs and HANDOFF; commit `docs: record audio ingress parity`.
