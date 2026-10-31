@@ -399,6 +399,8 @@ export class FakeApi {
   todos: FakeTodo[] = [];
   reminders: FakeReminder[] = [];
   webhooks: FakeWebhook[] = [];
+  calendarTokenCreatedAt: string | null = null;
+  calendarMintCount = 0;
   webhookLogs: FakeWebhookOutboxItem[] = [];
   aiConfig: FakeAiConfig = {
     owner_id: OWNER,
@@ -2525,6 +2527,29 @@ export class FakeApi {
         period_change_minor: change,
         period_change_pct: pct,
       });
+    }
+
+    // --- calendar feed token ---
+    if (path === '/account/calendar-token') {
+      if (method === 'GET') {
+        return json(route, 200, {
+          active: this.calendarTokenCreatedAt !== null,
+          created_at: this.calendarTokenCreatedAt,
+        });
+      }
+      if (method === 'POST') {
+        this.calendarMintCount += 1;
+        this.calendarTokenCreatedAt = '2026-10-31T09:00:00Z';
+        const token = `mb_cal_fake_token_${this.calendarMintCount}`;
+        return json(route, 200, {
+          token,
+          feed_path: `/api/v1/calendar/feed.ics?token=${token}`,
+        });
+      }
+      if (method === 'DELETE') {
+        this.calendarTokenCreatedAt = null;
+        return route.fulfill({ status: 204, body: '' });
+      }
     }
 
     // --- webhooks ---

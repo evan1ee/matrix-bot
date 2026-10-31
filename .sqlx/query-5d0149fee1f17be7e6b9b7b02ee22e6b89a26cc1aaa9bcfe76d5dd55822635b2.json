@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH hit AS (\n            SELECT account_id FROM account_calendar_tokens WHERE token_hash = $1\n        ), touched AS (\n            UPDATE account_calendar_tokens t\n               SET last_accessed_at = now()\n              FROM hit\n             WHERE t.account_id = hit.account_id\n               AND (t.last_accessed_at IS NULL OR t.last_accessed_at < now() - interval '1 hour')\n        )\n        SELECT account_id AS \"account_id!\" FROM hit\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "account_id!",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "account_calendar_tokens",
+            "name": "account_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "5d0149fee1f17be7e6b9b7b02ee22e6b89a26cc1aaa9bcfe76d5dd55822635b2"
+}

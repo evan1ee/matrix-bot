@@ -5,10 +5,10 @@ use axum::{
 };
 
 use super::{
-    account, admin, agent, ai, ai_stream, auth, bookmarks, briefing, finance, finance_analytics,
-    finance_budgets, finance_categories, finance_net_worth, finance_receipts, footprints, habits,
-    identities, knowledge, knowledge_transfer, life, life_activity, link, mcp, ocr, openapi,
-    portfolio, portfolio_alerts, portfolio_cash, portfolio_history, portfolio_prices,
+    account, admin, agent, ai, ai_stream, auth, bookmarks, briefing, calendar, finance,
+    finance_analytics, finance_budgets, finance_categories, finance_net_worth, finance_receipts,
+    footprints, habits, identities, knowledge, knowledge_transfer, life, life_activity, link, mcp,
+    ocr, openapi, portfolio, portfolio_alerts, portfolio_cash, portfolio_history, portfolio_prices,
     recurring_bills, reminders, rooms, settings, sse, storage, todo_steps, todos, voice, webhooks,
 };
 
@@ -77,6 +77,13 @@ fn routes_auth() -> Router<auth::ApiState> {
 fn routes_account() -> Router<auth::ApiState> {
     Router::new()
         .route("/account/passkeys", get(account::passkeys::list_passkeys))
+        .route("/calendar/feed.ics", get(calendar::get_feed))
+        .route(
+            "/account/calendar-token",
+            get(calendar::token_status)
+                .post(calendar::mint_token)
+                .delete(calendar::revoke_token),
+        )
         .route(
             "/account/passkeys/add/start",
             post(account::passkeys::add_passkey_start),

@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT last_accessed_at FROM account_calendar_tokens WHERE token_hash = 'h'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "last_accessed_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "account_calendar_tokens",
+            "name": "last_accessed_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "1894a4405d3acab14c24a0ba45646eac58c987bce75d7d5d2841caf92c9d097b"
+}

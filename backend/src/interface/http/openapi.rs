@@ -31,11 +31,12 @@ use crate::interface::http::reminders::{RecurrencePattern, Reminder, ReminderSta
 use crate::interface::http::todos::{TodoItem, TodoPriority};
 use crate::interface::http::webhooks::{TelegramMessageResult, TelegramQuery, TelegramResponse};
 use crate::interface::http::{
-    account, admin, agent, ai, ai_stream, auth, bookmarks, briefing, finance, finance_analytics,
-    finance_budgets, finance_categories, finance_net_worth, finance_receipts, footprints, habits,
-    health, identities, knowledge, knowledge_transfer, life, life_activity, link, mcp, ocr,
-    portfolio, portfolio_alerts, portfolio_cash, portfolio_history, portfolio_prices,
-    recurring_bills, reminders, rooms, settings, sse, storage, todo_steps, todos, voice, webhooks,
+    account, admin, agent, ai, ai_stream, auth, bookmarks, briefing, calendar, finance,
+    finance_analytics, finance_budgets, finance_categories, finance_net_worth, finance_receipts,
+    footprints, habits, health, identities, knowledge, knowledge_transfer, life, life_activity,
+    link, mcp, ocr, portfolio, portfolio_alerts, portfolio_cash, portfolio_history,
+    portfolio_prices, recurring_bills, reminders, rooms, settings, sse, storage, todo_steps, todos,
+    voice, webhooks,
 };
 
 #[derive(OpenApi)]
@@ -178,6 +179,10 @@ use crate::interface::http::{
         knowledge::search_knowledge,
         knowledge_transfer::export_notes,
         knowledge_transfer::import_notes,
+        calendar::get_feed,
+        calendar::mint_token,
+        calendar::token_status,
+        calendar::revoke_token,
         mcp::list_mcp_tokens,
         mcp::create_mcp_token,
         mcp::delete_mcp_token,
@@ -398,6 +403,8 @@ use crate::interface::http::{
             crate::interface::mcp::models::CreateMcpTokenRequest,
             crate::interface::mcp::models::CreateMcpTokenResponse,
             crate::interface::mcp::models::McpTokenSummary,
+            calendar::CalendarTokenResponse,
+            calendar::CalendarTokenStatus,
             ocr::OcrScanResponse,
             ocr::OcrBlockDto,
             ocr::ReceiptExtractionDto,

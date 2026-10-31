@@ -20,6 +20,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/account/calendar-token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /api/v1/account/calendar-token — whether a feed token exists. */
+        get: operations["token_status"];
+        put?: never;
+        /** POST /api/v1/account/calendar-token — mints a feed token, replacing any old one. */
+        post: operations["mint_token"];
+        /** DELETE /api/v1/account/calendar-token — revokes the feed token. */
+        delete: operations["revoke_token"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/account/identities": {
         parameters: {
             query?: never;
@@ -970,6 +989,23 @@ export interface paths {
         get?: never;
         put?: never;
         post: operations["trigger_briefing"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/calendar/feed.ics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** GET /api/v1/calendar/feed.ics — the account's agenda as iCalendar. */
+        get: operations["get_feed"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -2694,6 +2730,17 @@ export interface components {
             quantity: string;
             /** @description Ticker/symbol, e.g. `"AAPL"`. */
             symbol: string;
+        };
+        CalendarTokenResponse: {
+            /** @description Path (with query) of the feed, relative to the server's origin. */
+            feed_path: string;
+            /** @description Shown once; only its hash is stored. */
+            token: string;
+        };
+        CalendarTokenStatus: {
+            active: boolean;
+            /** Format: date-time */
+            created_at?: string | null;
         };
         CashAmountRequest: {
             /** @description Decimal string, e.g. `"1000.00"`. */
@@ -4508,6 +4555,91 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AiUserConfig"];
+                };
+            };
+        };
+    };
+    token_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Token status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalendarTokenStatus"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    mint_token: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description New token; shown once */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CalendarTokenResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    revoke_token: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Revoked (also when none existed) */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
                 };
             };
         };
@@ -6671,6 +6803,47 @@ export interface operations {
             };
             /** @description Unauthorized */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    get_feed: {
+        parameters: {
+            query?: {
+                /** @description The subscription token; a `Authorization: Bearer` header works too. */
+                token?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description iCalendar document */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/calendar": string;
+                };
+            };
+            /** @description Unknown or revoked token */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Rate limit exceeded */
+            429: {
                 headers: {
                     [name: string]: unknown;
                 };

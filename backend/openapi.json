@@ -67,6 +67,103 @@
         ]
       }
     },
+    "/api/v1/account/calendar-token": {
+      "get": {
+        "tags": [
+          "calendar"
+        ],
+        "summary": "GET /api/v1/account/calendar-token — whether a feed token exists.",
+        "operationId": "token_status",
+        "responses": {
+          "200": {
+            "description": "Token status",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarTokenStatus"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "calendar"
+        ],
+        "summary": "POST /api/v1/account/calendar-token — mints a feed token, replacing any old one.",
+        "operationId": "mint_token",
+        "responses": {
+          "200": {
+            "description": "New token; shown once",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CalendarTokenResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "calendar"
+        ],
+        "summary": "DELETE /api/v1/account/calendar-token — revokes the feed token.",
+        "operationId": "revoke_token",
+        "responses": {
+          "204": {
+            "description": "Revoked (also when none existed)"
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/account/identities": {
       "get": {
         "tags": [
@@ -3124,6 +3221,59 @@
             "session_cookie": []
           }
         ]
+      }
+    },
+    "/api/v1/calendar/feed.ics": {
+      "get": {
+        "tags": [
+          "calendar"
+        ],
+        "summary": "GET /api/v1/calendar/feed.ics — the account's agenda as iCalendar.",
+        "operationId": "get_feed",
+        "parameters": [
+          {
+            "name": "token",
+            "in": "query",
+            "description": "The subscription token; a `Authorization: Bearer` header works too.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "nullable": true
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "iCalendar document",
+            "content": {
+              "text/calendar": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or revoked token",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/api/v1/events": {
@@ -10297,6 +10447,39 @@
           "symbol": {
             "type": "string",
             "description": "Ticker/symbol, e.g. `\"AAPL\"`."
+          }
+        }
+      },
+      "CalendarTokenResponse": {
+        "type": "object",
+        "required": [
+          "token",
+          "feed_path"
+        ],
+        "properties": {
+          "feed_path": {
+            "type": "string",
+            "description": "Path (with query) of the feed, relative to the server's origin."
+          },
+          "token": {
+            "type": "string",
+            "description": "Shown once; only its hash is stored."
+          }
+        }
+      },
+      "CalendarTokenStatus": {
+        "type": "object",
+        "required": [
+          "active"
+        ],
+        "properties": {
+          "active": {
+            "type": "boolean"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
           }
         }
       },

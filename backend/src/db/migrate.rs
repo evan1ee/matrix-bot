@@ -218,6 +218,7 @@ mod tests {
             ("security_events", "account_id"),
             ("web_users", "account_id"),
             ("mcp_tokens", "account_id"),
+            ("account_calendar_tokens", "account_id"),
             ("account_rooms", "account_id"),
             ("jobs", "account_id"),
         ];
