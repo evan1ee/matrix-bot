@@ -259,6 +259,31 @@ impl NewJob {
         caption: Option<String>,
     ) -> Self {
         let dedupe_key = storage_key.as_str().to_owned();
+        Self::receipt_job(owner, storage_key, conversation, caption, dedupe_key)
+    }
+
+    /// An emailed receipt keys on the message and attachment position rather
+    /// than the storage object: a re-fetched message stores a new object, and
+    /// the key is what stops it recording a second expense.
+    pub fn media_process_email_receipt(
+        owner: AccountId,
+        storage_key: StorageKey,
+        conversation: ConversationAddress,
+        caption: Option<String>,
+        message_id: &str,
+        attachment_idx: usize,
+    ) -> Self {
+        let dedupe_key = format!("email_receipt:{message_id}:{attachment_idx}");
+        Self::receipt_job(owner, storage_key, Some(conversation), caption, dedupe_key)
+    }
+
+    fn receipt_job(
+        owner: AccountId,
+        storage_key: StorageKey,
+        conversation: Option<ConversationAddress>,
+        caption: Option<String>,
+        dedupe_key: String,
+    ) -> Self {
         let payload = JobPayload::MediaProcessReceipt(ProcessReceiptPayload {
             storage_key,
             account_id: owner,
@@ -631,6 +656,40 @@ mod tests {
         let val = serde_json::to_value(payload).unwrap();
         let back: ProcessReceiptPayload = serde_json::from_value(val).unwrap();
         assert_eq!(&back, payload);
+    }
+
+    #[test]
+    fn email_receipt_job_dedupes_by_message_and_index() {
+        use crate::domain::storage::{StorageCategory, StorageKey};
+        let o = owner();
+        let conv = ConversationAddress::Email("alice@example.com".into());
+        let build = |idx: usize| {
+            let key = StorageKey::generate(&o, StorageCategory::Receipts, "png");
+            NewJob::media_process_email_receipt(
+                o,
+                key,
+                conv.clone(),
+                None,
+                "msg-1@example.com",
+                idx,
+            )
+        };
+
+        let first = build(0);
+        // A re-fetched message stores a fresh object but must map to the same job.
+        assert_eq!(first.dedupe_key(), build(0).dedupe_key());
+        assert_eq!(
+            first.dedupe_key(),
+            Some("email_receipt:msg-1@example.com:0")
+        );
+        assert_ne!(first.dedupe_key(), build(1).dedupe_key());
+
+        assert_eq!(first.job_type(), JobType::MediaProcessReceipt);
+        assert_eq!((first.max_attempts(), first.backoff_seconds()), (3, 60));
+        match first.payload() {
+            JobPayload::MediaProcessReceipt(p) => assert_eq!(p.conversation, Some(conv)),
+            _ => panic!("wrong payload variant"),
+        }
     }
 
     #[test]
