@@ -10,6 +10,11 @@ export type SearchResultItem = components['schemas']['SearchResultItem'];
 /** What an import did: notes created and updated, and files it skipped with a reason. */
 export type ImportReport = components['schemas']['ImportReportDto'];
 export type KnowledgeSearchRequest = components['schemas']['KnowledgeSearchRequest'];
+/** A note's links in both directions; a null `note_id` is a title with no note yet. */
+export type NoteLinks = components['schemas']['NoteLinksResponse'];
+export type NoteLink = components['schemas']['NoteLinkDto'];
+export type KnowledgeGraph = components['schemas']['KnowledgeGraphResponse'];
+export type GraphNode = components['schemas']['GraphNode'];
 
 /** Mirrors `domain::knowledge::note::NoteType`. */
 export const NOTE_TYPES = [

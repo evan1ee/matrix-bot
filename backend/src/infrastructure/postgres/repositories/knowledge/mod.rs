@@ -4,6 +4,7 @@
 //! and `knowledge_embeddings` tables, including HNSW vector hybrid search.
 
 pub mod indexing;
+pub mod links;
 pub mod notes;
 pub mod retrieval;
 pub mod search;

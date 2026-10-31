@@ -4,6 +4,7 @@
 //! publication for notes and cross-domain semantic hybrid search.
 
 mod indexing;
+mod links;
 pub mod markdown;
 mod note_file;
 mod notes;
@@ -11,6 +12,7 @@ mod retrieval;
 mod search;
 mod transfer;
 
+pub use links::{KnowledgeGraph, LinkedNote, NoteLinks};
 pub use notes::NoteService;
 pub use retrieval::SearchQuery;
 pub use search::SearchService;

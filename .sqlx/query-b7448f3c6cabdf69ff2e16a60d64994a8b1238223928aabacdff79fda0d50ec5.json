@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO notes (owner_id, title, content, content_hash, search_text, excerpt)              VALUES ($1, 'a note', 'body', 'h', 'body', 'body') RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Int8",
+        "origin": {
+          "Table": {
+            "table": "notes",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b7448f3c6cabdf69ff2e16a60d64994a8b1238223928aabacdff79fda0d50ec5"
+}

@@ -6129,6 +6129,31 @@
         ]
       }
     },
+    "/api/v1/notes/graph": {
+      "get": {
+        "tags": [
+          "knowledge"
+        ],
+        "operationId": "get_knowledge_graph",
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeGraphResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/notes/import": {
       "post": {
         "tags": [
@@ -6303,6 +6328,46 @@
         "responses": {
           "204": {
             "description": "Note deleted"
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/notes/{id}/links": {
+      "get": {
+        "tags": [
+          "knowledge"
+        ],
+        "operationId": "get_note_links",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Note ID",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NoteLinksResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Note not found"
           }
         },
         "security": [
@@ -11680,6 +11745,43 @@
           }
         }
       },
+      "GraphEdge": {
+        "type": "object",
+        "required": [
+          "source",
+          "target"
+        ],
+        "properties": {
+          "source": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "target": {
+            "type": "integer",
+            "format": "int64"
+          }
+        }
+      },
+      "GraphNode": {
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "note_type"
+        ],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "note_type": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
       "Habit": {
         "type": "object",
         "required": [
@@ -12015,6 +12117,27 @@
           "updated_at": {
             "type": "string",
             "nullable": true
+          }
+        }
+      },
+      "KnowledgeGraphResponse": {
+        "type": "object",
+        "required": [
+          "nodes",
+          "edges"
+        ],
+        "properties": {
+          "edges": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GraphEdge"
+            }
+          },
+          "nodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/GraphNode"
+            }
           }
         }
       },
@@ -12616,6 +12739,46 @@
           }
         ],
         "description": "A single note: the summary fields plus the Markdown body."
+      },
+      "NoteLinkDto": {
+        "type": "object",
+        "description": "One end of a link. `note_id` is null for a link to a title with no note yet.",
+        "required": [
+          "title"
+        ],
+        "properties": {
+          "note_id": {
+            "type": "integer",
+            "format": "int64",
+            "nullable": true
+          },
+          "title": {
+            "type": "string"
+          }
+        }
+      },
+      "NoteLinksResponse": {
+        "type": "object",
+        "required": [
+          "outgoing",
+          "backlinks"
+        ],
+        "properties": {
+          "backlinks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NoteLinkDto"
+            },
+            "description": "Notes that link to this note."
+          },
+          "outgoing": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/NoteLinkDto"
+            },
+            "description": "Notes (or not-yet-existing titles) this note links to."
+          }
+        }
       },
       "NoteSummary": {
         "type": "object",

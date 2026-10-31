@@ -1659,6 +1659,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/notes/graph": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_knowledge_graph"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/notes/import": {
         parameters: {
             query?: never;
@@ -1707,6 +1723,22 @@ export interface paths {
         put: operations["update_note"];
         post?: never;
         delete: operations["delete_note"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/notes/{id}/links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_note_links"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -3161,6 +3193,18 @@ export interface components {
             /** Format: int64 */
             total_places: number;
         };
+        GraphEdge: {
+            /** Format: int64 */
+            source: number;
+            /** Format: int64 */
+            target: number;
+        };
+        GraphNode: {
+            /** Format: int64 */
+            id: number;
+            note_type: string;
+            title: string;
+        };
         Habit: {
             archived: boolean;
             category: string;
@@ -3272,6 +3316,10 @@ export interface components {
             name: string;
             room_id: string;
             updated_at?: string | null;
+        };
+        KnowledgeGraphResponse: {
+            edges: components["schemas"]["GraphEdge"][];
+            nodes: components["schemas"]["GraphNode"][];
         };
         KnowledgeSearchRequest: {
             filter_types?: string[] | null;
@@ -3458,6 +3506,18 @@ export interface components {
             content: string;
             /** @description Always `"markdown"`; kept so single-note readers keep working. */
             format: string;
+        };
+        /** @description One end of a link. `note_id` is null for a link to a title with no note yet. */
+        NoteLinkDto: {
+            /** Format: int64 */
+            note_id?: number | null;
+            title: string;
+        };
+        NoteLinksResponse: {
+            /** @description Notes that link to this note. */
+            backlinks: components["schemas"]["NoteLinkDto"][];
+            /** @description Notes (or not-yet-existing titles) this note links to. */
+            outgoing: components["schemas"]["NoteLinkDto"][];
         };
         /** @description A note without its body, as listed. The excerpt is what a list renders. */
         NoteSummary: {
@@ -8954,6 +9014,25 @@ export interface operations {
             };
         };
     };
+    get_knowledge_graph: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KnowledgeGraphResponse"];
+                };
+            };
+        };
+    };
     import_notes: {
         parameters: {
             query?: never;
@@ -9096,6 +9175,35 @@ export interface operations {
         responses: {
             /** @description Note deleted */
             204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_note_links: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Note ID */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NoteLinksResponse"];
+                };
+            };
+            /** @description Note not found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

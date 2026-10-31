@@ -190,6 +190,7 @@ pub const OWNED_TABLES: &[&str] = &[
     "bot_message_targets",
     "notes",
     "knowledge_embeddings",
+    "knowledge_note_links",
 ];
 
 /// Tables carrying `owner_id` that a merge moves through a dedicated routine.

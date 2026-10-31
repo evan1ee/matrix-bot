@@ -1,4 +1,5 @@
 pub mod error;
+pub mod links;
 pub mod note;
 pub mod search;
 

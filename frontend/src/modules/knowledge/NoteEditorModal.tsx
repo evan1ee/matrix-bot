@@ -5,6 +5,17 @@ import DOMPurify from 'dompurify';
 import { ApiHttpError } from '../../core/apiClient';
 import { NOTE_TYPES } from './types';
 import type { Note, NoteTypeValue } from './types';
+import { useNoteLinks, useNotes } from './api';
+import { NoteLinksPanel } from './NoteLinksPanel';
+import {
+  activeWikiQuery,
+  completeWikiLink,
+  linkifyWikiLinks,
+  titleKey,
+  wikiLinkTitle,
+} from './wikiLinks';
+
+const MAX_SUGGESTIONS = 6;
 
 export interface NoteEditorSave {
   title: string;
@@ -27,6 +38,8 @@ interface NoteEditorModalProps {
   /** Fetches the server's current copy, for resolving an edit conflict. */
   onReload?: () => Promise<Note | null>;
   isSaving: boolean;
+  /** Switches the editor to another note (a backlink or a rendered `[[link]]`). */
+  onOpenNote?: (id: number) => void;
 }
 
 const CONFLICT_MESSAGE = 'This note changed elsewhere — reload';
@@ -40,6 +53,7 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
   loadError = null,
   onReload,
   isSaving,
+  onOpenNote,
 }) => {
   const [title, setTitle] = useState('');
   const [content, setContent] = useState('');
@@ -51,7 +65,22 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
   const [previewTab, setPreviewTab] = useState<'write' | 'preview'>('write');
   const [error, setError] = useState<string | null>(null);
 
+  const [caret, setCaret] = useState(0);
+  const [suggestionIndex, setSuggestionIndex] = useState(0);
+  const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
+
   const titleInputRef = useRef<HTMLInputElement>(null);
+  const contentRef = useRef<HTMLTextAreaElement>(null);
+  const noteId = initialNote?.id ?? null;
+  // Links describe the saved note; an unsaved draft's links appear after saving.
+  const noteLinks = useNoteLinks(isOpen ? noteId : null);
+
+  const wiki = previewTab === 'write' && isOpen ? activeWikiQuery(content, caret) : null;
+  const wikiMatches = useNotes({ archived: false, search: wiki?.query, enabled: wiki !== null });
+  const suggestions =
+    wiki && !suggestionsDismissed
+      ? (wikiMatches.data ?? []).filter((n) => n.id !== noteId).slice(0, MAX_SUGGESTIONS)
+      : [];
   const isEditing = Boolean(initialNote) || isLoading || loadError !== null;
   const awaitingNote = isEditing && !initialNote;
 
@@ -151,12 +180,51 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
     }
   };
 
+  const pickSuggestion = (title: string) => {
+    if (!wiki) return;
+    const next = completeWikiLink(content, wiki, caret, title);
+    setContent(next.text);
+    setCaret(next.caret);
+    setSuggestionIndex(0);
+    // The textarea keeps focus; move its caret once React has applied the text.
+    requestAnimationFrame(() => {
+      contentRef.current?.focus();
+      contentRef.current?.setSelectionRange(next.caret, next.caret);
+    });
+  };
+
+  const handleContentKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (suggestions.length === 0) return;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      const step = e.key === 'ArrowDown' ? 1 : -1;
+      setSuggestionIndex((i) => (i + step + suggestions.length) % suggestions.length);
+    } else if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      pickSuggestion(suggestions[Math.min(suggestionIndex, suggestions.length - 1)].title);
+    } else if (e.key === 'Escape') {
+      // Closes the list only; the window-level Escape would close the modal.
+      e.stopPropagation();
+      setSuggestionsDismissed(true);
+    }
+  };
+
+  const handlePreviewClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    const anchor = (e.target as HTMLElement).closest('a');
+    const title = wikiLinkTitle(anchor?.getAttribute('href') ?? null);
+    if (title === null) return;
+    e.preventDefault();
+    const target = noteLinks.data?.outgoing.find((l) => titleKey(l.title) === titleKey(title));
+    if (target?.note_id != null) onOpenNote?.(target.note_id);
+  };
+
   const renderedPreview = () => {
-    const html = marked.parse(content || '*Nothing to preview*') as string;
+    const html = marked.parse(linkifyWikiLinks(content || '*Nothing to preview*')) as string;
     const cleanHtml = DOMPurify.sanitize(html);
     return (
       <div
         className="prose dark:prose-invert max-w-none text-sm leading-relaxed"
+        onClick={handlePreviewClick}
         dangerouslySetInnerHTML={{ __html: cleanHtml }}
       />
     );
@@ -317,20 +385,71 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
                 </div>
 
                 {previewTab === 'write' ? (
-                  <textarea
-                    id="note-content-input"
-                    rows={10}
-                    placeholder="Write your note in markdown..."
-                    value={content}
-                    onChange={(e) => setContent(e.target.value)}
-                    className="w-full px-3 py-2 text-sm bg-neutral-50 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-md text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-hidden focus:ring-2 focus:ring-neutral-400 dark:focus:ring-neutral-600 font-mono transition resize-y"
-                  />
+                  <div className="relative">
+                    <textarea
+                      id="note-content-input"
+                      ref={contentRef}
+                      rows={10}
+                      placeholder="Write your note in markdown..."
+                      value={content}
+                      onChange={(e) => {
+                        setContent(e.target.value);
+                        setCaret(e.target.selectionStart);
+                        setSuggestionIndex(0);
+                        setSuggestionsDismissed(false);
+                      }}
+                      onKeyDown={handleContentKeyDown}
+                      onKeyUp={(e) => setCaret(e.currentTarget.selectionStart)}
+                      onClick={(e) => setCaret(e.currentTarget.selectionStart)}
+                      className="w-full px-3 py-2 text-sm bg-neutral-50 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-md text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-hidden focus:ring-2 focus:ring-neutral-400 dark:focus:ring-neutral-600 font-mono transition resize-y"
+                    />
+                    {suggestions.length > 0 && (
+                      <ul
+                        role="listbox"
+                        aria-label="Link to note"
+                        data-testid="wiki-suggestions"
+                        className="absolute left-3 bottom-2 z-10 w-64 max-w-[calc(100%-1.5rem)] overflow-hidden rounded-md border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 shadow-lg"
+                      >
+                        {suggestions.map((note, i) => (
+                          <li
+                            key={note.id}
+                            role="option"
+                            aria-selected={i === suggestionIndex}
+                          >
+                            <button
+                              type="button"
+                              // Mouse-down keeps the textarea focused (and its caret) while picking.
+                              onMouseDown={(e) => {
+                                e.preventDefault();
+                                pickSuggestion(note.title);
+                              }}
+                              className={`block w-full truncate px-3 py-1.5 text-left text-xs transition-colors ${
+                                i === suggestionIndex
+                                  ? 'bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100'
+                                  : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800'
+                              }`}
+                            >
+                              {note.title}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
                 ) : (
                   <div className="w-full min-h-[240px] max-h-[360px] p-3 overflow-y-auto bg-neutral-50 dark:bg-neutral-800/60 border border-neutral-300 dark:border-neutral-700 rounded-md">
                     {renderedPreview()}
                   </div>
                 )}
               </div>
+
+              {noteId !== null && onOpenNote && (
+                <NoteLinksPanel
+                  links={noteLinks.data}
+                  isLoading={noteLinks.isLoading}
+                  onOpenNote={onOpenNote}
+                />
+              )}
             </>
           )}
         </div>
