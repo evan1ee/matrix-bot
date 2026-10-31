@@ -243,3 +243,138 @@ async fn record_expense_with_receipt_and_link_receipt() {
         .unwrap_err();
     assert!(matches!(err, AppError::NotFound(_)));
 }
+
+#[tokio::test]
+async fn create_rejects_foreign_or_non_receipt_key() {
+    use crate::domain::storage::{StorageCategory, StorageKey};
+
+    let (pool, services, owner) = setup("fin_receipt_key_rules").await;
+    let stranger = AccountId::from_seed("fin_receipt_key_stranger");
+    let bad_keys = [
+        StorageKey::generate(&stranger, StorageCategory::Receipts, "jpg"),
+        StorageKey::generate(&owner, StorageCategory::Audio, "ogg"),
+    ];
+
+    for key in bad_keys {
+        let err = services
+            .finance
+            .record_expense(
+                &owner,
+                100,
+                "USD",
+                2,
+                None,
+                None,
+                Some(key),
+                "web",
+                "tester",
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(err, AppError::Validation(_)), "{err:?}");
+    }
+    let rows = repo::list(&pool, &owner, &Default::default())
+        .await
+        .unwrap();
+    assert!(rows.is_empty());
+}
+
+#[tokio::test]
+async fn link_receipt_rejects_foreign_key() {
+    use crate::domain::storage::{StorageCategory, StorageKey};
+
+    let (_pool, services, owner) = setup("fin_link_foreign_key").await;
+    let stranger = AccountId::from_seed("fin_link_foreign_key_other");
+    let tx = services
+        .finance
+        .record_expense(&owner, 100, "USD", 2, None, None, None, "web", "tester")
+        .await
+        .unwrap();
+
+    let err = services
+        .finance
+        .link_receipt(
+            &owner,
+            tx.id,
+            StorageKey::generate(&stranger, StorageCategory::Receipts, "jpg"),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, AppError::Validation(_)), "{err:?}");
+}
+
+#[tokio::test]
+async fn detach_receipt_clears_key_and_publishes_update() {
+    use crate::domain::storage::{StorageCategory, StorageKey};
+
+    let (pool, services, owner) = setup("fin_detach_receipt").await;
+    let key = StorageKey::generate(&owner, StorageCategory::Receipts, "jpg");
+    let tx = services
+        .finance
+        .record_expense(&owner, 100, "USD", 2, None, None, Some(key), "web", "t")
+        .await
+        .unwrap();
+
+    let updated = services
+        .finance
+        .detach_receipt(&owner, tx.id)
+        .await
+        .unwrap();
+
+    assert_eq!(updated.receipt_storage_key, None);
+    assert!(types(&pool, &owner)
+        .await
+        .contains(&"TransactionUpdated".to_string()));
+}
+
+#[tokio::test]
+async fn detach_receipt_without_receipt_or_other_owner_is_not_found() {
+    use crate::domain::storage::{StorageCategory, StorageKey};
+
+    let (_pool, services, owner) = setup("fin_detach_missing").await;
+    let stranger = AccountId::from_seed("fin_detach_missing_other");
+    let bare = services
+        .finance
+        .record_expense(&owner, 100, "USD", 2, None, None, None, "web", "t")
+        .await
+        .unwrap();
+    let with = services
+        .finance
+        .record_expense(
+            &owner,
+            100,
+            "USD",
+            2,
+            None,
+            None,
+            Some(StorageKey::generate(
+                &owner,
+                StorageCategory::Receipts,
+                "png",
+            )),
+            "web",
+            "t",
+        )
+        .await
+        .unwrap();
+
+    let err = services
+        .finance
+        .detach_receipt(&owner, bare.id)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, AppError::NotFound(_)));
+    let err = services
+        .finance
+        .detach_receipt(&stranger, with.id)
+        .await
+        .unwrap_err();
+    assert!(matches!(err, AppError::NotFound(_)));
+    let still = services
+        .finance
+        .get_transaction(&owner, with.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(still.receipt_storage_key.is_some());
+}

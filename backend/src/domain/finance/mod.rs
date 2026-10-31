@@ -202,6 +202,9 @@ pub enum FinanceError {
     #[error("Category not found or access denied")]
     CategoryNotFound,
 
+    #[error("Receipt must be a receipts file in your own storage")]
+    InvalidReceiptKey,
+
     #[error("No category named {name}")]
     UnknownCategory { name: String },
 
@@ -225,6 +228,13 @@ pub enum FinanceError {
 
     #[error("Invalid money format: {0}")]
     Money(#[from] money::MoneyError),
+}
+
+/// A receipt may only point at a receipts object in the owner's own storage;
+/// anything else would let one account link, and later presign, another's files.
+pub fn receipt_key_belongs_to(owner: &AccountId, key: &StorageKey) -> bool {
+    key.account_id() == *owner
+        && key.category() == crate::domain::storage::StorageCategory::Receipts
 }
 
 #[cfg(test)]

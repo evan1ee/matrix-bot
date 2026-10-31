@@ -3,8 +3,8 @@ use crate::domain::accounts::AccountId;
 use crate::domain::events::SystemEvent;
 use crate::domain::finance::budget::RecordedTransaction;
 use crate::domain::finance::{
-    Direction, FinanceError, ListTransactionsFilter, NewTransaction, Transaction, TransactionPatch,
-    MAX_CATEGORY_LEN, MAX_NOTE_LEN,
+    receipt_key_belongs_to, Direction, FinanceError, ListTransactionsFilter, NewTransaction,
+    Transaction, TransactionPatch, MAX_CATEGORY_LEN, MAX_NOTE_LEN,
 };
 use crate::infrastructure::postgres::repositories::finance as repo;
 use crate::infrastructure::postgres::repositories::outbox;
@@ -56,6 +56,12 @@ impl FinanceService {
         if let Some(note) = input.note {
             if note.len() > MAX_NOTE_LEN {
                 return Err(FinanceError::NoteTooLong { max: MAX_NOTE_LEN }.into());
+            }
+        }
+
+        if let Some(key) = &input.receipt_storage_key {
+            if !receipt_key_belongs_to(owner, key) {
+                return Err(FinanceError::InvalidReceiptKey.into());
             }
         }
 
@@ -211,11 +217,34 @@ impl FinanceService {
         transaction_id: i64,
         storage_key: crate::domain::storage::StorageKey,
     ) -> Result<Transaction, AppError> {
+        if !receipt_key_belongs_to(owner, &storage_key) {
+            return Err(FinanceError::InvalidReceiptKey.into());
+        }
         let mut tx = self.pool.begin().await?;
         let updated =
             repo::set_receipt_storage_key(&mut tx, owner, transaction_id, Some(&storage_key))
                 .await?
                 .ok_or(FinanceError::TransactionNotFound)?;
+        outbox::publish(&mut tx, &SystemEvent::TransactionUpdated(updated.clone())).await?;
+        tx.commit().await?;
+        Ok(updated)
+    }
+
+    /// Unlinks the receipt from a transaction owned by `owner`. A transaction
+    /// without a receipt is reported as not found, like an unknown one.
+    pub async fn detach_receipt(
+        &self,
+        owner: &AccountId,
+        transaction_id: i64,
+    ) -> Result<Transaction, AppError> {
+        let mut tx = self.pool.begin().await?;
+        let current = repo::find_owned(&mut *tx, owner, transaction_id)
+            .await?
+            .filter(|t| t.receipt_storage_key.is_some())
+            .ok_or(FinanceError::TransactionNotFound)?;
+        let updated = repo::set_receipt_storage_key(&mut tx, owner, current.id, None)
+            .await?
+            .ok_or(FinanceError::TransactionNotFound)?;
         outbox::publish(&mut tx, &SystemEvent::TransactionUpdated(updated.clone())).await?;
         tx.commit().await?;
         Ok(updated)
