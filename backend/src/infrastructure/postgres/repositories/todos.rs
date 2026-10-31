@@ -152,6 +152,31 @@ pub async fn list_all_user<'e>(
     Ok(rows.into_iter().map(Into::into).collect())
 }
 
+/// Open todos that have a due date, soonest first (the calendar feed's agenda).
+pub async fn list_open_dated<'e>(
+    conn: impl PgExecutor<'e>,
+    owner_id: &AccountId,
+    limit: i64,
+) -> Result<Vec<TodoItem>, sqlx::Error> {
+    let rows = sqlx::query_as!(
+        TodoRow,
+        r#"
+        SELECT id, room_id, owner_id, sender_name, text, priority, due_at, remind_before_minutes, completed, created_at,
+               tags, recurrence, recurrence_anchor, next_todo_id
+        FROM todos
+        WHERE owner_id = $1 AND completed = FALSE AND due_at IS NOT NULL
+        ORDER BY due_at ASC, id ASC
+        LIMIT $2
+        "#,
+        owner_id.as_uuid(),
+        limit
+    )
+    .fetch_all(conn)
+    .await?;
+
+    Ok(rows.into_iter().map(Into::into).collect())
+}
+
 pub async fn count_all_user<'e>(
     conn: impl PgExecutor<'e>,
     owner_id: &AccountId,

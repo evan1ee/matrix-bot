@@ -216,6 +216,7 @@ pub const ACCOUNT_ID_DISCARDED: &[&str] = &[
     "recovery_codes",
     "recovery_requests",
     "mcp_tokens",
+    "account_calendar_tokens",
     "passkey_enrollment_tokens",
 ];
 

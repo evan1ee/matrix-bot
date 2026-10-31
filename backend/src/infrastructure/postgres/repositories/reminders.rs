@@ -398,6 +398,36 @@ pub async fn clear_user_history<'e>(
     Ok(result.rows_affected())
 }
 
+/// Pending reminders that belong to no todo or bill, soonest first (the
+/// calendar feed announces sourced reminders through their parent).
+pub async fn list_pending_standalone<'e>(
+    conn: impl PgExecutor<'e>,
+    owner_id: &AccountId,
+    limit: i64,
+) -> Result<Vec<Reminder>, sqlx::Error> {
+    let rows = sqlx::query_as!(
+        ReminderRow,
+        r#"
+        SELECT
+            id, room_id, owner_id, sender_name, message, trigger_at,
+            recurrence, status, retry_count, source_kind, source_id, created_at
+        FROM reminders
+        WHERE owner_id = $1
+          AND status = 'pending'
+          AND source_kind IS NULL
+          AND source_id IS NULL
+        ORDER BY trigger_at ASC, id ASC
+        LIMIT $2
+        "#,
+        owner_id.as_uuid(),
+        limit
+    )
+    .fetch_all(conn)
+    .await?;
+
+    Ok(rows.into_iter().map(Into::into).collect())
+}
+
 pub async fn list_user_reminders<'e>(
     conn: impl PgExecutor<'e>,
     owner_id: &AccountId,
