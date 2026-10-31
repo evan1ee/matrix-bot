@@ -421,6 +421,8 @@ export class FakeApi {
   nextAiConvId = 1;
   nextAiMsgId = 1;
   notes: FakeNote[] = [];
+  /** Whether `GET /briefing/audio` finds a recording (else 404). */
+  briefingAudio = false;
   /** The `X-Search-Mode` header `POST /knowledge/search` answers with. */
   searchMode: 'hybrid' | 'lexical' = 'hybrid';
   /** What `POST /notes/import` answers with. */
@@ -3902,6 +3904,12 @@ export class FakeApi {
     }
 
     // --- morning briefing ---
+    if (path === '/briefing/audio' && method === 'GET') {
+      if (!this.briefingAudio) {
+        return json(route, 404, { error: 'No briefing recording for that day', code: 404 });
+      }
+      return json(route, 200, { url: '/fake-media/briefing.ogg', expires_in_seconds: 3600 });
+    }
     if (path === '/briefing/trigger' && method === 'POST') {
       return json(route, 200, {
         owner_id: 'acct_00000000000000000000000000000001',

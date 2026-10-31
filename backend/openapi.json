@@ -3188,6 +3188,73 @@
         ]
       }
     },
+    "/api/v1/briefing/audio": {
+      "get": {
+        "tags": [
+          "briefing"
+        ],
+        "summary": "Returns a link to the spoken version of the caller's briefing for a day.",
+        "operationId": "briefing_audio",
+        "parameters": [
+          {
+            "name": "date",
+            "in": "query",
+            "description": "The briefing's local date, `YYYY-MM-DD`.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Presigned link to the recording",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BriefingAudioResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed date",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No recording for that day",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/briefing/trigger": {
       "post": {
         "tags": [
@@ -10298,6 +10365,22 @@
           "unread_count": {
             "type": "integer",
             "format": "int64"
+          }
+        }
+      },
+      "BriefingAudioResponse": {
+        "type": "object",
+        "required": [
+          "url",
+          "expires_in_seconds"
+        ],
+        "properties": {
+          "expires_in_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "url": {
+            "type": "string"
           }
         }
       },

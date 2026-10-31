@@ -67,6 +67,8 @@ pub struct ReconciledCollisions {
 /// 3. Combines colliding `portfolio_holdings` (`(owner_id, symbol)` with same
 ///    `currency`) by summing quantities and computing weighted average cost.
 /// 4. Sums colliding `portfolio_daily_snapshots` (`(owner_id, snapshot_date, currency)`).
+/// 5. Drops `from`'s `briefing_audio` for days `into` already has (`into` wins; the
+///    orphaned object is not deleted, there is no storage sweep).
 pub async fn reconcile_colliding_owned_rows(
     conn: &mut sqlx::PgConnection,
     from: &AccountId,
@@ -247,6 +249,15 @@ pub async fn reconcile_colliding_owned_rows(
         .await?;
         out.snapshots = snapshots_merged.rows_affected() as i64;
     }
+
+    // 5. One recording per day: `into`'s wins.
+    sqlx::query(AssertSqlSafe(
+        "DELETE FROM briefing_audio b          WHERE b.owner_id = $2            AND EXISTS (SELECT 1 FROM briefing_audio o                        WHERE o.owner_id = $1 AND o.local_date = b.local_date)",
+    ))
+    .bind(into.as_uuid())
+    .bind(from.as_uuid())
+    .execute(&mut *conn)
+    .await?;
 
     Ok(out)
 }

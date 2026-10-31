@@ -32,4 +32,7 @@ pub struct BriefingPayload {
     pub plain_text: String,
     pub summary: BriefingSummary,
     pub tickers: Vec<TickerPerformance>,
+    /// What to read aloud; internal, never part of the REST payload.
+    #[serde(default)]
+    pub audio_script: Option<String>,
 }

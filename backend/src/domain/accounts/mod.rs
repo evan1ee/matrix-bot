@@ -191,6 +191,7 @@ pub const OWNED_TABLES: &[&str] = &[
     "notes",
     "knowledge_embeddings",
     "knowledge_note_links",
+    "briefing_audio",
 ];
 
 /// Tables carrying `owner_id` that a merge moves through a dedicated routine.
