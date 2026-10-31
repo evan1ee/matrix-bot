@@ -2,7 +2,7 @@
 
 **Read this before touching code.** [`AGENTS.md`](../../AGENTS.md) holds the rules; this file holds the state: what is done, what an operator must still do, what is open, and the rulings that settled each disagreement. Design rationale lives in [`docs/architecture.md`](../architecture.md) and its sibling documents, not here.
 
-> **Status (2026-10):** every architectural phase and all Track 2 post-cutover enhancements are implemented: the PostgreSQL foundation, omnichannel adapters, object storage, the autonomous agent runtime with deep procedural pipelines and Kokoro TTS audio compilation, the web console with WebAuthn conditional UI autofill, the notes and knowledge base (pgvector hybrid search), and dynamic configuration with the encrypted credential vault. The web AI assistant streams replies, tool steps and Stop (phase 1, awaiting merge). What remains is operator cutover (Track 1) and web assistant phase 2.
+> **Status (2026-10):** every architectural phase and all Track 2 post-cutover enhancements are implemented: the PostgreSQL foundation, omnichannel adapters, object storage, the autonomous agent runtime with deep procedural pipelines and Kokoro TTS audio compilation, the web console with WebAuthn conditional UI autofill, the notes and knowledge base (pgvector hybrid search), and dynamic configuration with the encrypted credential vault. The web AI assistant streams replies, tool steps and Stop (phase 1, awaiting merge). What remains is operator cutover (Track 1), immediate technical debt remediation, and the brainstormed feature roadmap (beginning with Web AI Assistant Phase 2).
 
 ---
 
@@ -142,6 +142,104 @@ Design: [`specs/2026-10-18-finance-budgets.md`](specs/2026-10-18-finance-budgets
 
 ---
 
+### Technical debt & quality items
+
+Immediate code quality issues and debt identified across the codebase:
+
+1. **Split `backend/src/domain/finance/budget.rs` (approaching modular limit):**
+   - Total file length is 528 lines (335 production lines + 193 unit test lines; [`AGENTS.md`](../../AGENTS.md) §4.3 target is < 300 production lines).
+   - Decompose into a `domain/finance/budget/` directory module:
+     - `budget/mod.rs`: Domain exports, top-level type aliases, and error conversions.
+     - `budget/scope.rs`: `BudgetScope` enum, category normalization, and scope validation.
+     - `budget/threshold.rs`: `Threshold`, `BudgetStatus`, pace projection calculation, and minor-unit threshold math.
+   - Retain unit tests adjacent to the extracted components without weakening invariants.
+
+2. **Fix multi-currency blind addition in `domain/recurring_bills/due.rs:75`:**
+   - In `evaluate_bill_cash_adequacy`, `total_due_minor += b.amount_minor;` sums amounts across varying currencies (e.g. JPY, USD, EUR) without conversion or exponent normalization, and compares against `available_cash_minor` to derive `projected_shortfall_minor`.
+   - Fix: Partition analyzed bills by `currency`, compute cash reserve adequacy and shortfall metrics per currency, or require matching account currency before computing shortfall.
+
+3. **~~Fix vector embedding deletion leak in `BookmarkService::delete` and `FootprintService::delete`~~ — done 2026-10-31 (Blueprint 8; bookmarks, footprints and journal now clean up in-transaction, footprints and journal enqueue versioned embed jobs):**
+   - `BookmarkService::create` enqueues embedding jobs (`KnowledgeItemType::Bookmark`), but `BookmarkService::delete` deletes the database row without calling `repositories::knowledge::delete_embeddings_for_item(&mut *tx, owner, "bookmark", id)` (unlike `NoteService::delete_note`).
+   - `FootprintService::delete` similarly lacks symmetric embedding deletion cleanup (and `LifeService::delete_day_log` must also include it once journal entries are embedded).
+   - Fix: Call `delete_embeddings_for_item` inside the deletion transaction before commit, keeping vector storage consistent.
+
+---
+
+### Feature roadmap & open backlog (Brainstormed 2026-10)
+
+> **Authoritative Specification:** Complete production-grade architectural blueprints for these capabilities are documented in [`docs/superpowers/specs/2026-10-31-feature-blueprints.md`](specs/2026-10-31-feature-blueprints.md).
+
+High-impact capabilities brainstormed via multi-agent architectural analysis across all domains:
+
+1. **Web AI Assistant Phase 2 & 3:**
+   - **Multi-conversation switcher:** Conversation list and switcher dropdown (`GET /ai/conversations`), switching `activeConversationId` without state leakage.
+   - **Auto-generated conversation titles:** Summarize first turn or prompt into clean conversation titles (replacing default timestamps or blank titles).
+   - **Model badge dynamic reflection:** Replace hardcoded `'gpt-4o-mini'` in `AiAssistantView.tsx` with effective model name from `useQuery(['ai-config'])` and backend `ResolvedAiConfig`.
+   - **Non-destructive New Chat:** Replace destructive `DELETE /ai/conversations/:id` in `AiAssistantView.tsx` (which permanently erases the conversation) with a clean conversation unsetting/minting action, preserving prior conversation history.
+   - **Phase 3 interactions:** Message regeneration, edit-and-resend prompt forks, and one-click markdown copy to clipboard.
+
+2. **Universal Calendar Feed (RFC 5545 iCalendar / `.ics`):**
+   - Read-only Webcal subscription endpoint (`/api/v1/calendar/feed.ics` with token authentication) for calendar clients (Apple Calendar, Google Calendar, Outlook).
+   - Aggregates actionable temporal items: todos with `due_at`, recurring bills with calculated next `due_date`, and standalone reminders (`remind_at`).
+   - Reminder source deduplication: Ensure reminder records spawned directly from todos or bills (`reminders.source_kind` / `reminders.source_id`) do not duplicate their parent entities in the feed.
+   - RFC 5545 compliance: `VEVENT` / `VTODO`, deterministic `UID` generation (`todo-{id}@matrix-bot`), `DTSTAMP`, and reminder alarms (`VALARM`).
+
+3. **Omnichannel Media & Voice STT Parity:**
+   - **Telegram Voice Notes:** Ingest voice and audio messages in Telegram webhook/polling worker, dispatch audio payloads to `matrix-bot-inference` Whisper STT, and route transcripts into inbound command dispatcher.
+   - **Discord Voice Messages:** Ingest Discord DM voice attachments (`audio/ogg`, etc.) and route through STT pipeline.
+   - **Email Inbound Attachment Parsing:** Extract attached receipts and invoices (PDF, PNG, JPEG) from inbound IMAP email messages, persist into `StorageCategory::Receipts`, and enqueue `media.process_receipt` OCR jobs.
+
+4. **Scanned Receipt Preservation:**
+   - Ingestion already saves receipts into `StorageCategory::Receipts` and forwards `receipt_storage_key` to `record_expense` (`interface/jobs/media.rs:194`), and the database column `receipt_storage_key` already exists on `transactions` (migration `0008`).
+   - Gaps to complete:
+     - Expose `receipt_storage_key` on `TransactionResponse` in `interface/http/finance.rs` and frontend `Transaction` type (`frontend/src/modules/finance/types.ts`).
+     - Web upload persistence: Persist files uploaded via `/api/v1/ocr/scan` (`ReceiptDropzone.tsx`) to `StorageCategory::Receipts` and link the generated `receipt_storage_key` upon expense creation.
+     - Web console UI: Lightbox / receipt viewer modal in `TransactionList.tsx` allowing users to view the stored receipt image alongside transaction details via presigned HMAC read URLs from `StorageService`.
+
+5. **Second Brain Bidirectional Wiki-Links (`[[Note Title]]`):**
+   - Pure domain parser in `domain/knowledge/` extracting `[[Note Title]]` references from note Markdown bodies.
+   - Persistence & relations: Forward and backlinks join table (`knowledge_note_links`: `source_note_id`, `target_note_id`, `target_title`, `owner_id`).
+   - Web UI: Autocomplete popup for `[[` in note editor, clickable inter-note links in rendered view, backlink list in note detail sidebar, and visual force-directed knowledge graph.
+
+6. **Unified Multi-Domain Knowledge Search:**
+   - Plumb Journal (`life_day_logs`) and Footprints into vector search: `KnowledgeItemType` already has `Journal` and `Footprint` variants and repository extraction queries in `get_item_content_for_embedding`, but `LifeService::record_day_log` and `FootprintService::record_footprint`/`update_footprint` must enqueue `NewJob::knowledge_embed_item` jobs upon creation/update.
+   - Symmetric deletion cleanup: Ensure `BookmarkService::delete`, `FootprintService::delete`, and `LifeService::delete_day_log` invoke `repositories::knowledge::delete_embeddings_for_item` inside the deletion transaction before commit (matching `NoteService::delete_note`).
+   - Unified hybrid search query spanning all personal knowledge artifacts (notes, bookmarks, journal, travel history).
+
+7. **Scheduled Morning Briefing Podcast:**
+   - Synthesize morning briefing `<audio_script>...</audio_script>` into high-quality Ogg Opus audio via Kokoro TTS on `matrix-bot-inference` (extending the procedural pipeline in `interface/jobs/agent/audio.rs` to `interface/jobs/briefing.rs`).
+   - Persist generated audio into object storage (`StorageCategory::Audio`).
+   - Web console integration: Dedicated audio player / podcast card on dashboard or briefing view for web-only users, with playback controls and download options.
+
+8. **Autonomous Scheduled Agent Task Controls:**
+   - REST API endpoints for agent task lifecycle management: pause, resume, trigger immediate out-of-schedule run, and delete (`PATCH /api/v1/agent/tasks/:id/state`, `POST /api/v1/agent/tasks/:id/trigger`, `DELETE /api/v1/agent/tasks/:id`).
+   - Web console UI: Automation management dashboard listing active schedules, last run status, execution duration, pause/resume toggles, and manual run triggers.
+
+9. **Multi-Currency Cash Runway & Subscription Auto-Discovery:**
+   - Fix multi-currency blind addition in `domain/recurring_bills/due.rs:75` by grouping calculations per currency or converting against real-time portfolio/forex exchange rates.
+   - Subscription auto-discovery: Analytical domain engine scanning transaction history for repeating cadence patterns (same merchant/amount every ~30 days), surfacing candidate subscriptions to the user.
+
+10. **Global Command Palette (`Cmd+K` / `Ctrl+K`):**
+    - Omnipresent web console modal accessible via `Cmd+K` / `Ctrl+K`.
+    - Three-tier fuzzy search & command palette:
+      1. Navigation to any of the 20 web modules.
+      2. Quick actions (create todo, record expense, add bookmark, create note, trigger agent run).
+      3. Global instant hybrid search across notes, bookmarks, transactions, and footprints.
+
+---
+
+### Next actions
+
+1. **Operator cutover (Track 1):** Execute migration rehearsal and supervised first boot against production backup following `docs/superpowers/runbooks/postgres-foundation-cutover.md`.
+2. **Immediate technical debt fixes:**
+   - Split `domain/finance/budget.rs` (528 lines, 335 prod lines) into `budget/scope.rs` and `budget/threshold.rs` to reach the < 300-line target.
+   - Fix multi-currency blind addition in `domain/recurring_bills/due.rs:75`.
+   - ~~Fix vector embedding deletion leak~~ (done, Blueprint 8).
+3. **Web AI Assistant Phase 2:** Implement multi-conversation thread switcher, dynamic model badge, and non-destructive new chat in `AiAssistantView.tsx`.
+4. **Roadmap execution (2026-10-31):** Phase A done for Blueprints 8 and 10 (plans: `plans/2026-10-31-knowledge-embedding-lifecycle.md`, `plans/2026-10-31-agent-task-controls.md`); Blueprint 1 (Web AI Phase 2/3) is next and still open; Phase B and C untouched. Follow the implementation blueprints in [`docs/superpowers/specs/2026-10-31-feature-blueprints.md`](specs/2026-10-31-feature-blueprints.md) across Phase A (critical data integrity & core usability), Phase B (omnichannel parity & financial automation), and Phase C (personal productivity & knowledge management).
+
+---
+
 ## 5. Settled rulings
 
 Format: `Ruling: <decision> — <why> — <cost if wrong>`. New rulings go here in the same commit as the work (AGENTS §4.1).
@@ -226,6 +324,16 @@ Format: `Ruling: <decision> — <why> — <cost if wrong>`. New rulings go here 
 - *Ruling: the migration was written as `0012_finance_budgets.sql` (migrations ended at `0011` on the branch) and renumbered to `0014_finance_budgets.sql` when merging into master, which had by then taken `0012_ai_message_tool_outcome` and `0013_todo_tags_recurrence_steps` — numbering follows the merge order — cost if wrong: none once merged.*
 - *Ruling: `alerts_enabled` is `Option<bool>` end to end (domain `NewBudget`, service, chat, REST, AI tools): `None` keeps the stored value on update and means `true` on create — `!budget set` must never silently re-enable alerts the user turned off — cost if wrong: a caller wanting "always set" passes `Some(true)`.*
 - *Ruling: the web panel says "Limit reached" at exactly 100 % (state `exceeded` begins at the limit; `remaining_minor` is 0 there) — the alert fires at 100 % and spend has not yet gone past the limit — cost if wrong: wording only.*
+
+### Rulings (2026-10-31 — Feature blueprints, Phase A)
+
+- *Ruling: bookmark, footprint and journal deletes drop their `knowledge_embeddings` rows in the same transaction as the row delete; there is no sweep job for legacy orphans (retrieval already filters hits whose item is gone) — cost if wrong: pre-fix orphans linger until their owner re-indexes.*
+- *Ruling: footprint create/update and day-log upsert enqueue `knowledge_embed_item_versioned` keyed by `updated_at`; `update_time_allocation` and bookmark edits do not (time allocation is not embedded; bookmark edits are outside the blueprint) — cost if wrong: an edited bookmark keeps stale embeddings until the hourly backfill.*
+- *Ruling: `life_repo::delete_day_log` returns `Option<i64>` (the deleted id) so the service can purge embeddings — cost if wrong: none.*
+- *Ruling: manual agent task trigger reuses `SystemEvent::AgentRunStarted` instead of the blueprint's new `AgentRunCreated`; only `AgentTaskUpdated` and `AgentTaskDeleted` are new — cost if wrong: none.*
+- *Ruling: `set_scheduled_task_state` returns the updated row and takes `next_run_at: Option<_>` (`None` on pause keeps the schedule); resume passes `CronSchedule::next_after(now)` — cost if wrong: none.*
+- *Ruling: a paused task can still be run by hand, and a manual run does not move `next_run_at`/`last_run_at` — cost if wrong: the card's "Last run" ignores manual runs.*
+- *Ruling: `POST /agent/tasks/{id}/trigger` answers 200 like `POST /agent/runs`, not the blueprint's 201 — cost if wrong: clients expecting 201.*
 
 ---
 

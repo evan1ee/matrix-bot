@@ -153,6 +153,9 @@ All are mounted under `/api/v1` and authenticate with `AuthUser` (session cookie
 | `GET /agent/approvals` | Pending approval requests |
 | `POST /agent/approvals/:id/approve`, `…/reject` | Resolve a held sensitive call. These take `AuthUser`, not `VerifiedUser`: they are not in `SENSITIVE`, so no passkey step-up applies today |
 | `GET /agent/tasks`, `PUT /agent/tasks/:id` | List scheduled agent tasks; upsert one (`400` for an unknown task id or invalid cron expression) |
+| `PATCH /agent/tasks/:id/state` | Pause or resume a task (`{"enabled": bool}`); resume reschedules strictly after now (`404` for an unknown or foreign task) |
+| `POST /agent/tasks/:id/trigger` | Run a task now, even if paused (`409` while the account already has an active run) |
+| `DELETE /agent/tasks/:id` | Delete a task; past runs stay (`204`) |
 | `GET /storage/:key` | Stream a stored binary. Allowed for a session whose account matches the key's `accounts/<id>/` prefix, or for an unexpired HMAC signature |
 | `POST /ocr/scan`, `POST /voice/transcribe` | Receipt OCR and speech-to-text for uploads from the web UI; each is unavailable (OCR answers `503`) while its inference service is unconfigured |
 
