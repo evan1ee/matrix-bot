@@ -174,6 +174,21 @@ Monthly spending limits, mounted under `/api/v1/finance/budgets` and authenticat
 
 String fields are capped at 500 characters (`400`).
 
+## Calendar feed
+
+A read-only iCalendar (RFC 5545) feed of an account's agenda, for Apple Calendar, Google Calendar, Outlook and Thunderbird.
+
+| Endpoint | Auth | Purpose |
+|---|---|---|
+| `GET /api/v1/calendar/feed.ics?token=` | the token (query, or `Authorization: Bearer`) | `text/calendar; charset=utf-8`, `Cache-Control: private, no-cache`; an unknown, revoked or missing token is one identical 404 |
+| `POST /api/v1/account/calendar-token` | session | mints the token (`mb_cal_<hex>`, shown once) and replaces any earlier one |
+| `GET /api/v1/account/calendar-token` | session | `{active, created_at}` |
+| `DELETE /api/v1/account/calendar-token` | session | revokes it (204, also when none existed) |
+
+- Contents: open todos with a due date (`VTODO`, with `VALARM` when a lead time is set), active recurring bills (`VEVENT` with an `RRULE` from the frequency, `COUNT` when installments are finite) and pending standalone reminders. A reminder tied to a todo or bill is left out because its parent already appears. At most 500 components, earliest first.
+- UIDs are stable (`todo-<id>@matrix-bot`, `bill-<id>@matrix-bot`, `reminder-<id>@matrix-bot`) so a client updates entries instead of duplicating them.
+- Only the SHA-256 of the token is stored (`account_calendar_tokens`, destroyed on account merge). 60 requests per minute per client IP. The mint and revoke routes are ordinary session routes, like MCP tokens, and publish no event.
+
 ## Knowledge base and notes API
 
 Personal notes and semantic search endpoints are mounted under `/api/v1`:

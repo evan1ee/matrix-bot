@@ -236,7 +236,7 @@ High-impact capabilities brainstormed via multi-agent architectural analysis acr
    - Fix multi-currency blind addition in `domain/recurring_bills/due.rs:75`.
    - ~~Fix vector embedding deletion leak~~ (done, Blueprint 8).
 3. **Web AI Assistant Phase 2:** Implement multi-conversation thread switcher, dynamic model badge, and non-destructive new chat in `AiAssistantView.tsx`.
-4. **Roadmap execution (2026-10-31):** Phase A done for Blueprints 8 and 10 (plans: `plans/2026-10-31-knowledge-embedding-lifecycle.md`, `plans/2026-10-31-agent-task-controls.md`); Blueprint 1 (Web AI Phase 2/3) done too (plan: `plans/2026-10-31-web-ai-threads.md`), so Phase A is complete; Phase B: Blueprint 5 (receipt viewer) done (plan: `plans/2026-10-31-receipt-preservation-viewer.md`), Blueprint 4 (email receipts) done (plan: `plans/2026-10-31-email-receipt-ingestion.md`); Blueprint 3 (Telegram/Discord voice) done (plan: `plans/2026-10-31-audio-ingress-parity.md`); Phase C untouched. Follow the implementation blueprints in [`docs/superpowers/specs/2026-10-31-feature-blueprints.md`](specs/2026-10-31-feature-blueprints.md) across Phase A (critical data integrity & core usability), Phase B (omnichannel parity & financial automation), and Phase C (personal productivity & knowledge management).
+4. **Roadmap execution (2026-10-31):** Phase A done for Blueprints 8 and 10 (plans: `plans/2026-10-31-knowledge-embedding-lifecycle.md`, `plans/2026-10-31-agent-task-controls.md`); Blueprint 1 (Web AI Phase 2/3) done too (plan: `plans/2026-10-31-web-ai-threads.md`), so Phase A is complete; Phase B: Blueprint 5 (receipt viewer) done (plan: `plans/2026-10-31-receipt-preservation-viewer.md`), Blueprint 4 (email receipts) done (plan: `plans/2026-10-31-email-receipt-ingestion.md`); Blueprint 3 (Telegram/Discord voice) done (plan: `plans/2026-10-31-audio-ingress-parity.md`); Blueprint 2 (calendar feed) done (plan: `plans/2026-10-31-calendar-feed.md`, branch `feat/calendar-feed`, unmerged); Phase C untouched. Follow the implementation blueprints in [`docs/superpowers/specs/2026-10-31-feature-blueprints.md`](specs/2026-10-31-feature-blueprints.md) across Phase A (critical data integrity & core usability), Phase B (omnichannel parity & financial automation), and Phase C (personal productivity & knowledge management).
 
 ---
 
@@ -359,6 +359,18 @@ Plan: `plans/2026-10-31-email-receipt-ingestion.md`. Status: done and verified; 
 - *Ruling: job key is `email_receipt:{message_id}:{index}`; a fully duplicate message (IMAP re-fetch after a restart clears `RecentMessages`) stores an orphan object for the retention sweep but queues nothing and sends no second reply — cost if wrong: none.*
 - *Ruling: no "Email" origin badge on the web ledger — `source_kind` models only recurring bills and portfolio cash, so a badge needs a new source kind, a migration and an OpenAPI change; the Blueprint 5 paperclip already opens the receipt — cost if wrong: emailed expenses are not visually distinguishable.*
 - *Pre-existing, not changed: `ProcessReceiptHandler` parses the OCR amount through `f64` before converting to minor units, against the integer-money rule; it is shared with Matrix and Discord and wants its own fix.*
+
+### Rulings (2026-10-31 — Feature blueprints, Phase B: calendar feed)
+
+Plan: `plans/2026-10-31-calendar-feed.md`. Status: done and verified against the repository, service, handler and Playwright suites; no real calendar client was pointed at it.
+
+- *Ruling: bill UID is `bill-{id}@matrix-bot`, not the spec's `bill-{id}-{due_date}` — the entry carries an `RRULE`, and a UID that changes whenever `next_due_at` advances would leave every past cycle behind as a duplicate — cost if wrong: none.*
+- *Ruling: `account_calendar_tokens` is keyed by `account_id` and listed in `ACCOUNT_ID_DISCARDED`, not `OWNED_TABLES` — `OWNED_TABLES` entries carry `owner_id`, and a merge should drop the absorbed account's link rather than move it — cost if wrong: none.*
+- *Ruling: mint/revoke are ordinary `AuthUser` routes with no `SystemEvent` (same class as MCP tokens), listed in the step-up test's `ORDINARY` list so that stays deliberate — cost if wrong: a stolen session can mint a link that exposes the agenda, which it could already read through `/todos`.*
+- *Ruling: `last_accessed_at` is touched in the resolving statement, at most hourly, instead of the spec's asynchronous update (a detached task is forbidden) — cost if wrong: coarser "last used" timestamp.*
+- *Ruling: the token lookup is a hash equality in SQL, not `subtle` constant-time comparison — the token is 256 bits of entropy and only its SHA-256 is compared — cost if wrong: none.*
+- *Ruling: the Settings UI lives in the former MCP tab, relabelled "Integrations", because a sixth tab overflows the dialog — cost if wrong: one extra click to find MCP.*
+- *Ruling: recurring reminders get an `RRULE`; todos do not (a recurring todo's successor appears as its own row once the current one is completed) — cost if wrong: a recurring todo shows only its next due date.*
 
 ### Rulings (2026-10-31 — Feature blueprints, Phase B: audio ingress parity)
 
