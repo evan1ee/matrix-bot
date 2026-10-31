@@ -241,6 +241,7 @@ impl<'a> Attachment<'a> {
                 if caption.starts_with("/note") || caption.starts_with("!note") {
                     return crate::interface::chat::knowledge::capture_voice_note(
                         services,
+                        "matrix",
                         room.room_id().as_str(),
                         owner_id,
                         caption,

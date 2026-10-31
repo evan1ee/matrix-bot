@@ -396,7 +396,8 @@ pub async fn capture_photo_note(
 #[allow(clippy::too_many_arguments)]
 pub async fn capture_voice_note(
     services: &AppServices,
-    room_id: &str,
+    source_channel: &str,
+    source_ref: &str,
     owner_id: &AccountId,
     caption: &str,
     media_bytes: &[u8],
@@ -454,7 +455,7 @@ pub async fn capture_voice_note(
         .create(
             owner_id,
             NewNote::new(&title, &transcription)
-                .source("matrix", Some(room_id.to_string()))
+                .source(source_channel, Some(source_ref.to_string()))
                 .tags(tags),
         )
         .await
@@ -616,5 +617,44 @@ mod tests {
         assert!(reply
             .html_body()
             .contains("Make invalid states unrepresentable."));
+    }
+
+    #[tokio::test]
+    async fn voice_note_records_the_calling_channel() {
+        let pool = test_pool().await;
+        run_migrations_unlocked(&pool).await;
+        let alice = AccountId::generate();
+        seed_account(&pool, &alice).await;
+        let mock_embedder =
+            Arc::new(crate::infrastructure::inference::embedding::MockEmbeddingProvider::new(384));
+        let services = AppServices::new(&pool).with_embedder(mock_embedder);
+        let (stt, calls) =
+            crate::infrastructure::inference::stt::stub::stub_stt("remember the milk").await;
+
+        let reply = capture_voice_note(
+            &services,
+            "telegram",
+            "telegram:42",
+            &alice,
+            "/note",
+            &[1, 2, 3],
+            Some("audio/ogg"),
+            &crate::interface::chat::voice::VoiceConfig::default(),
+            &stt,
+            None,
+        )
+        .await;
+
+        assert!(reply.contains("Voice Note"), "{reply}");
+        assert_eq!(calls.get(), 1);
+        let notes = services
+            .notes
+            .list(&alice, None, None, false, 10)
+            .await
+            .expect("list");
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].source_channel, "telegram");
+        assert_eq!(notes[0].source_ref.as_deref(), Some("telegram:42"));
+        assert_eq!(notes[0].tags, vec!["voice".to_string()]);
     }
 }

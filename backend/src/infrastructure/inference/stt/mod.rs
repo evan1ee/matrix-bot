@@ -190,6 +190,9 @@ pub fn file_extension_for(mime_type: Option<&str>) -> &'static str {
 }
 
 #[cfg(test)]
+pub(crate) mod stub;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::infrastructure::inference::test_support::spawn_server;
