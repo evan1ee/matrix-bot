@@ -15,6 +15,7 @@
 //! - `telegram`: the Telegram adapter.
 
 pub mod adapter;
+pub mod audio_ingress;
 pub mod discord;
 pub mod email;
 #[cfg(test)]

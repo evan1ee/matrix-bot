@@ -12,6 +12,7 @@ use std::sync::{Arc, Weak};
 use futures_util::FutureExt;
 use tracing::{error, warn};
 
+use super::audio_ingress::VoiceRuntime;
 use super::message::{IncomingMessage, Reply};
 use super::registry::ChannelRegistry;
 use crate::application::identity::Resolution;
@@ -51,6 +52,9 @@ pub struct Inbound {
     modules: Arc<ModuleRegistry>,
     /// Weak: adapters own the pipeline and the registry owns the adapters (A5).
     registry: Weak<ChannelRegistry>,
+    /// Set by the composition root when voice notes are handled by file
+    /// channels; see [`super::audio_ingress`].
+    voice: Option<Arc<VoiceRuntime>>,
 }
 
 impl Inbound {
@@ -65,7 +69,17 @@ impl Inbound {
             db,
             modules,
             registry,
+            voice: None,
         }
+    }
+
+    pub fn with_voice(mut self, voice: VoiceRuntime) -> Self {
+        self.voice = Some(Arc::new(voice));
+        self
+    }
+
+    pub fn voice(&self) -> Option<&VoiceRuntime> {
+        self.voice.as_deref()
     }
 
     pub fn services(&self) -> &AppServices {
