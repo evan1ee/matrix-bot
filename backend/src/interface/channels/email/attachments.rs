@@ -13,7 +13,8 @@ pub const MAX_ATTACHMENT_BYTES: usize = 10 * 1024 * 1024;
 pub const MAX_MESSAGE_BYTES: usize = 30 * 1024 * 1024;
 pub const MAX_RECEIPTS_PER_MESSAGE: usize = 5;
 
-/// An image part accepted for OCR.
+/// An image or PDF part accepted for OCR (the inference service rasterises
+/// the first pages of a PDF).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InboundAttachment {
     pub filename: String,
@@ -24,8 +25,6 @@ pub struct InboundAttachment {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SkipReason {
-    /// Neither the backend nor the inference service can decode PDFs.
-    Pdf,
     TooLarge,
     MessageTooLarge,
     TooMany,
@@ -35,11 +34,10 @@ pub enum SkipReason {
 impl SkipReason {
     pub fn describe(self) -> &'static str {
         match self {
-            Self::Pdf => "PDF receipts are not supported yet; send a photo or screenshot instead",
             Self::TooLarge => "larger than the 10 MiB limit",
             Self::MessageTooLarge => "this message already exceeded the 30 MiB limit",
             Self::TooMany => "only the first 5 receipts of a message are processed",
-            Self::NotAReceipt => "not a JPEG, PNG or WebP image",
+            Self::NotAReceipt => "not a JPEG, PNG, WebP or PDF file",
         }
     }
 }
@@ -76,9 +74,7 @@ pub fn extract_attachments(msg: &Message) -> Extracted {
             out.skipped.push(skip(filename, SkipReason::NotAReceipt));
             continue;
         };
-        let verdict = if content_type == "application/pdf" {
-            Some(SkipReason::Pdf)
-        } else if data.len() > MAX_ATTACHMENT_BYTES {
+        let verdict = if data.len() > MAX_ATTACHMENT_BYTES {
             Some(SkipReason::TooLarge)
         } else if budget + data.len() > MAX_MESSAGE_BYTES {
             Some(SkipReason::MessageTooLarge)
@@ -160,15 +156,29 @@ mod tests {
     }
 
     #[test]
-    fn a_pdf_is_skipped_and_named() {
+    fn a_pdf_is_accepted_with_the_sniffed_type() {
         let got = extract(&mime(&[(
             "application/pdf",
             "inv.pdf",
             "",
-            b"%PDF-1.7\n".to_vec(),
+            b"%PDF-1.7
+"
+            .to_vec(),
         )]));
-        assert!(got.accepted.is_empty());
-        assert_eq!(got.skipped, vec![skip("inv.pdf".into(), SkipReason::Pdf)]);
+        assert!(got.skipped.is_empty());
+        assert_eq!(got.accepted.len(), 1);
+        assert_eq!(got.accepted[0].content_type, "application/pdf");
+        assert_eq!(got.accepted[0].extension, "pdf");
+    }
+
+    #[test]
+    fn an_oversized_pdf_is_skipped_like_an_image() {
+        let mut big = b"%PDF-1.7
+"
+        .to_vec();
+        big.resize(MAX_ATTACHMENT_BYTES + 1, 0);
+        let got = extract(&mime(&[("application/pdf", "big.pdf", "", big)]));
+        assert_eq!(got.skipped[0].reason, SkipReason::TooLarge);
     }
 
     #[test]

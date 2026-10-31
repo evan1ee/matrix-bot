@@ -44,6 +44,8 @@ impl OcrResult {
 pub enum OcrError {
     #[error("Failed to decode image bytes: {0}")]
     ImageDecode(String),
+    #[error("Failed to read PDF: {0}")]
+    Pdf(#[from] super::pdf::PdfError),
     #[error("Missing OCR model file: {0}")]
     MissingModel(String),
     #[error("Failed to download OCR model: {0}")]
@@ -167,7 +169,21 @@ static OCR_ENGINE: std::sync::OnceLock<
 > = std::sync::OnceLock::new();
 
 /// Synchronous text recognition on raw image bytes using PaddleOCR ONNX models.
+///
+/// A PDF is rasterised (first pages only, see `pdf::MAX_PDF_PAGES`) and the
+/// text of every page is joined in page order.
 pub fn run_ocr_sync(image_bytes: &[u8], model_dir: &Path) -> Result<OcrResult, OcrError> {
+    if super::pdf::is_pdf(image_bytes) {
+        let mut blocks = Vec::new();
+        for page in super::pdf::render_pages(image_bytes)? {
+            blocks.extend(run_ocr_image(&page, model_dir)?.blocks);
+        }
+        return Ok(OcrResult::new(blocks));
+    }
+    run_ocr_image(image_bytes, model_dir)
+}
+
+fn run_ocr_image(image_bytes: &[u8], model_dir: &Path) -> Result<OcrResult, OcrError> {
     let dynamic_img =
         image::load_from_memory(image_bytes).map_err(|e| OcrError::ImageDecode(e.to_string()))?;
     let rgb_img = dynamic_img.to_rgb8();
@@ -241,6 +257,12 @@ mod tests {
         let bad_bytes = b"not an image file at all";
         let res = run_ocr_sync(bad_bytes, Path::new("models/ocr"));
         assert!(matches!(res, Err(OcrError::ImageDecode(_))));
+    }
+
+    #[test]
+    fn test_unreadable_pdf_returns_pdf_error_not_image_decode() {
+        let res = run_ocr_sync(b"%PDF-1.4 not really", Path::new("models/ocr"));
+        assert!(matches!(res, Err(OcrError::Pdf(_))));
     }
 
     #[test]

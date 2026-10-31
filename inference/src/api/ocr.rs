@@ -21,7 +21,7 @@ pub struct OcrScanBlock {
 
 /// Maps an `OcrError` to the HTTP status that describes whose fault it is.
 ///
-/// `ImageDecode` is a client error -- the caller sent bytes that are not a
+/// `ImageDecode` and `Pdf` are client errors -- the caller sent bytes that are not a
 /// decodable image -- so it is `400`, not `500`. `MissingModel` and
 /// `ModelDownload` mean the server isn't ready to serve OCR at all, so both
 /// are `503`. `Inference` and `Join` are genuine server-side failures.
@@ -32,7 +32,7 @@ fn status_for(err: &crate::ocr::OcrError) -> StatusCode {
     use crate::ocr::OcrError;
 
     match err {
-        OcrError::ImageDecode(_) => StatusCode::BAD_REQUEST,
+        OcrError::ImageDecode(_) | OcrError::Pdf(_) => StatusCode::BAD_REQUEST,
         OcrError::MissingModel(_) => StatusCode::SERVICE_UNAVAILABLE,
         OcrError::ModelDownload(_) => StatusCode::SERVICE_UNAVAILABLE,
         OcrError::Inference(_) => StatusCode::INTERNAL_SERVER_ERROR,
@@ -147,6 +147,12 @@ mod tests {
     #[test]
     fn test_status_for_image_decode_is_bad_request() {
         let err = crate::ocr::OcrError::ImageDecode("bad bytes".to_string());
+        assert_eq!(status_for(&err), StatusCode::BAD_REQUEST);
+    }
+
+    #[test]
+    fn test_status_for_unreadable_pdf_is_bad_request() {
+        let err = crate::ocr::OcrError::Pdf(crate::ocr::pdf::PdfError::NoPages);
         assert_eq!(status_for(&err), StatusCode::BAD_REQUEST);
     }
 

@@ -246,7 +246,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_pdf_only_email_is_answered_with_the_reason() {
+    async fn a_pdf_attachment_is_stored_and_queued_like_an_image() {
         let (services, pool, dir, _, _) = setup(true).await;
         let pdf = PNG_EML
             .replace("image/png", "application/pdf")
@@ -261,13 +261,12 @@ mod tests {
             .unwrap();
 
         assert!(
-            reply.html_body().contains("invoice.pdf"),
+            reply.html_body().contains("Received 1 receipt"),
             "{}",
             reply.html_body()
         );
-        assert!(reply.html_body().contains("PDF"), "{}", reply.html_body());
-        assert_eq!(files_under(dir.path()), 0);
-        assert!(job_keys(&pool).await.is_empty());
+        assert_eq!(files_under(dir.path()), 1);
+        assert_eq!(job_keys(&pool).await.len(), 1);
     }
 
     #[tokio::test]
