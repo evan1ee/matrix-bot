@@ -236,7 +236,7 @@ High-impact capabilities brainstormed via multi-agent architectural analysis acr
    - Fix multi-currency blind addition in `domain/recurring_bills/due.rs:75`.
    - ~~Fix vector embedding deletion leak~~ (done, Blueprint 8).
 3. **Web AI Assistant Phase 2:** Implement multi-conversation thread switcher, dynamic model badge, and non-destructive new chat in `AiAssistantView.tsx`.
-4. **Roadmap execution (2026-10-31):** Phase A done for Blueprints 8 and 10 (plans: `plans/2026-10-31-knowledge-embedding-lifecycle.md`, `plans/2026-10-31-agent-task-controls.md`); Blueprint 1 (Web AI Phase 2/3) done too (plan: `plans/2026-10-31-web-ai-threads.md`), so Phase A is complete; Phase B: Blueprint 5 (receipt viewer) done (plan: `plans/2026-10-31-receipt-preservation-viewer.md`), Blueprints 4 (email receipts) and 3 (Telegram/Discord voice) not started; Phase C untouched. Follow the implementation blueprints in [`docs/superpowers/specs/2026-10-31-feature-blueprints.md`](specs/2026-10-31-feature-blueprints.md) across Phase A (critical data integrity & core usability), Phase B (omnichannel parity & financial automation), and Phase C (personal productivity & knowledge management).
+4. **Roadmap execution (2026-10-31):** Phase A done for Blueprints 8 and 10 (plans: `plans/2026-10-31-knowledge-embedding-lifecycle.md`, `plans/2026-10-31-agent-task-controls.md`); Blueprint 1 (Web AI Phase 2/3) done too (plan: `plans/2026-10-31-web-ai-threads.md`), so Phase A is complete; Phase B: Blueprint 5 (receipt viewer) done (plan: `plans/2026-10-31-receipt-preservation-viewer.md`), Blueprint 4 (email receipts) done (plan: `plans/2026-10-31-email-receipt-ingestion.md`); Blueprint 3 (Telegram/Discord voice) not started; Phase C untouched. Follow the implementation blueprints in [`docs/superpowers/specs/2026-10-31-feature-blueprints.md`](specs/2026-10-31-feature-blueprints.md) across Phase A (critical data integrity & core usability), Phase B (omnichannel parity & financial automation), and Phase C (personal productivity & knowledge management).
 
 ---
 
@@ -347,6 +347,18 @@ Format: `Ruling: <decision> — <why> — <cost if wrong>`. New rulings go here 
 - *Ruling: `POST /finance/receipts/upload` decides the type from magic bytes (JPEG/PNG/WebP/PDF, 10 MiB), stores first and OCRs images best-effort; PDFs are stored without OCR; oversize is 400 (no 413 constructor) — a failed OCR must not lose the file — cost if wrong: PDF receipts need manual entry.*
 - *Ruling: detaching leaves the stored file for the storage retention sweep; no `ReceiptAttached/Detached` events, `TransactionUpdated` carries the row — cost if wrong: orphan files linger until swept.*
 - *Ruling: `/ocr/scan` is unchanged; the OCR call moved into shared `ocr::run_ocr` — cost if wrong: none.*
+
+### Rulings (2026-10-31 — Feature blueprints, Phase B: email receipts)
+
+Plan: `plans/2026-10-31-email-receipt-ingestion.md`. Status: done and verified; live IMAP/SMTP untested (no external service is contacted from tests).
+
+- *Ruling: PDF attachments are extracted, skipped and named in the reply, not OCR'd — neither the backend nor `inference/` can decode PDFs and a rasteriser is a heavy dependency for one input type; the spec's 3-page bound is moot until one lands — cost if wrong: PDF-only invoices need manual entry.*
+- *Ruling: an attachment's type comes from magic bytes (`domain::finance::receipt::sniff_receipt_type`, moved out of `interface/http` so both interfaces share it), never the declared MIME type — cost if wrong: none.*
+- *Ruling: an email with any attachment part is a receipt submission; its body is the caption and is never dispatched to a module or the AI, and an empty body is accepted — otherwise a forwarded receipt would start an AI chat — cost if wrong: a command sent with an attachment is not run.*
+- *Ruling: parts with a `Content-ID` (images embedded in the HTML body) are ignored silently; at most 5 receipts per message, 10 MiB each, 30 MiB total, so one email cannot fan out into hundreds of OCR jobs — cost if wrong: a sixth receipt in one email needs a resend.*
+- *Ruling: job key is `email_receipt:{message_id}:{index}`; a fully duplicate message (IMAP re-fetch after a restart clears `RecentMessages`) stores an orphan object for the retention sweep but queues nothing and sends no second reply — cost if wrong: none.*
+- *Ruling: no "Email" origin badge on the web ledger — `source_kind` models only recurring bills and portfolio cash, so a badge needs a new source kind, a migration and an OpenAPI change; the Blueprint 5 paperclip already opens the receipt — cost if wrong: emailed expenses are not visually distinguishable.*
+- *Pre-existing, not changed: `ProcessReceiptHandler` parses the OCR amount through `f64` before converting to minor units, against the integer-money rule; it is shared with Matrix and Discord and wants its own fix.*
 
 ---
 

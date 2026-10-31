@@ -5,5 +5,6 @@ pub mod attachments;
 pub mod imap;
 pub mod inbound;
 pub mod outbound;
+pub mod receipts;
 
 pub use adapter::EmailAdapter;

@@ -370,4 +370,70 @@ mod tests {
         assert_eq!(sends.len(), 1);
         assert!(sends[0].1.contains("OCR service is not configured"));
     }
+
+    #[tokio::test]
+    async fn an_emailed_receipt_is_recorded_and_the_sender_is_mailed_the_result() {
+        use crate::domain::finance::ListTransactionsFilter;
+        use crate::domain::jobs::NewJob;
+        use crate::infrastructure::inference::test_support::spawn_server;
+        use crate::infrastructure::postgres::repositories::accounts::core;
+
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let owner = core::create(&pool, "alice", crate::domain::accounts::STATUS_ACTIVE)
+            .await
+            .unwrap();
+        let temp_dir = tempfile::tempdir().unwrap();
+        let storage =
+            Arc::new(LocalStorageService::new(temp_dir.path(), None, "test-secret").unwrap());
+        let key = StorageKey::generate(&owner, StorageCategory::Receipts, "png");
+        storage
+            .put(&key, Bytes::from_static(b"png bytes"), "image/png")
+            .await
+            .unwrap();
+        let ocr_app = axum::Router::new().route(
+            "/ocr",
+            axum::routing::post(|| async {
+                axum::Json(serde_json::json!({
+                    "text": "STARBUCKS COFFEE\nDate: 2026-09-17\nTOTAL AMOUNT: $9.99",
+                    "blocks": []
+                }))
+            }),
+        );
+        let ocr = OcrClient::new(Some(spawn_server(ocr_app).await));
+
+        let services = AppServices::new(&pool).with_storage(storage);
+        let outbound = FakeOutbound::connected();
+        let handler = ProcessReceiptHandler::new(services.clone(), outbound.clone(), ocr);
+        let email = ConversationAddress::Email("alice@example.com".into());
+        let job = NewJob::media_process_email_receipt(
+            owner,
+            key.clone(),
+            email.clone(),
+            None,
+            "m1@example.com",
+            0,
+        );
+        let payload = match job.payload() {
+            crate::domain::jobs::JobPayload::MediaProcessReceipt(p) => {
+                serde_json::to_value(p).unwrap()
+            }
+            _ => unreachable!("receipt job carries a receipt payload"),
+        };
+
+        handler.run(&test_ctx(owner), payload).await.unwrap();
+
+        let recorded = services
+            .finance
+            .list_transactions(&owner, &ListTransactionsFilter::default())
+            .await
+            .unwrap();
+        assert_eq!(recorded.len(), 1);
+        assert_eq!(recorded[0].amount_minor, 999);
+        assert_eq!(recorded[0].receipt_storage_key.as_ref(), Some(&key));
+        let sends = outbound.room_sends();
+        assert_eq!(sends.len(), 1, "exactly one result mail");
+        assert_eq!(sends[0].0, email.to_storage());
+        assert!(sends[0].1.contains("Receipt recorded"), "{}", sends[0].1);
+    }
 }

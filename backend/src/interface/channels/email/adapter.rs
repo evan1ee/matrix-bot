@@ -12,6 +12,7 @@ use tracing::{debug, error, info, warn};
 use super::imap::ImapPoller;
 use super::inbound::{parse_inbound_email, InboundError};
 use super::outbound::EmailSender;
+use super::receipts::ingest_receipts;
 use crate::config::EmailConfig;
 use crate::domain::accounts::AccountId;
 use crate::domain::channels::{Channel, ConversationAddress};
@@ -113,10 +114,19 @@ impl EmailAdapter {
                         continue;
                     }
 
-                    // Progress is None (NoProgress / R128)
-                    let outcome = inbound.handle(&parsed.message, parsed.text, None).await;
+                    // An email carrying attachment parts is a receipt submission; its
+                    // body is only a caption and must never reach a module or the AI.
+                    let reply = if parsed.has_attachments() {
+                        ingest_receipts(inbound.services(), &inbound.db().pool, &parsed).await
+                    } else {
+                        // Progress is None (NoProgress / R128)
+                        match inbound.handle(&parsed.message, parsed.text, None).await {
+                            InboundOutcome::Replied(reply) => Some(reply),
+                            InboundOutcome::Ignored => None,
+                        }
+                    };
 
-                    if let InboundOutcome::Replied(reply) = outcome {
+                    if let Some(reply) = reply {
                         let outgoing = OutgoingMessage {
                             target: Target::Conversation(parsed.message.conversation.clone()),
                             content: reply.content,
