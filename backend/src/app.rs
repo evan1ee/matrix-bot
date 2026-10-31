@@ -19,7 +19,9 @@ use crate::application::AppServices;
 use crate::config::{Config, TelegramMode};
 use crate::db::Database;
 use crate::domain::channels::Channel;
+use crate::infrastructure::inference::stt::SttClient;
 use crate::interface::channels::adapter::ChannelAdapter;
+use crate::interface::channels::audio_ingress::VoiceRuntime;
 use crate::interface::channels::discord::adapter::DiscordAdapter;
 use crate::interface::channels::email::EmailAdapter;
 use crate::interface::channels::inbound::Inbound;
@@ -28,6 +30,7 @@ use crate::interface::channels::matrix::handles::BotHandles;
 use crate::interface::channels::matrix::modules::build_modules;
 use crate::interface::channels::registry::{check_unique, ChannelRegistry};
 use crate::interface::channels::telegram::adapter::TelegramAdapter;
+use crate::interface::chat::voice::VoiceConfig;
 use crate::interface::http;
 use crate::interface::jobs::Outbound;
 use crate::jobs;
@@ -258,13 +261,23 @@ pub async fn run(config: Config, shutdown: CancellationToken) -> anyhow::Result<
     // The pipeline holds a `Weak` of the registry for out-of-band sends, so the
     // registry is built with `new_cyclic` (A5). Uniqueness was checked just
     // above, which is what makes the infallible constructor sound.
+    // Voice notes arriving as files (Telegram, Discord) share Matrix's STT setup.
+    let voice = VoiceRuntime::new(
+        VoiceConfig {
+            enabled: config.voice_enabled,
+            language: config.voice_language.clone(),
+        },
+        SttClient::new(
+            config.stt_base_url.clone(),
+            config.stt_api_key.clone(),
+            config.stt_model.clone(),
+        ),
+        config.ai.clone(),
+    );
     let channels = Arc::new_cyclic(|weak| {
-        let inbound = Arc::new(Inbound::new(
-            services.clone(),
-            db.clone(),
-            modules,
-            weak.clone(),
-        ));
+        let inbound = Arc::new(
+            Inbound::new(services.clone(), db.clone(), modules, weak.clone()).with_voice(voice),
+        );
         let mut adapters: Vec<Arc<dyn ChannelAdapter>> = Vec::new();
         if let Some(matrix) = &matrix {
             matrix.attach_inbound(Arc::clone(&inbound));
