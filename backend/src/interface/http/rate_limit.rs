@@ -54,6 +54,7 @@ static AUTH_START_LIMITER: OnceLock<InMemoryRateLimiter> = OnceLock::new();
 static LINK_SIGNUP_LIMITER: OnceLock<InMemoryRateLimiter> = OnceLock::new();
 static TELEGRAM_WEBHOOK_LIMITER: OnceLock<InMemoryRateLimiter> = OnceLock::new();
 static GEOCODE_LIMITER: OnceLock<InMemoryRateLimiter> = OnceLock::new();
+static CALENDAR_LIMITER: OnceLock<InMemoryRateLimiter> = OnceLock::new();
 
 /// Webhooks: max 60 requests per minute per webhook token.
 pub fn check_webhook_limit(token_hash: &str) -> bool {
@@ -97,6 +98,13 @@ pub fn check_geocode_limit(ip: &str) -> bool {
         .check(ip)
 }
 
+/// Calendar feed polling (unauthenticated): max 60 requests per minute per IP.
+pub fn check_calendar_limit(ip: &str) -> bool {
+    CALENDAR_LIMITER
+        .get_or_init(|| InMemoryRateLimiter::new(60, Duration::from_secs(60)))
+        .check(ip)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -118,5 +126,12 @@ mod tests {
         assert!(!limiter.check("user1"));
         std::thread::sleep(Duration::from_millis(60));
         assert!(limiter.check("user1"));
+    }
+
+    #[test]
+    fn calendar_limit_allows_60_then_refuses() {
+        let ip = "calendar-test-ip";
+        assert!((0..60).all(|_| check_calendar_limit(ip)));
+        assert!(!check_calendar_limit(ip));
     }
 }

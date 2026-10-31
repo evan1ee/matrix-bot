@@ -30,6 +30,7 @@ pub mod app_error;
 pub mod auth;
 pub mod bookmarks;
 pub mod briefing;
+pub mod calendar;
 pub mod error;
 pub mod finance;
 pub mod finance_analytics;
@@ -287,6 +288,9 @@ mod step_up_tests {
         ("GET", "/api/v1/account/security-events"),
         ("GET", "/api/v1/account/recovery-status"),
         ("GET", "/api/v1/todos"),
+        ("GET", "/api/v1/account/calendar-token"),
+        ("POST", "/api/v1/account/calendar-token"),
+        ("DELETE", "/api/v1/account/calendar-token"),
         ("GET", "/api/v1/admin/config-status"),
         ("GET", "/api/v1/admin/settings"),
         ("GET", "/api/v1/admin/settings/llm.default_model"),
