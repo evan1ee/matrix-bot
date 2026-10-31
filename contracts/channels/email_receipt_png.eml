@@ -1,0 +1,17 @@
+Authentication-Results: mx.example.com;
+    dkim=pass header.i=@example.com header.s=20230601;
+    dmarc=pass (p=REJECT sp=REJECT dis=NONE) header.from=example.com
+From: Alice User <alice@example.com>
+To: bot@example.com
+Message-ID: <msg-receipt-5678@example.com>
+Date: Fri, 03 Oct 2026 10:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="rcpt-boundary"
+
+--rcpt-boundary
+Content-Type: image/png; name="lunch.png"
+Content-Disposition: attachment; filename="lunch.png"
+Content-Transfer-Encoding: base64
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==
+--rcpt-boundary--

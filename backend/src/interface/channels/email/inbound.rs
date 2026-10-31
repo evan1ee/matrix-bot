@@ -4,6 +4,7 @@
 
 use mail_parser::{Message, MessageParser};
 
+use super::attachments::{extract_attachments, InboundAttachment, SkippedAttachment};
 use crate::domain::channels::{Channel, ConversationAddress, PlatformIdentity, PlatformUserId};
 use crate::interface::channels::inbound::InboundText;
 use crate::interface::channels::message::{IncomingMessage, MessageRef};
@@ -81,6 +82,16 @@ pub struct ParsedEmail {
     pub message: IncomingMessage,
     pub text: InboundText,
     pub subject: Option<String>,
+    /// Receipt images to OCR. When any attachment part is present the message
+    /// is a receipt submission: its body is a caption, not a command.
+    pub attachments: Vec<InboundAttachment>,
+    pub skipped_attachments: Vec<SkippedAttachment>,
+}
+
+impl ParsedEmail {
+    pub fn has_attachments(&self) -> bool {
+        !self.attachments.is_empty() || !self.skipped_attachments.is_empty()
+    }
 }
 
 /// Verifies that DMARC passed in an `Authentication-Results` header issued by `authserv_id`.
@@ -368,10 +379,17 @@ pub fn parse_inbound_email(
 
     let stripped_body = strip_quotes_and_signatures(&body_text);
 
+    // Only after DMARC passed above: a forged sender never gets its bytes parsed.
+    let extracted = extract_attachments(&parsed);
+    let has_attachments = !extracted.accepted.is_empty() || !extracted.skipped.is_empty();
+
     let final_text = if !stripped_body.is_empty() {
         stripped_body
     } else if let Some(subj) = &subject {
         subj.clone()
+    } else if has_attachments {
+        // A photographed receipt often travels with no words at all.
+        String::new()
     } else {
         return Err(InboundError::EmptyBody);
     };
@@ -398,6 +416,8 @@ pub fn parse_inbound_email(
         message: incoming,
         text: inbound_text,
         subject,
+        attachments: extracted.accepted,
+        skipped_attachments: extracted.skipped,
     })
 }
 
@@ -422,6 +442,8 @@ mod tests {
     const AUTO_FIXTURE: &str =
         include_str!("../../../../../contracts/channels/email_autoreply.eml");
     const QUOTE_FIXTURE: &str = include_str!("../../../../../contracts/channels/email_quoted.eml");
+    const RECEIPT_FIXTURE: &str =
+        include_str!("../../../../../contracts/channels/email_receipt_png.eml");
 
     #[test]
     fn test_verify_dmarc_pass() {
@@ -591,6 +613,32 @@ mod tests {
             }
             _ => panic!("expected command"),
         }
+    }
+
+    #[test]
+    fn a_bodyless_subjectless_receipt_email_is_parsed_with_its_image() {
+        let parsed = parse_inbound_email(RECEIPT_FIXTURE.as_bytes(), "mx.example.com", None)
+            .expect("an email whose only content is a receipt photo must be accepted");
+        assert_eq!(parsed.message.message_id.0, "msg-receipt-5678@example.com");
+        assert!(parsed.has_attachments());
+        assert_eq!(parsed.attachments.len(), 1);
+        assert_eq!(parsed.attachments[0].filename, "lunch.png");
+        assert_eq!(parsed.attachments[0].content_type, "image/png");
+        assert!(matches!(parsed.text, InboundText::FreeText(t) if t.is_empty()));
+    }
+
+    #[test]
+    fn a_receipt_email_failing_dmarc_is_rejected_before_its_bytes_are_read() {
+        let forged = RECEIPT_FIXTURE.replace("dmarc=pass", "dmarc=fail");
+        let res = parse_inbound_email(forged.as_bytes(), "mx.example.com", None);
+        assert!(matches!(res, Err(InboundError::Dmarc(_))));
+    }
+
+    #[test]
+    fn a_receipt_email_from_a_sender_outside_the_allowlist_is_rejected() {
+        let allowed = vec!["bob@example.com".to_owned()];
+        let res = parse_inbound_email(RECEIPT_FIXTURE.as_bytes(), "mx.example.com", Some(&allowed));
+        assert!(matches!(res, Err(InboundError::SenderNotAllowed(_))));
     }
 
     #[test]

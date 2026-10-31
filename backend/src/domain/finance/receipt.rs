@@ -224,9 +224,50 @@ fn find_date_in_line(line: &str) -> Option<String> {
     None
 }
 
+/// File type from magic bytes; a sender's content type and file name are
+/// claims, not facts. Returns `(extension, mime)`.
+pub fn sniff_receipt_type(bytes: &[u8]) -> Option<(&'static str, &'static str)> {
+    if bytes.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        Some(("jpg", "image/jpeg"))
+    } else if bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A]) {
+        Some(("png", "image/png"))
+    } else if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        Some(("webp", "image/webp"))
+    } else if bytes.starts_with(b"%PDF-") {
+        Some(("pdf", "application/pdf"))
+    } else {
+        None
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sniff_receipt_type_accepts_jpeg_png_webp_pdf() {
+        let png = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0];
+        assert_eq!(
+            sniff_receipt_type(&[0xFF, 0xD8, 0xFF, 0xE0]).unwrap().1,
+            "image/jpeg"
+        );
+        assert_eq!(sniff_receipt_type(&png).unwrap().1, "image/png");
+        assert_eq!(
+            sniff_receipt_type(b"RIFF\0\0\0\0WEBPVP8 ").unwrap().1,
+            "image/webp"
+        );
+        assert_eq!(
+            sniff_receipt_type(b"%PDF-1.7\n").unwrap().1,
+            "application/pdf"
+        );
+    }
+
+    #[test]
+    fn sniff_receipt_type_rejects_text_and_empty() {
+        assert!(sniff_receipt_type(b"").is_none());
+        assert!(sniff_receipt_type(b"not an image.png").is_none());
+        assert!(sniff_receipt_type(b"RIFF\0\0\0\0WAVEfmt ").is_none());
+    }
 
     #[test]
     fn test_extract_receipt_fields() {
