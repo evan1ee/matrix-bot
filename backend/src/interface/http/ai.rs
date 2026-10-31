@@ -7,11 +7,16 @@ use tracing::error;
 
 use crate::infrastructure::postgres::repositories::llm as llm_repo;
 use crate::interface::http::auth::{ApiState, AuthUser};
-use crate::interface::http::error::ApiError;
+#[allow(
+    unused_imports,
+    reason = "named only inside #[utoipa::path] attributes, where it fixes the OpenAPI schema name"
+)]
+use crate::interface::http::error::{ApiError, ApiErrorResponse};
 use crate::llm::error::AiError;
 use crate::llm::models::{
-    AiChatRequest, AiChatResponse, AiConversation, AiMessage, AiUserConfig, UpdateAiConfigInput,
-    VerifyAiKeyInput, VerifyAiKeyResponse,
+    AiChatRequest, AiChatResponse, AiConversation, AiMessage, AiUserConfig,
+    CreateConversationRequest, RenameConversationRequest, TruncateConversationRequest,
+    UpdateAiConfigInput, VerifyAiKeyInput, VerifyAiKeyResponse,
 };
 use crate::llm::resolved_config::ResolvedAiConfig;
 use crate::llm::retrospective::{generate_weekly_retrospective, WeeklyRetrospective};
@@ -180,6 +185,86 @@ pub async fn delete_conversation(
         return Err(ApiError::not_found("Conversation not found"));
     }
 
+    Ok(StatusCode::NO_CONTENT)
+}
+
+#[utoipa::path(
+    post,
+    tag = "ai",
+    path = "/api/v1/ai/conversations",
+    request_body = CreateConversationRequest,
+    responses((status = 201, description = "An empty conversation", body = AiConversation)),
+    security(("session_cookie" = []))
+)]
+pub async fn create_conversation(
+    State(state): State<ApiState>,
+    user: AuthUser,
+    body: Option<Json<CreateConversationRequest>>,
+) -> Result<(StatusCode, Json<AiConversation>), ApiError> {
+    let requested = body.and_then(|Json(b)| b.room_id);
+    let room_id = state
+        .services
+        .rooms
+        .resolve_target_room(&user.account_id, requested.as_deref())
+        .await;
+    let conv = state
+        .services
+        .llm
+        .create_conversation(&user.account_id, &room_id)
+        .await?;
+    Ok((StatusCode::CREATED, Json(conv.into())))
+}
+
+#[utoipa::path(
+    patch,
+    tag = "ai",
+    path = "/api/v1/ai/conversations/{id}/title",
+    params(("id" = String, Path, description = "Conversation ID")),
+    request_body = RenameConversationRequest,
+    responses(
+        (status = 200, body = AiConversation),
+        (status = 400, description = "Empty, multi-line or over-long title", body = ApiErrorResponse),
+        (status = 404, description = "Unknown or foreign conversation", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
+pub async fn rename_conversation(
+    State(state): State<ApiState>,
+    user: AuthUser,
+    Path(id): Path<String>,
+    Json(body): Json<RenameConversationRequest>,
+) -> Result<Json<AiConversation>, ApiError> {
+    let conv = state
+        .services
+        .llm
+        .rename_conversation(&user.account_id, &id, &body.title)
+        .await?;
+    Ok(Json(conv.into()))
+}
+
+#[utoipa::path(
+    post,
+    tag = "ai",
+    path = "/api/v1/ai/conversations/{id}/truncate",
+    params(("id" = String, Path, description = "Conversation ID")),
+    request_body = TruncateConversationRequest,
+    responses(
+        (status = 204, description = "The message and everything after it are gone"),
+        (status = 404, description = "Unknown or foreign conversation or message", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
+pub async fn truncate_conversation(
+    State(state): State<ApiState>,
+    user: AuthUser,
+    Path(id): Path<String>,
+    Json(body): Json<TruncateConversationRequest>,
+) -> Result<StatusCode, ApiError> {
+    state
+        .services
+        .llm
+        .truncate_from(&user.account_id, &id, &body.from_message_id)
+        .await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -538,5 +623,88 @@ mod tests {
         let cancelled = ApiError::from(AiError::Cancelled);
         assert_eq!(cancelled.status.as_u16(), 499);
         assert_eq!(cancelled.message, "Client closed request");
+    }
+
+    /// Given a user, When they create, rename and truncate threads over HTTP,
+    /// Then each answers as documented and a stranger gets 404.
+    #[tokio::test]
+    async fn thread_endpoints_flow() {
+        let (state, owner) = setup_state().await;
+        let user = AuthUser::for_account(owner);
+        let stranger = AuthUser::for_account(
+            crate::application::AppServices::new(&state.db.pool)
+                .identity
+                .provision_matrix_for_test("@thread_stranger:mbm.one")
+                .await,
+        );
+
+        let (status, Json(conv)) = create_conversation(State(state.clone()), user.clone(), None)
+            .await
+            .expect("create");
+        assert_eq!(status, StatusCode::CREATED);
+        assert!(conv.title.is_none());
+
+        let renamed = rename_conversation(
+            State(state.clone()),
+            user.clone(),
+            Path(conv.id.clone()),
+            Json(RenameConversationRequest {
+                title: "Budget".into(),
+            }),
+        )
+        .await
+        .expect("rename")
+        .0;
+        assert_eq!(renamed.title.as_deref(), Some("Budget"));
+
+        let bad = rename_conversation(
+            State(state.clone()),
+            user.clone(),
+            Path(conv.id.clone()),
+            Json(RenameConversationRequest {
+                title: "a\nb".into(),
+            }),
+        )
+        .await
+        .expect_err("multi-line title");
+        assert_eq!(bad.status, StatusCode::BAD_REQUEST);
+
+        let foreign = rename_conversation(
+            State(state.clone()),
+            stranger.clone(),
+            Path(conv.id.clone()),
+            Json(RenameConversationRequest {
+                title: "Mine".into(),
+            }),
+        )
+        .await
+        .expect_err("stranger");
+        assert_eq!(foreign.status, StatusCode::NOT_FOUND);
+
+        let msg = llm_repo::add_message(&state.db.pool, &conv.id, "user", "hi", None, None)
+            .await
+            .unwrap();
+        let denied = truncate_conversation(
+            State(state.clone()),
+            stranger,
+            Path(conv.id.clone()),
+            Json(TruncateConversationRequest {
+                from_message_id: msg.id.clone(),
+            }),
+        )
+        .await
+        .expect_err("stranger truncate");
+        assert_eq!(denied.status, StatusCode::NOT_FOUND);
+        let ok = truncate_conversation(
+            State(state),
+            user,
+            Path(conv.id),
+            Json(TruncateConversationRequest {
+                from_message_id: msg.id,
+            }),
+        )
+        .await
+        .expect("truncate");
+        assert_eq!(ok, StatusCode::NO_CONTENT);
     }
 }

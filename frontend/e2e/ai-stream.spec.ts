@@ -280,7 +280,8 @@ test('the same prompt can be sent twice', async ({ app }) => {
   await expect(app.getByTestId('live-turn')).toHaveCount(0);
   await send(app, 'hi');
   await expect(app.getByText(/I received your prompt/)).toHaveCount(2);
-  await expect(app.getByText('hi', { exact: true })).toHaveCount(2);
+  // Paragraphs only: the thread switcher also shows the auto title "hi".
+  await expect(app.locator('p', { hasText: /^hi$/ })).toHaveCount(2);
 });
 
 test('a retraction of the open segment keeps the earlier text and drops the partial', async ({ app, api }) => {

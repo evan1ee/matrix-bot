@@ -1,5 +1,5 @@
-import React, { useLayoutEffect, useEffect, useMemo, useRef } from 'react';
-import { Bot, ChevronRight, Clock } from 'lucide-react';
+import React, { useLayoutEffect, useEffect, useMemo, useRef, useState } from 'react';
+import { Bot, Check, ChevronRight, Clock, Copy, Pencil } from 'lucide-react';
 import { MarkdownRenderer } from '../../components/MarkdownRenderer';
 import { formatShortTimeInZone } from '../../core/settings';
 import type { AiMessage } from './types';
@@ -17,9 +17,60 @@ const SUGGESTIONS = [
   'Summarize my upcoming reminders and bills',
 ];
 
-function StoredMessage({ m, timezone }: { m: AiMessage; timezone: string }) {
+const ACTION =
+  'inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-sans text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors duration-150 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed';
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      setCopied(false);
+    }
+  };
+  return (
+    <button type="button" onClick={copy} aria-label="Copy markdown" className={ACTION}>
+      {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+      {copied ? 'Copied' : 'Copy'}
+    </button>
+  );
+}
+
+function StoredMessage({
+  m,
+  timezone,
+  canEdit,
+  onEdit,
+}: {
+  m: AiMessage;
+  timezone: string;
+  canEdit: boolean;
+  onEdit: (m: AiMessage) => void;
+}) {
   const time = formatShortTimeInZone(m.created_at, timezone);
-  if (m.role === 'user') return <UserBubble content={m.content} time={time} />;
+  if (m.role === 'user') {
+    return (
+      <div className="space-y-1">
+        <UserBubble content={m.content} time={time} />
+        <div className="flex justify-end gap-1 max-w-3xl ml-auto pr-10">
+          <CopyButton text={m.content} />
+          <button
+            type="button"
+            onClick={() => onEdit(m)}
+            disabled={!canEdit}
+            aria-label="Edit and resend"
+            className={ACTION}
+          >
+            <Pencil className="w-3 h-3" />
+            Edit &amp; resend
+          </button>
+        </div>
+      </div>
+    );
+  }
   if (m.role === 'tool') {
     return (
       <div className="max-w-3xl mr-auto pl-10">
@@ -29,12 +80,15 @@ function StoredMessage({ m, timezone }: { m: AiMessage; timezone: string }) {
   }
   return (
     <AssistantRow>
-      <div className="p-3.5 rounded-lg text-sm leading-relaxed space-y-2 max-w-2xl font-sans bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100 shadow-xs">
-        <MarkdownRenderer content={m.content} />
-        <div className="text-[10px] font-mono flex items-center gap-1 pt-1 text-neutral-400 dark:text-neutral-500">
-          <Clock className="w-2.5 h-2.5" />
-          <span>{time}</span>
+      <div className="space-y-1">
+        <div className="p-3.5 rounded-lg text-sm leading-relaxed space-y-2 max-w-2xl font-sans bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 text-neutral-900 dark:text-neutral-100 shadow-xs">
+          <MarkdownRenderer content={m.content} />
+          <div className="text-[10px] font-mono flex items-center gap-1 pt-1 text-neutral-400 dark:text-neutral-500">
+            <Clock className="w-2.5 h-2.5" />
+            <span>{time}</span>
+          </div>
         </div>
+        <CopyButton text={m.content} />
       </div>
     </AssistantRow>
   );
@@ -48,7 +102,9 @@ export const MessageList: React.FC<{
   turn: LiveTurn | null;
   timezone: string;
   onSuggestion: (text: string) => void;
-}> = ({ messages, isLoading, conversationId, turn, timezone, onSuggestion }) => {
+  canEdit: boolean;
+  onEdit: (m: AiMessage) => void;
+}> = ({ messages, isLoading, conversationId, turn, timezone, onSuggestion, canEdit, onEdit }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const prevLengthRef = useRef(0);
   const prevConvIdRef = useRef<string | null>(null);
@@ -133,7 +189,9 @@ export const MessageList: React.FC<{
           </div>
         </div>
       ) : (
-        visible.map((m) => <StoredMessage key={m.id} m={m} timezone={timezone} />)
+        visible.map((m) => (
+          <StoredMessage key={m.id} m={m} timezone={timezone} canEdit={canEdit} onEdit={onEdit} />
+        ))
       )}
 
       {turn && <LiveTurnBubble turn={turn} />}

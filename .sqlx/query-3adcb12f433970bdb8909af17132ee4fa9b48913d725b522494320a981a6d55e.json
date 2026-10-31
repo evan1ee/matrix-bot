@@ -1,0 +1,32 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH target AS (\n            SELECT m.created_at\n            FROM ai_messages m\n            JOIN ai_conversations c ON c.id = m.conversation_id\n            WHERE m.id = $3 AND m.conversation_id = $1 AND c.owner_id = $2\n        ), removed AS (\n            DELETE FROM ai_messages\n            WHERE conversation_id = $1\n              AND created_at >= (SELECT created_at FROM target)\n            RETURNING 1\n        )\n        SELECT (SELECT COUNT(*) FROM target) AS \"found!\", (SELECT COUNT(*) FROM removed) AS \"removed!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "found!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      },
+      {
+        "ordinal": 1,
+        "name": "removed!",
+        "type_info": "Int8",
+        "origin": "Expression"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null,
+      null
+    ]
+  },
+  "hash": "3adcb12f433970bdb8909af17132ee4fa9b48913d725b522494320a981a6d55e"
+}

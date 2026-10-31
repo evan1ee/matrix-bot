@@ -382,8 +382,19 @@ fn routes_ai_and_webhooks() -> Router<auth::ApiState> {
         .route("/ai/chat", post(ai::chat))
         .route("/ai/chat/stream", post(ai_stream::chat_stream))
         .route("/ai/verify", post(ai::verify_ai_config))
-        .route("/ai/conversations", get(ai::list_conversations))
+        .route(
+            "/ai/conversations",
+            get(ai::list_conversations).post(ai::create_conversation),
+        )
         .route("/ai/conversations/:id", delete(ai::delete_conversation))
+        .route(
+            "/ai/conversations/:id/title",
+            patch(ai::rename_conversation),
+        )
+        .route(
+            "/ai/conversations/:id/truncate",
+            post(ai::truncate_conversation),
+        )
         .route(
             "/ai/conversations/:id/messages",
             get(ai::get_conversation_messages),

@@ -236,7 +236,7 @@ High-impact capabilities brainstormed via multi-agent architectural analysis acr
    - Fix multi-currency blind addition in `domain/recurring_bills/due.rs:75`.
    - ~~Fix vector embedding deletion leak~~ (done, Blueprint 8).
 3. **Web AI Assistant Phase 2:** Implement multi-conversation thread switcher, dynamic model badge, and non-destructive new chat in `AiAssistantView.tsx`.
-4. **Roadmap execution (2026-10-31):** Phase A done for Blueprints 8 and 10 (plans: `plans/2026-10-31-knowledge-embedding-lifecycle.md`, `plans/2026-10-31-agent-task-controls.md`); Blueprint 1 (Web AI Phase 2/3) is next and still open; Phase B and C untouched. Follow the implementation blueprints in [`docs/superpowers/specs/2026-10-31-feature-blueprints.md`](specs/2026-10-31-feature-blueprints.md) across Phase A (critical data integrity & core usability), Phase B (omnichannel parity & financial automation), and Phase C (personal productivity & knowledge management).
+4. **Roadmap execution (2026-10-31):** Phase A done for Blueprints 8 and 10 (plans: `plans/2026-10-31-knowledge-embedding-lifecycle.md`, `plans/2026-10-31-agent-task-controls.md`); Blueprint 1 (Web AI Phase 2/3) done too (plan: `plans/2026-10-31-web-ai-threads.md`), so Phase A is complete; Phase B and C untouched. Follow the implementation blueprints in [`docs/superpowers/specs/2026-10-31-feature-blueprints.md`](specs/2026-10-31-feature-blueprints.md) across Phase A (critical data integrity & core usability), Phase B (omnichannel parity & financial automation), and Phase C (personal productivity & knowledge management).
 
 ---
 
@@ -334,6 +334,11 @@ Format: `Ruling: <decision> — <why> — <cost if wrong>`. New rulings go here 
 - *Ruling: `set_scheduled_task_state` returns the updated row and takes `next_run_at: Option<_>` (`None` on pause keeps the schedule); resume passes `CronSchedule::next_after(now)` — cost if wrong: none.*
 - *Ruling: a paused task can still be run by hand, and a manual run does not move `next_run_at`/`last_run_at` — cost if wrong: the card's "Last run" ignores manual runs.*
 - *Ruling: `POST /agent/tasks/{id}/trigger` answers 200 like `POST /agent/runs`, not the blueprint's 201 — cost if wrong: clients expecting 201.*
+- *Ruling: Edit & Resend truncates (user decision 2026-10-31): `POST /ai/conversations/{id}/truncate` deletes the edited message and everything after it, then the new prompt is sent; no `parent_message_id`/branching — cost if wrong: the replaced replies are gone, not kept as a branch.*
+- *Ruling: a conversation's first reply sets a heuristic title (`title_from_prompt`, ≤ 50 characters at a word boundary) instead of the blueprint's LLM `ai.generate_title` job — no new job type or provider call; a user title is never overwritten — cost if wrong: titles are plain prompt prefixes.*
+- *Ruling: conversation create, rename, auto-title and truncate publish the existing `AiConversationUpdated` rather than a new `AiConversationTitleUpdated` — cost if wrong: none.*
+- *Ruling: no `effective_model_name` on `GET /account/ai-config`: `model_name` already resolves to the instance default when the user has none, so only the SPA's hardcoded `gpt-4o-mini` fallback went — cost if wrong: none.*
+- *Ruling: web "New Chat" creates an empty conversation (a turn without an id resumes the room's latest one for an hour) and is a no-op while the active thread is empty; deleting a thread is a separate, confirmed button — cost if wrong: none.*
 
 ---
 

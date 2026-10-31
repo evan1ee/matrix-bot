@@ -91,7 +91,7 @@ pub async fn get_or_create_conversation(
 
     let existing = sqlx::query!(
         r#"
-        SELECT id, owner_id, room_id, created_at, updated_at
+        SELECT id, owner_id, room_id, title, created_at, updated_at
         FROM ai_conversations
         WHERE owner_id = $1 AND room_id = $2 AND updated_at::timestamptz >= $3
         ORDER BY updated_at::timestamptz DESC
@@ -109,6 +109,7 @@ pub async fn get_or_create_conversation(
             id: r.id,
             owner_id: AccountId::from_uuid(r.owner_id).to_string(),
             room_id: r.room_id,
+            title: r.title,
             created_at: r.created_at,
             updated_at: r.updated_at,
         });
@@ -143,7 +144,7 @@ pub async fn get_conversation(
 ) -> Result<Option<AiConversation>, sqlx::Error> {
     let row = sqlx::query!(
         r#"
-        SELECT id, owner_id, room_id, created_at, updated_at
+        SELECT id, owner_id, room_id, title, created_at, updated_at
         FROM ai_conversations
         WHERE id = $1 AND owner_id = $2
         "#,
@@ -157,6 +158,7 @@ pub async fn get_conversation(
         id: r.id,
         owner_id: AccountId::from_uuid(r.owner_id).to_string(),
         room_id: r.room_id,
+        title: r.title,
         created_at: r.created_at,
         updated_at: r.updated_at,
     }))
@@ -169,7 +171,7 @@ pub async fn list_conversations(
 ) -> Result<Vec<AiConversation>, sqlx::Error> {
     let rows = sqlx::query!(
         r#"
-        SELECT id, owner_id, room_id, created_at, updated_at
+        SELECT id, owner_id, room_id, title, created_at, updated_at
         FROM ai_conversations
         WHERE owner_id = $1
         ORDER BY updated_at DESC
@@ -187,6 +189,7 @@ pub async fn list_conversations(
             id: r.id,
             owner_id: AccountId::from_uuid(r.owner_id).to_string(),
             room_id: r.room_id,
+            title: r.title,
             created_at: r.created_at,
             updated_at: r.updated_at,
         })
@@ -210,6 +213,102 @@ pub async fn delete_conversation(
     .await?;
 
     Ok(res.rows_affected() > 0)
+}
+
+/// Mints an empty conversation, so "new chat" never has to reuse the room's
+/// latest one.
+pub async fn create_conversation(
+    conn: impl sqlx::PgExecutor<'_>,
+    owner_id: &AccountId,
+    room_id: &str,
+) -> Result<AiConversation, sqlx::Error> {
+    let id = format!("conv_{}", Uuid::new_v4().simple());
+    let r = sqlx::query!(
+        r#"
+        INSERT INTO ai_conversations (id, owner_id, room_id, created_at, updated_at)
+        VALUES (
+            $1, $2, $3,
+            TO_CHAR(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+            TO_CHAR(NOW() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"')
+        )
+        RETURNING id, owner_id, room_id, title, created_at, updated_at
+        "#,
+        id,
+        owner_id.as_uuid(),
+        room_id
+    )
+    .fetch_one(conn)
+    .await?;
+
+    Ok(AiConversation {
+        id: r.id,
+        owner_id: AccountId::from_uuid(r.owner_id).to_string(),
+        room_id: r.room_id,
+        title: r.title,
+        created_at: r.created_at,
+        updated_at: r.updated_at,
+    })
+}
+
+/// Sets the title of an owned conversation. With `only_if_unset` an existing
+/// title (the user's, or an earlier automatic one) is kept. Returns whether a
+/// row was changed.
+pub async fn set_conversation_title(
+    conn: impl sqlx::PgExecutor<'_>,
+    id: &str,
+    owner_id: &AccountId,
+    title: &str,
+    only_if_unset: bool,
+) -> Result<bool, sqlx::Error> {
+    let res = sqlx::query!(
+        r#"
+        UPDATE ai_conversations
+        SET title = $3
+        WHERE id = $1 AND owner_id = $2 AND ($4 = FALSE OR title IS NULL)
+        "#,
+        id,
+        owner_id.as_uuid(),
+        title,
+        only_if_unset
+    )
+    .execute(conn)
+    .await?;
+
+    Ok(res.rows_affected() > 0)
+}
+
+/// Deletes a message and every later one in its conversation. `None` when the
+/// message is not in a conversation `owner_id` owns; the conversation itself
+/// is kept, even when this empties it.
+pub async fn truncate_messages_from(
+    conn: impl sqlx::PgExecutor<'_>,
+    conversation_id: &str,
+    owner_id: &AccountId,
+    message_id: &str,
+) -> Result<Option<u64>, sqlx::Error> {
+    let res = sqlx::query!(
+        r#"
+        WITH target AS (
+            SELECT m.created_at
+            FROM ai_messages m
+            JOIN ai_conversations c ON c.id = m.conversation_id
+            WHERE m.id = $3 AND m.conversation_id = $1 AND c.owner_id = $2
+        ), removed AS (
+            DELETE FROM ai_messages
+            WHERE conversation_id = $1
+              AND created_at >= (SELECT created_at FROM target)
+            RETURNING 1
+        )
+        SELECT (SELECT COUNT(*) FROM target) AS "found!", (SELECT COUNT(*) FROM removed) AS "removed!"
+        "#,
+        conversation_id,
+        owner_id.as_uuid(),
+        message_id
+    )
+    .fetch_one(conn)
+    .await?;
+
+    Ok((res.found > 0).then_some(res.removed as u64))
 }
 
 pub async fn touch_conversation(
@@ -624,5 +723,119 @@ mod tests {
                 Some(ToolStepOutcome::NeedsConfirmation),
             ]
         );
+    }
+
+    async fn owner(pool: &sqlx::PgPool, seed: &str) -> AccountId {
+        let owner = AccountId::from_seed(seed);
+        crate::db::pool::seed_account(pool, &owner).await;
+        owner
+    }
+
+    /// Given two accounts, When one creates, titles and truncates a thread,
+    /// Then only it can, titles are kept when asked, and truncation stops at
+    /// the chosen message.
+    #[tokio::test]
+    async fn conversation_titles_and_truncation_are_owner_scoped() {
+        let pool = crate::db::pool::test_pool().await;
+        crate::db::migrate::run_migrations_unlocked(&pool).await;
+        let alice = owner(&pool, "ai_thread_alice").await;
+        let bob = owner(&pool, "ai_thread_bob").await;
+
+        let conv = create_conversation(&pool, &alice, "web").await.unwrap();
+        assert_eq!(conv.title, None);
+        let other = create_conversation(&pool, &alice, "web").await.unwrap();
+        assert_ne!(conv.id, other.id);
+
+        assert!(
+            set_conversation_title(&pool, &conv.id, &alice, "First", true)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !set_conversation_title(&pool, &conv.id, &alice, "Second", true)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !set_conversation_title(&pool, &conv.id, &bob, "Hijack", false)
+                .await
+                .unwrap()
+        );
+        assert!(
+            set_conversation_title(&pool, &conv.id, &alice, "Renamed", false)
+                .await
+                .unwrap()
+        );
+        let loaded = get_conversation(&pool, &conv.id, &alice)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(loaded.title.as_deref(), Some("Renamed"));
+
+        let first = add_message(&pool, &conv.id, "user", "one", None, None)
+            .await
+            .unwrap();
+        let second = add_message(&pool, &conv.id, "assistant", "two", None, None)
+            .await
+            .unwrap();
+        let third = add_message(&pool, &conv.id, "user", "three", None, None)
+            .await
+            .unwrap();
+        let foreign = add_message(&pool, &other.id, "user", "elsewhere", None, None)
+            .await
+            .unwrap();
+
+        // A stranger, or a message from another conversation, finds nothing.
+        assert_eq!(
+            truncate_messages_from(&pool, &conv.id, &bob, &second.id)
+                .await
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            truncate_messages_from(&pool, &conv.id, &alice, &foreign.id)
+                .await
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            get_recent_messages(&pool, &conv.id, 10)
+                .await
+                .unwrap()
+                .len(),
+            3
+        );
+
+        assert_eq!(
+            truncate_messages_from(&pool, &conv.id, &alice, &second.id)
+                .await
+                .unwrap(),
+            Some(2)
+        );
+        let left = get_recent_messages(&pool, &conv.id, 10).await.unwrap();
+        assert_eq!(
+            left.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+            vec![first.id.as_str()]
+        );
+        assert!(left.iter().all(|m| m.id != third.id));
+        assert_eq!(
+            get_recent_messages(&pool, &other.id, 10)
+                .await
+                .unwrap()
+                .len(),
+            1
+        );
+
+        // Truncating the first message empties the thread but keeps it.
+        assert_eq!(
+            truncate_messages_from(&pool, &conv.id, &alice, &first.id)
+                .await
+                .unwrap(),
+            Some(1)
+        );
+        assert!(get_conversation(&pool, &conv.id, &alice)
+            .await
+            .unwrap()
+            .is_some());
     }
 }

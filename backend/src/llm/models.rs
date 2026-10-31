@@ -126,6 +126,7 @@ pub struct AiConversation {
     pub id: String,
     pub owner_id: String,
     pub room_id: String,
+    pub title: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -136,10 +137,28 @@ impl From<crate::domain::llm::AiConversation> for AiConversation {
             id: c.id,
             owner_id: c.owner_id,
             room_id: c.room_id,
+            title: c.title,
             created_at: c.created_at,
             updated_at: c.updated_at,
         }
     }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, ToSchema)]
+pub struct CreateConversationRequest {
+    /// Room the conversation belongs to; the account's default room when absent.
+    pub room_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct RenameConversationRequest {
+    pub title: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TruncateConversationRequest {
+    /// This message and every later one in the conversation are deleted.
+    pub from_message_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

@@ -368,6 +368,7 @@ export interface FakeAiConversation {
   id: string;
   owner_id: string;
   room_id: string;
+  title?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -2630,6 +2631,7 @@ export class FakeApi {
         this.aiConversations.push(conv);
       }
       conv.updated_at = new Date().toISOString();
+      if (!conv.title) conv.title = String(body?.prompt || '').slice(0, 50);
 
       const userMsg: FakeAiMessage = {
         id: `msg_${this.nextAiMsgId++}`,
@@ -2787,6 +2789,41 @@ export class FakeApi {
 
     if (path === '/ai/conversations' && method === 'GET') {
       return json(route, 200, this.aiConversations);
+    }
+
+    if (path === '/ai/conversations' && method === 'POST') {
+      const now = new Date().toISOString();
+      const created: FakeAiConversation = {
+        id: `conv_${this.nextAiConvId++}`,
+        owner_id: OWNER,
+        room_id: String(body?.room_id || '!room1:example.com'),
+        title: null,
+        created_at: now,
+        updated_at: now,
+      };
+      this.aiConversations.unshift(created);
+      return json(route, 201, created);
+    }
+
+    const aiTitleMatch = path.match(/^\/ai\/conversations\/([^/]+)\/title$/);
+    if (aiTitleMatch && method === 'PATCH') {
+      const conv = this.aiConversations.find((c) => c.id === aiTitleMatch[1]);
+      if (!conv) return json(route, 404, { error: 'Conversation not found', code: 404 });
+      const title = String(body?.title ?? '').trim();
+      if (!title) return json(route, 400, { error: 'Title cannot be empty', code: 400 });
+      conv.title = title;
+      return json(route, 200, conv);
+    }
+
+    const aiTruncateMatch = path.match(/^\/ai\/conversations\/([^/]+)\/truncate$/);
+    if (aiTruncateMatch && method === 'POST') {
+      const id = aiTruncateMatch[1];
+      const msgs = this.aiMessages.filter((m) => m.conversation_id === id);
+      const index = msgs.findIndex((m) => m.id === body?.from_message_id);
+      if (index < 0) return json(route, 404, { error: 'Message not found', code: 404 });
+      const doomed = new Set(msgs.slice(index).map((m) => m.id));
+      this.aiMessages = this.aiMessages.filter((m) => !doomed.has(m.id));
+      return route.fulfill({ status: 204, body: '' });
     }
 
     const aiConvMatch = path.match(/^\/ai\/conversations\/([^/]+)$/);

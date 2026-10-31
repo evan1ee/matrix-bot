@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, owner_id, room_id, created_at, updated_at\n        FROM ai_conversations\n        WHERE owner_id = $1 AND room_id = $2 AND updated_at::timestamptz >= $3\n        ORDER BY updated_at::timestamptz DESC\n        LIMIT 1\n        ",
+  "query": "\n        SELECT id, owner_id, room_id, title, created_at, updated_at\n        FROM ai_conversations\n        WHERE id = $1 AND owner_id = $2\n        ",
   "describe": {
     "columns": [
       {
@@ -38,6 +38,17 @@
       },
       {
         "ordinal": 3,
+        "name": "title",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "ai_conversations",
+            "name": "title"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
         "name": "created_at",
         "type_info": "Text",
         "origin": {
@@ -48,7 +59,7 @@
         }
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "updated_at",
         "type_info": "Text",
         "origin": {
@@ -61,18 +72,18 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid",
         "Text",
-        "Timestamptz"
+        "Uuid"
       ]
     },
     "nullable": [
       false,
       false,
       false,
+      true,
       false,
       false
     ]
   },
-  "hash": "e5493960fca678c0b78a5b0ae71488cf98526fabcaec0343a8927b53e33582d0"
+  "hash": "451cd482af06d3eb184a60cf4ebbb8af62938fdcbbbb58190f810b70f4c211ed"
 }

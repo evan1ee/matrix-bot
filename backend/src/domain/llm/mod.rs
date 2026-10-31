@@ -1,5 +1,9 @@
 use serde::{Deserialize, Serialize};
 
+pub mod title;
+
+pub use title::{title_from_prompt, ConversationTitle, TitleError};
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AiUserConfig {
     pub owner_id: String,
@@ -245,6 +249,7 @@ pub struct AiConversation {
     pub id: String,
     pub owner_id: String,
     pub room_id: String,
+    pub title: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }

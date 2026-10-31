@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE ai_conversations\n        SET title = $3\n        WHERE id = $1 AND owner_id = $2 AND ($4 = FALSE OR title IS NULL)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Uuid",
+        "Text",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "afeb2d7752b6e891095ece6258a4eee2ad5398b381d989f8f413d0cc5e443583"
+}

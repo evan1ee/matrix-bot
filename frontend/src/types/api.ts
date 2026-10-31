@@ -612,7 +612,7 @@ export interface paths {
         };
         get: operations["list_conversations"];
         put?: never;
-        post?: never;
+        post: operations["create_conversation"];
         delete?: never;
         options?: never;
         head?: never;
@@ -645,6 +645,38 @@ export interface paths {
         get: operations["get_conversation_messages"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/ai/conversations/{id}/title": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch: operations["rename_conversation"];
+        trace?: never;
+    };
+    "/api/v1/ai/conversations/{id}/truncate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["truncate_conversation"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2394,6 +2426,7 @@ export interface components {
             id: string;
             owner_id: string;
             room_id: string;
+            title?: string | null;
             updated_at: string;
         };
         AiMessage: {
@@ -2750,6 +2783,10 @@ export interface components {
             category_id?: number | null;
             currency: string;
             limit: string;
+        };
+        CreateConversationRequest: {
+            /** @description Room the conversation belongs to; the account's default room when absent. */
+            room_id?: string | null;
         };
         CreateFootprintRequest: {
             address?: string | null;
@@ -3647,6 +3684,9 @@ export interface components {
          * @enum {string}
          */
         ReminderStatus: "Pending" | "Triggered" | "Cancelled" | "Failed";
+        RenameConversationRequest: {
+            title: string;
+        };
         RenamePasskeyRequest: {
             label: string;
         };
@@ -4016,6 +4056,10 @@ export interface components {
              */
             occurred_at?: string | null;
             room_id?: string | null;
+        };
+        TruncateConversationRequest: {
+            /** @description This message and every later one in the conversation are deleted. */
+            from_message_id: string;
         };
         UnlinkIdentityRequest: {
             channel: string;
@@ -5828,6 +5872,30 @@ export interface operations {
             };
         };
     };
+    create_conversation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateConversationRequest"];
+            };
+        };
+        responses: {
+            /** @description An empty conversation */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiConversation"];
+                };
+            };
+        };
+    };
     delete_conversation: {
         parameters: {
             query?: never;
@@ -5866,6 +5934,84 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AiMessage"][];
+                };
+            };
+        };
+    };
+    rename_conversation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Conversation ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RenameConversationRequest"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AiConversation"];
+                };
+            };
+            /** @description Empty, multi-line or over-long title */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unknown or foreign conversation */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    truncate_conversation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Conversation ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TruncateConversationRequest"];
+            };
+        };
+        responses: {
+            /** @description The message and everything after it are gone */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unknown or foreign conversation or message */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
                 };
             };
         };

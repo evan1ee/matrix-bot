@@ -2058,6 +2058,39 @@
             "session_cookie": []
           }
         ]
+      },
+      "post": {
+        "tags": [
+          "ai"
+        ],
+        "operationId": "create_conversation",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConversationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "An empty conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiConversation"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
       }
     },
     "/api/v1/ai/conversations/{id}": {
@@ -2116,6 +2149,121 @@
                   "items": {
                     "$ref": "#/components/schemas/AiMessage"
                   }
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/conversations/{id}/title": {
+      "patch": {
+        "tags": [
+          "ai"
+        ],
+        "operationId": "rename_conversation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conversation ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameConversationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiConversation"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Empty, multi-line or over-long title",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Unknown or foreign conversation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/ai/conversations/{id}/truncate": {
+      "post": {
+        "tags": [
+          "ai"
+        ],
+        "operationId": "truncate_conversation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conversation ID",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TruncateConversationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "The message and everything after it are gone"
+          },
+          "404": {
+            "description": "Unknown or foreign conversation or message",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
                 }
               }
             }
@@ -9232,6 +9380,10 @@
           "room_id": {
             "type": "string"
           },
+          "title": {
+            "type": "string",
+            "nullable": true
+          },
           "updated_at": {
             "type": "string"
           }
@@ -10356,6 +10508,16 @@
           },
           "limit": {
             "type": "string"
+          }
+        }
+      },
+      "CreateConversationRequest": {
+        "type": "object",
+        "properties": {
+          "room_id": {
+            "type": "string",
+            "description": "Room the conversation belongs to; the account's default room when absent.",
+            "nullable": true
           }
         }
       },
@@ -13011,6 +13173,17 @@
           "Failed"
         ]
       },
+      "RenameConversationRequest": {
+        "type": "object",
+        "required": [
+          "title"
+        ],
+        "properties": {
+          "title": {
+            "type": "string"
+          }
+        }
+      },
       "RenamePasskeyRequest": {
         "type": "object",
         "required": [
@@ -13994,6 +14167,18 @@
           "room_id": {
             "type": "string",
             "nullable": true
+          }
+        }
+      },
+      "TruncateConversationRequest": {
+        "type": "object",
+        "required": [
+          "from_message_id"
+        ],
+        "properties": {
+          "from_message_id": {
+            "type": "string",
+            "description": "This message and every later one in the conversation are deleted."
           }
         }
       },

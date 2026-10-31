@@ -433,6 +433,16 @@ pub async fn run_turn(
         warn!("Failed to persist assistant message: {}", e);
     }
 
+    // A thread is named by its first prompt; a failure here costs only the title.
+    if let Err(e) = ctx
+        .services
+        .llm
+        .auto_title(ctx.owner_id, &conversation.id, prompt_trimmed)
+        .await
+    {
+        warn!("Failed to title conversation: {}", e);
+    }
+
     info!(
         "LLM turn completed for owner {} in room {} (tools: {}, reply chars: {})",
         ctx.owner_id,
