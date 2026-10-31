@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { CustomSelect } from './CustomSelect';
 import { RoomsPanel } from './RoomsPanel';
 import { SecurityPanel } from './SecurityPanel';
+import { CalendarFeedPanel } from './CalendarFeedPanel';
 import { McpPanel } from './McpPanel';
 import { NotificationPanel } from './NotificationPanel';
 import { fetchApi } from '../core/apiClient';
@@ -198,7 +199,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                     : 'text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 pb-1'
                 }`}
               >
-                {t === 'mcp' ? 'MCP' : t}
+                {t === 'mcp' ? 'Integrations' : t}
               </button>
             ))}
           </div>
@@ -218,7 +219,10 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
         ) : tab === 'rooms' ? (
           <RoomsPanel />
         ) : tab === 'mcp' ? (
-          <McpPanel />
+          <div className="space-y-8">
+            <CalendarFeedPanel />
+            <McpPanel />
+          </div>
         ) : (
         <>
         {errorMsg && (
