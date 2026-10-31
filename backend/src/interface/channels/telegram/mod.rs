@@ -15,6 +15,7 @@
 //! - `adapter`: `TelegramAdapter`, start-up, webhook registration, backoff.
 
 pub mod adapter;
+pub mod audio;
 pub mod commands;
 pub mod inbound;
 pub mod ingress;

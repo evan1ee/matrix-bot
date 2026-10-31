@@ -235,7 +235,7 @@ fn display_name(user: &User) -> Option<String> {
 }
 
 /// `None` only for an id Telegram never sends (non-positive for a user).
-fn identity(user: &User) -> Option<PlatformIdentity> {
+pub(super) fn identity(user: &User) -> Option<PlatformIdentity> {
     let user_id = match PlatformUserId::parse(Channel::Telegram, &user.id.0.to_string()) {
         Ok(id) => id,
         Err(error) => {

@@ -105,6 +105,16 @@ pub fn check_declared_size(bytes: u64) -> Result<(), AudioIngressError> {
     }
 }
 
+/// The length a platform reports before the download, refused for the same
+/// reason as [`check_declared_size`].
+pub fn check_declared_duration(secs: u32) -> Result<(), AudioIngressError> {
+    if secs > MAX_AUDIO_SECS {
+        Err(AudioIngressError::TooLong)
+    } else {
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AudioPayload {
     bytes: Vec<u8>,
@@ -229,6 +239,15 @@ mod tests {
         let at = |secs| AudioPayload::new(vec![1], Some("audio/ogg"), None, Some(secs));
         assert!(at(120).is_ok());
         assert_eq!(at(121).unwrap_err(), AudioIngressError::TooLong);
+    }
+
+    #[test]
+    fn check_declared_duration_matches_the_limit() {
+        assert!(check_declared_duration(MAX_AUDIO_SECS).is_ok());
+        assert_eq!(
+            check_declared_duration(MAX_AUDIO_SECS + 1).unwrap_err(),
+            AudioIngressError::TooLong
+        );
     }
 
     #[test]

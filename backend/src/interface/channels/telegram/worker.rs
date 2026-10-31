@@ -10,6 +10,7 @@ use tokio::sync::{mpsc, Mutex as AsyncMutex};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, warn};
 
+use super::audio::{audio_of, TelegramAudio};
 use super::commands::CommandRefusal;
 use super::inbound::{normalize, parse_message_ref, Normalized, UpdateKind};
 use super::ingress::RecentUpdates;
@@ -65,6 +66,8 @@ pub enum Prepared {
         text: String,
     },
     Dispatch(Box<Normalized>),
+    /// A voice note or audio file in a private chat.
+    Audio(Box<TelegramAudio>),
 }
 
 /// Deserializes with `from_slice` (never `from_value`: that silently yields
@@ -89,6 +92,9 @@ pub fn prepare(body: &[u8], recent: &Mutex<RecentUpdates>, username: &str) -> Pr
             "Dropped a duplicate Telegram update"
         );
         return Prepared::Drop;
+    }
+    if let Some(audio) = audio_of(&update) {
+        return Prepared::Audio(Box::new(audio));
     }
     match normalize(&update, username) {
         None => Prepared::Drop,
@@ -156,6 +162,7 @@ async fn handle(body: &[u8], ctx: &WorkerCtx) {
             post(&ctx.bot, &kind, Plan::text(text)).await;
         }
         Prepared::Dispatch(n) => run_turn(ctx, *n).await,
+        Prepared::Audio(audio) => super::audio::run(ctx, *audio).await,
     }
 }
 
@@ -229,7 +236,7 @@ async fn acknowledge(bot: &Bot, kind: &UpdateKind) {
 }
 
 /// Delivers `plan` as a reply to the triggering message.
-async fn post(bot: &Bot, kind: &UpdateKind, plan: Plan) -> Option<SentRef> {
+pub(super) async fn post(bot: &Bot, kind: &UpdateKind, plan: Plan) -> Option<SentRef> {
     let chat = ChatId(chat_of(kind));
     match deliver(bot, chat, Some(message_of(kind)), plan).await {
         Ok(sent) => Some(sent),
@@ -320,6 +327,23 @@ mod tests {
         ));
         assert!(matches!(
             prepare(PRIVATE.as_bytes(), &recent, "MyBot"),
+            Prepared::Drop
+        ));
+    }
+
+    #[test]
+    fn a_voice_note_is_prepared_as_audio_once() {
+        let voice = include_str!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../contracts/channels/telegram_private_voice.json"
+        ));
+        let recent = recent();
+        assert!(matches!(
+            prepare(voice.as_bytes(), &recent, "MyBot"),
+            Prepared::Audio(_)
+        ));
+        assert!(matches!(
+            prepare(voice.as_bytes(), &recent, "MyBot"),
             Prepared::Drop
         ));
     }
