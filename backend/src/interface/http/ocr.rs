@@ -48,19 +48,6 @@ pub async fn scan_image(
     State(state): State<ApiState>,
     mut multipart: Multipart,
 ) -> Result<Json<OcrScanResponse>, ApiError> {
-    let snapshot = state.services.app_config.snapshot();
-    let ocr_enabled =
-        if snapshot.is_customized(crate::domain::config::SettingKey::InferenceOcrEnabled) {
-            snapshot.inference_ocr_enabled()
-        } else {
-            state.ocr_config.enabled
-        };
-    if !ocr_enabled {
-        return Err(ApiError::service_unavailable(
-            "OCR service is disabled in server configuration",
-        ));
-    }
-
     let mut image_bytes: Option<Vec<u8>> = None;
 
     while let Some(field) = multipart
@@ -85,14 +72,7 @@ pub async fn scan_image(
 
     info!("Running web OCR scan on {} image bytes", bytes.len());
 
-    let effective_ocr = state
-        .ocr
-        .with_base_url_override(Some(snapshot.inference_ocr_base_url()).filter(|s| !s.is_empty()));
-
-    let ocr_result = match effective_ocr.scan(bytes).await {
-        Ok(scan) => scan,
-        Err(err) => return Err(ocr_error_response(err)),
-    };
+    let ocr_result = run_ocr(&state, bytes).await?;
 
     let blocks: Vec<OcrBlockDto> = ocr_result
         .blocks
@@ -110,6 +90,33 @@ pub async fn scan_image(
         blocks,
         structured: Some(structured),
     }))
+}
+
+/// Runs the configured OCR service on `bytes`, honouring the admin-console
+/// override of the enabled flag and base URL. Shared by every web endpoint
+/// that reads a receipt image.
+pub(crate) async fn run_ocr(
+    state: &ApiState,
+    bytes: Vec<u8>,
+) -> Result<crate::infrastructure::inference::ocr::OcrScan, ApiError> {
+    let snapshot = state.services.app_config.snapshot();
+    let ocr_enabled =
+        if snapshot.is_customized(crate::domain::config::SettingKey::InferenceOcrEnabled) {
+            snapshot.inference_ocr_enabled()
+        } else {
+            state.ocr_config.enabled
+        };
+    if !ocr_enabled {
+        return Err(ApiError::service_unavailable(
+            "OCR service is disabled in server configuration",
+        ));
+    }
+
+    let effective_ocr = state
+        .ocr
+        .with_base_url_override(Some(snapshot.inference_ocr_base_url()).filter(|s| !s.is_empty()));
+
+    effective_ocr.scan(bytes).await.map_err(ocr_error_response)
 }
 
 /// Maps a failed OCR service call onto the status this endpoint's

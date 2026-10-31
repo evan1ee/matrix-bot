@@ -6,10 +6,10 @@ use axum::{
 
 use super::{
     account, admin, agent, ai, ai_stream, auth, bookmarks, briefing, finance, finance_analytics,
-    finance_budgets, finance_categories, finance_net_worth, footprints, habits, identities,
-    knowledge, knowledge_transfer, life, life_activity, link, mcp, ocr, openapi, portfolio,
-    portfolio_alerts, portfolio_cash, portfolio_history, portfolio_prices, recurring_bills,
-    reminders, rooms, settings, sse, storage, todo_steps, todos, voice, webhooks,
+    finance_budgets, finance_categories, finance_net_worth, finance_receipts, footprints, habits,
+    identities, knowledge, knowledge_transfer, life, life_activity, link, mcp, ocr, openapi,
+    portfolio, portfolio_alerts, portfolio_cash, portfolio_history, portfolio_prices,
+    recurring_bills, reminders, rooms, settings, sse, storage, todo_steps, todos, voice, webhooks,
 };
 
 /// The API route table.
@@ -212,6 +212,20 @@ fn routes_finance() -> Router<auth::ApiState> {
         .route(
             "/finance/transactions/:id",
             put(finance::update_transaction).delete(finance::delete_transaction),
+        )
+        .route(
+            "/finance/transactions/:id/receipt-url",
+            get(finance_receipts::receipt_url),
+        )
+        .route(
+            "/finance/transactions/:id/receipt",
+            delete(finance_receipts::detach_receipt),
+        )
+        .route(
+            "/finance/receipts/upload",
+            post(finance_receipts::upload_receipt).layer(DefaultBodyLimit::max(
+                finance_receipts::UPLOAD_BODY_LIMIT_BYTES,
+            )),
         )
         .route("/finance/summary", get(finance::summary))
         .route("/finance/net-worth", get(finance_net_worth::get_net_worth))

@@ -36,6 +36,7 @@ pub mod finance_analytics;
 pub mod finance_budgets;
 pub mod finance_categories;
 pub mod finance_net_worth;
+pub mod finance_receipts;
 pub mod footprints;
 pub mod habits;
 pub mod health;

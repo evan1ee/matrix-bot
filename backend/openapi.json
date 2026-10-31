@@ -3645,6 +3645,52 @@
         ]
       }
     },
+    "/api/v1/finance/receipts/upload": {
+      "post": {
+        "tags": [
+          "Finance"
+        ],
+        "summary": "Stores an uploaded receipt and, for images, reads it with OCR.",
+        "operationId": "upload_receipt",
+        "responses": {
+          "200": {
+            "description": "Receipt stored",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptUploadResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing, oversized or unsupported file",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
     "/api/v1/finance/share": {
       "get": {
         "tags": [
@@ -4004,6 +4050,122 @@
           },
           "404": {
             "description": "Not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/finance/transactions/{id}/receipt": {
+      "delete": {
+        "tags": [
+          "Finance"
+        ],
+        "summary": "Unlinks the receipt from the transaction. The stored file is left to the storage retention sweep.",
+        "operationId": "detach_receipt",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Transaction id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Receipt unlinked",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Transaction"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such transaction, or it has no receipt",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "session_cookie": []
+          }
+        ]
+      }
+    },
+    "/api/v1/finance/transactions/{id}/receipt-url": {
+      "get": {
+        "tags": [
+          "Finance"
+        ],
+        "summary": "Returns a link to the transaction's receipt that stops working after five minutes.",
+        "operationId": "receipt_url",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Transaction id",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Presigned view link",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReceiptUrlResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such transaction, or it has no receipt",
             "content": {
               "application/json": {
                 "schema": {
@@ -12835,6 +12997,42 @@
           }
         }
       },
+      "ReceiptUploadResponse": {
+        "type": "object",
+        "required": [
+          "receipt_storage_key"
+        ],
+        "properties": {
+          "extracted": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/ReceiptExtractionDto"
+              }
+            ],
+            "nullable": true
+          },
+          "receipt_storage_key": {
+            "type": "string",
+            "description": "Pass this as `receipt_storage_key` when creating the transaction."
+          }
+        }
+      },
+      "ReceiptUrlResponse": {
+        "type": "object",
+        "required": [
+          "url",
+          "expires_in_seconds"
+        ],
+        "properties": {
+          "expires_in_seconds": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "url": {
+            "type": "string"
+          }
+        }
+      },
       "RecoveryCodesResponse": {
         "type": "object",
         "required": [
@@ -14109,6 +14307,11 @@
             "type": "string",
             "description": "The sole ownership key, matching `AuthUser::owner_id()`."
           },
+          "receipt_storage_key": {
+            "type": "string",
+            "description": "Storage key of the scanned receipt; view it via `/finance/transactions/{id}/receipt-url`.",
+            "nullable": true
+          },
           "room_id": {
             "type": "string"
           },
@@ -14162,6 +14365,11 @@
             "type": "string",
             "format": "date-time",
             "description": "When the money moved. Defaults to now.",
+            "nullable": true
+          },
+          "receipt_storage_key": {
+            "type": "string",
+            "description": "Key returned by `POST /finance/receipts/upload`; must be your own receipt.",
             "nullable": true
           },
           "room_id": {

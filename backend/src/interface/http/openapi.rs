@@ -32,10 +32,10 @@ use crate::interface::http::todos::{TodoItem, TodoPriority};
 use crate::interface::http::webhooks::{TelegramMessageResult, TelegramQuery, TelegramResponse};
 use crate::interface::http::{
     account, admin, agent, ai, ai_stream, auth, bookmarks, briefing, finance, finance_analytics,
-    finance_budgets, finance_categories, finance_net_worth, footprints, habits, health, identities,
-    knowledge, knowledge_transfer, life, life_activity, link, mcp, ocr, portfolio,
-    portfolio_alerts, portfolio_cash, portfolio_history, portfolio_prices, recurring_bills,
-    reminders, rooms, settings, sse, storage, todo_steps, todos, voice, webhooks,
+    finance_budgets, finance_categories, finance_net_worth, finance_receipts, footprints, habits,
+    health, identities, knowledge, knowledge_transfer, life, life_activity, link, mcp, ocr,
+    portfolio, portfolio_alerts, portfolio_cash, portfolio_history, portfolio_prices,
+    recurring_bills, reminders, rooms, settings, sse, storage, todo_steps, todos, voice, webhooks,
 };
 
 #[derive(OpenApi)]
@@ -97,6 +97,9 @@ use crate::interface::http::{
         finance::update_transaction,
         finance::delete_transaction,
         finance::summary,
+        finance_receipts::upload_receipt,
+        finance_receipts::receipt_url,
+        finance_receipts::detach_receipt,
         finance_net_worth::get_net_worth,
         finance_categories::list_categories,
         finance_categories::create_category,
@@ -308,6 +311,8 @@ use crate::interface::http::{
             finance::TransactionRequest,
             finance::CategoryRequest,
             finance::LedgerResponse,
+            finance_receipts::ReceiptUploadResponse,
+            finance_receipts::ReceiptUrlResponse,
             finance::CategoryDeletedResponse,
             finance_budgets::BudgetDto,
             finance_budgets::BudgetStatusDto,

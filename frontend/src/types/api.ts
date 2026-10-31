@@ -1096,6 +1096,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/finance/receipts/upload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stores an uploaded receipt and, for images, reads it with OCR. */
+        post: operations["upload_receipt"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/finance/share": {
         parameters: {
             query?: never;
@@ -1155,6 +1172,40 @@ export interface paths {
         put: operations["update_transaction"];
         post?: never;
         delete: operations["delete_transaction"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/finance/transactions/{id}/receipt": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Unlinks the receipt from the transaction. The stored file is left to the storage retention sweep. */
+        delete: operations["detach_receipt"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/finance/transactions/{id}/receipt-url": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Returns a link to the transaction's receipt that stops working after five minutes. */
+        get: operations["receipt_url"];
+        put?: never;
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -3557,6 +3608,16 @@ export interface components {
             date?: string | null;
             merchant?: string | null;
         };
+        ReceiptUploadResponse: {
+            extracted?: components["schemas"]["ReceiptExtractionDto"] | null;
+            /** @description Pass this as `receipt_storage_key` when creating the transaction. */
+            receipt_storage_key: string;
+        };
+        ReceiptUrlResponse: {
+            /** Format: int64 */
+            expires_in_seconds: number;
+            url: string;
+        };
         RecoveryCodesResponse: {
             /** @description Shown exactly once. The server keeps only hashes. */
             codes: string[];
@@ -4023,6 +4084,8 @@ export interface components {
             occurred_at: string;
             /** @description The sole ownership key, matching `AuthUser::owner_id()`. */
             owner_id: string;
+            /** @description Storage key of the scanned receipt; view it via `/finance/transactions/{id}/receipt-url`. */
+            receipt_storage_key?: string | null;
             room_id: string;
             /** @description Display only — user-controlled, and collides across identity spaces. */
             sender_name: string;
@@ -4055,6 +4118,8 @@ export interface components {
              * @description When the money moved. Defaults to now.
              */
             occurred_at?: string | null;
+            /** @description Key returned by `POST /finance/receipts/upload`; must be your own receipt. */
+            receipt_storage_key?: string | null;
             room_id?: string | null;
         };
         TruncateConversationRequest: {
@@ -7015,6 +7080,44 @@ export interface operations {
             };
         };
     };
+    upload_receipt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Receipt stored */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceiptUploadResponse"];
+                };
+            };
+            /** @description Missing, oversized or unsupported file */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
     get_share: {
         parameters: {
             query?: never;
@@ -7284,6 +7387,88 @@ export interface operations {
                 };
             };
             /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    detach_receipt: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Transaction id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Receipt unlinked */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Transaction"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description No such transaction, or it has no receipt */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+        };
+    };
+    receipt_url: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Transaction id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Presigned view link */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceiptUrlResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description No such transaction, or it has no receipt */
             404: {
                 headers: {
                     [name: string]: unknown;

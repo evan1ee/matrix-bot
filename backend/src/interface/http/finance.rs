@@ -92,6 +92,8 @@ pub struct Transaction {
     /// When the money moved — not when the row was written.
     pub occurred_at: DateTime<Utc>,
     pub created_at: Option<DateTime<Utc>>,
+    /// Storage key of the scanned receipt; view it via `/finance/transactions/{id}/receipt-url`.
+    pub receipt_storage_key: Option<String>,
 }
 
 impl From<crate::domain::finance::Transaction> for Transaction {
@@ -112,6 +114,7 @@ impl From<crate::domain::finance::Transaction> for Transaction {
             source_id: t.source_id,
             occurred_at: t.occurred_at,
             created_at: t.created_at,
+            receipt_storage_key: t.receipt_storage_key.map(|k| k.into_inner()),
         }
     }
 }
@@ -194,6 +197,8 @@ pub struct TransactionRequest {
     /// When the money moved. Defaults to now.
     pub occurred_at: Option<DateTime<Utc>>,
     pub room_id: Option<String>,
+    /// Key returned by `POST /finance/receipts/upload`; must be your own receipt.
+    pub receipt_storage_key: Option<String>,
 }
 
 #[derive(Serialize, ToSchema)]
@@ -303,6 +308,12 @@ pub async fn create_transaction(
     let (amount_minor, currency, exponent) = prepare(&payload)?;
     let category = owned_category(&state, &user.account_id, payload.category_id).await?;
     let room_id = payload.room_id.unwrap_or_else(|| "web".to_string());
+    let receipt_storage_key = payload
+        .receipt_storage_key
+        .as_deref()
+        .map(crate::domain::storage::StorageKey::parse)
+        .transpose()
+        .map_err(|e| ApiError::bad_request(e.to_string()))?;
 
     let tx = state
         .services
@@ -316,7 +327,7 @@ pub async fn create_transaction(
                 currency_exponent: exponent,
                 category: category.as_deref(),
                 note: payload.note.as_deref(),
-                receipt_storage_key: None,
+                receipt_storage_key,
                 room_id: &room_id,
                 sender_name: &user.display_name,
                 occurred_at: payload.occurred_at.unwrap_or_else(Utc::now),
@@ -452,6 +463,7 @@ mod tests {
             note: Some("lunch".to_string()),
             occurred_at: None,
             room_id: None,
+            receipt_storage_key: None,
         }
     }
 
