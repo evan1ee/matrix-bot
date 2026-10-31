@@ -57,6 +57,9 @@ export interface FakeReminder {
   created_at: string;
 }
 
+const ONE_PIXEL_PNG =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+
 export interface FakeTransaction {
   id: number;
   room_id: string;
@@ -73,6 +76,7 @@ export interface FakeTransaction {
   created_at: string;
   source_kind?: string | null;
   source_id?: number | null;
+  receipt_storage_key?: string | null;
 }
 
 export interface FakeRecurringBill {
@@ -1863,8 +1867,35 @@ export class FakeApi {
         category_name: category?.name ?? null,
         note: body?.note ?? null,
         occurred_at: body?.occurred_at ?? new Date().toISOString(),
+        receipt_storage_key: body?.receipt_storage_key ?? null,
       });
       return json(route, 200, tx);
+    }
+    if (path === '/finance/receipts/upload' && method === 'POST') {
+      return json(route, 200, {
+        receipt_storage_key: 'accounts/alice/receipts/fake-receipt.png',
+        extracted: {
+          merchant: 'STARBUCKS COFFEE',
+          amount: '9.99',
+          currency: 'USD',
+          date: '2026-09-15',
+          category_suggestion: 'Dining',
+        },
+      });
+    }
+    const receiptMatch = path.match(/^\/finance\/transactions\/(\d+)\/receipt(-url)?$/);
+    if (receiptMatch) {
+      const tx = this.transactions.find((t) => t.id === Number(receiptMatch[1]));
+      if (!tx || !tx.receipt_storage_key) {
+        return json(route, 404, { error: 'No receipt for this entry', code: 404 });
+      }
+      if (receiptMatch[2] && method === 'GET') {
+        return json(route, 200, { url: ONE_PIXEL_PNG, expires_in_seconds: 300 });
+      }
+      if (!receiptMatch[2] && method === 'DELETE') {
+        tx.receipt_storage_key = null;
+        return json(route, 200, tx);
+      }
     }
     const txMatch = path.match(/^\/finance\/transactions\/(\d+)$/);
     if (txMatch && method === 'PUT') {

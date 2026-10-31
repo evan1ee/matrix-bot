@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   ArrowDownRight,
   ArrowUpRight,
+  Paperclip,
   Pencil,
   Trash2,
   Sparkles,
@@ -12,6 +13,7 @@ import {
 import { triggerAiPrompt } from '../../ai';
 import { CustomSelect } from '../../../components/CustomSelect';
 import { formatDateInZone } from '../../../core/settings';
+import { ReceiptLightboxModal } from './ReceiptLightboxModal';
 import { Transaction, Category, Direction, currencyOptionsFor, formatMinor } from '../index';
 
 interface LedgerEditRowProps {
@@ -173,6 +175,7 @@ export const TransactionList: React.FC<TransactionListProps> = ({
   timezone,
 }) => {
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [receiptTx, setReceiptTx] = useState<Transaction | null>(null);
 
   return (
     <div className="rounded-lg bg-neutral-50 dark:bg-neutral-950 border border-neutral-200 dark:border-neutral-800 p-5 space-y-4">
@@ -290,6 +293,16 @@ export const TransactionList: React.FC<TransactionListProps> = ({
                     {isExpense ? '−' : '+'}
                     {formatMinor(tx.amount_minor, tx.currency_exponent)} {tx.currency}
                   </span>
+                  {tx.receipt_storage_key && (
+                    <button
+                      onClick={() => setReceiptTx(tx)}
+                      title="View receipt"
+                      aria-label="View receipt"
+                      className="p-1.5 rounded text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-200 dark:hover:bg-neutral-800 transition cursor-pointer"
+                    >
+                      <Paperclip className="w-4 h-4" />
+                    </button>
+                  )}
                   <button
                     onClick={() => setEditingId(tx.id)}
                     title="Edit entry"
@@ -309,6 +322,13 @@ export const TransactionList: React.FC<TransactionListProps> = ({
             );
           })}
         </div>
+      )}
+      {receiptTx && (
+        <ReceiptLightboxModal
+          transactionId={receiptTx.id}
+          title={receiptTx.note || 'Receipt'}
+          onClose={() => setReceiptTx(null)}
+        />
       )}
     </div>
   );

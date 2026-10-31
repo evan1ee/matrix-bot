@@ -37,6 +37,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   const [showCategories, setShowCategories] = useState(false);
   const [newCategory, setNewCategory] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
+  const [receiptKey, setReceiptKey] = useState<string | null>(null);
 
   useEffect(() => {
     setCurrency(defaultCurrency);
@@ -59,12 +60,15 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
       currency: currency.trim().toUpperCase(),
       category_id: categoryId ? Number(categoryId) : null,
       note: note.trim() || null,
+      receipt_storage_key: receiptKey,
     });
     setAmount('');
     setNote('');
+    setReceiptKey(null);
   };
 
-  const handleReceiptScanned = (extracted: ReceiptExtraction) => {
+  const handleReceiptScanned = (extracted: ReceiptExtraction, receiptStorageKey: string) => {
+    setReceiptKey(receiptStorageKey);
     if (extracted.amount) {
       setAmount(extracted.amount);
     }

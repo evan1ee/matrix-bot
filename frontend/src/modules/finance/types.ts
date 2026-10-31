@@ -33,6 +33,8 @@ export type OcrTextBlock = components['schemas']['OcrBlockDto'];
 
 export type OcrScanResponse = components['schemas']['OcrScanResponse'];
 
+export type ReceiptUploadResponse = components['schemas']['ReceiptUploadResponse'];
+
 export type Direction = 'expense' | 'income';
 
 export interface Transaction {
@@ -52,6 +54,8 @@ export interface Transaction {
   created_at?: string | null;
   source_kind?: string | null;
   source_id?: number | null;
+  /** Set when a receipt file is attached; view it with the receipt-url endpoint. */
+  receipt_storage_key?: string | null;
 }
 
 export interface Category {

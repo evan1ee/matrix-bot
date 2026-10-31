@@ -413,6 +413,39 @@ test('scans receipt image and populates entry form', async ({ app, api }) => {
   await expect(app.getByPlaceholder('What was it for?')).toHaveValue('STARBUCKS COFFEE');
 });
 
+test('keeps the scanned receipt and opens it from the ledger', async ({ app }) => {
+  await gotoApp(app, TAB.finance);
+
+  const fileChooserPromise = app.waitForEvent('filechooser');
+  await app.getByTestId('receipt-dropzone').click();
+  const fileChooser = await fileChooserPromise;
+  await fileChooser.setFiles({
+    name: 'receipt.png',
+    mimeType: 'image/png',
+    buffer: Buffer.from('fake image content'),
+  });
+  await expect(app.getByPlaceholder('15.50')).toHaveValue('9.99');
+  await app.getByPlaceholder('15.50').press('Enter');
+
+  const row = app.getByTestId('ledger-row').filter({ hasText: 'STARBUCKS COFFEE' });
+  await row.getByRole('button', { name: 'View receipt' }).click();
+
+  const lightbox = app.getByTestId('receipt-lightbox');
+  await expect(lightbox).toBeVisible();
+  await expect(lightbox.getByRole('img', { name: /Receipt for/ })).toBeVisible();
+
+  await app.keyboard.press('Escape');
+  await expect(lightbox).toHaveCount(0);
+
+  // Removing the receipt drops the paperclip but keeps the entry.
+  await row.getByRole('button', { name: 'View receipt' }).click();
+  await lightbox.getByRole('button', { name: 'Remove receipt' }).click();
+  await app.getByRole('button', { name: 'Remove', exact: true }).click();
+  await expect(lightbox).toHaveCount(0);
+  await expect(row).toBeVisible();
+  await expect(row.getByRole('button', { name: 'View receipt' })).toHaveCount(0);
+});
+
 
 
 test.describe('budgets', () => {

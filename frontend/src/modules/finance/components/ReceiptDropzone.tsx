@@ -1,9 +1,9 @@
 import React, { useRef, useState } from 'react';
 import { Camera, Loader2, Check, AlertCircle, X } from 'lucide-react';
-import { ReceiptExtraction, OcrScanResponse } from '../types';
+import { ReceiptExtraction, ReceiptUploadResponse } from '../types';
 
 interface ReceiptDropzoneProps {
-  onReceiptScanned: (extracted: ReceiptExtraction, rawText?: string) => void;
+  onReceiptScanned: (extracted: ReceiptExtraction, receiptStorageKey: string) => void;
 }
 
 export const ReceiptDropzone: React.FC<ReceiptDropzoneProps> = ({ onReceiptScanned }) => {
@@ -14,20 +14,20 @@ export const ReceiptDropzone: React.FC<ReceiptDropzoneProps> = ({ onReceiptScann
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const handleFileUpload = async (file: File) => {
-    if (!file.type.startsWith('image/')) {
-      setErrorMsg('Please upload a valid image file (JPG, PNG, WebP).');
+    if (!file.type.startsWith('image/') && file.type !== 'application/pdf') {
+      setErrorMsg('Please upload a JPG, PNG, WebP or PDF receipt.');
       return;
     }
 
     setIsScanning(true);
     setErrorMsg(null);
-    setScanStatus('Scanning receipt with PaddleOCR...');
+    setScanStatus('Uploading receipt...');
 
     try {
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await fetch('/api/v1/ocr/scan', {
+      const response = await fetch('/api/v1/finance/receipts/upload', {
         method: 'POST',
         body: formData,
         credentials: 'include',
@@ -38,14 +38,16 @@ export const ReceiptDropzone: React.FC<ReceiptDropzoneProps> = ({ onReceiptScann
         throw new Error(errJson.error || `Server responded with status ${response.status}`);
       }
 
-      const data: OcrScanResponse = await response.json();
-      const extracted = data.structured || {};
+      const data: ReceiptUploadResponse = await response.json();
+      const extracted = data.extracted || {};
 
-      onReceiptScanned(extracted, data.raw_text);
+      onReceiptScanned(extracted, data.receipt_storage_key);
       setScanStatus(
         extracted.merchant
           ? `Scanned: ${extracted.merchant} (${extracted.amount ? `${extracted.amount} ` : ''}${extracted.currency || ''})`
-          : 'Receipt scanned! Form populated below.'
+          : data.extracted
+            ? 'Receipt saved and scanned. Form populated below.'
+            : 'Receipt saved. Enter the details below.'
       );
       setTimeout(() => setScanStatus(null), 5000);
     } catch (err: any) {
@@ -100,7 +102,7 @@ export const ReceiptDropzone: React.FC<ReceiptDropzoneProps> = ({ onReceiptScann
         <input
           ref={fileInputRef}
           type="file"
-          accept="image/jpeg,image/png,image/webp"
+          accept="image/jpeg,image/png,image/webp,application/pdf"
           className="hidden"
           onChange={(e) => {
             if (e.target.files && e.target.files.length > 0) {
@@ -109,7 +111,7 @@ export const ReceiptDropzone: React.FC<ReceiptDropzoneProps> = ({ onReceiptScann
           }}
         />
 
-        <span className="text-[10px] font-mono text-neutral-400">JPG, PNG, WebP</span>
+        <span className="text-[10px] font-mono text-neutral-400">JPG, PNG, WebP, PDF</span>
       </div>
 
       {scanStatus && (
