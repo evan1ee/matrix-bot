@@ -3,6 +3,8 @@ use sqlx::PgPool;
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
 use crate::domain::events::SystemEvent;
+use crate::domain::jobs::NewJob;
+use crate::domain::knowledge::search::KnowledgeItemType;
 use crate::domain::life::DayLogInput;
 use crate::domain::life::{
     normalize_mood, validate_date_str, DayActivityResponse, LifeDayLog, LifeError, LifeHorizonDay,
@@ -10,7 +12,7 @@ use crate::domain::life::{
 };
 use crate::infrastructure::postgres::read_models::life as life_read;
 use crate::infrastructure::postgres::repositories::life as life_repo;
-use crate::infrastructure::postgres::repositories::outbox;
+use crate::infrastructure::postgres::repositories::{jobs, knowledge, outbox};
 
 impl From<LifeError> for AppError {
     fn from(err: LifeError) -> Self {
@@ -88,6 +90,13 @@ impl LifeService {
             life_repo::upsert_day_log(&mut *tx, owner_id, log_date, DayLogInput { mood, ..input })
                 .await?;
         outbox::publish(&mut tx, &SystemEvent::LifeDayLogged(log.clone())).await?;
+        let job = NewJob::knowledge_embed_item_versioned(
+            *owner_id,
+            KnowledgeItemType::Journal,
+            log.id,
+            &log.updated_at,
+        );
+        jobs::enqueue(&mut *tx, &job).await?;
         tx.commit().await?;
         Ok(log)
     }
@@ -117,7 +126,15 @@ impl LifeService {
 
         let mut tx = self.pool.begin().await?;
         let deleted = life_repo::delete_day_log(&mut *tx, owner_id, log_date).await?;
-        if deleted {
+        if let Some(id) = deleted {
+            // Same transaction as the row delete, or search keeps returning a ghost.
+            knowledge::delete_embeddings_for_item(
+                &mut *tx,
+                owner_id,
+                KnowledgeItemType::Journal.as_str(),
+                id,
+            )
+            .await?;
             outbox::publish(
                 &mut tx,
                 &SystemEvent::LifeDayCleared {
@@ -128,7 +145,7 @@ impl LifeService {
             .await?;
         }
         tx.commit().await?;
-        Ok(deleted)
+        Ok(deleted.is_some())
     }
 
     pub async fn get_year_view(
@@ -308,5 +325,72 @@ mod tests {
                 "LifeDayCleared"
             ]
         );
+    }
+
+    fn day(mood: &'static str) -> DayLogInput<'static> {
+        DayLogInput {
+            mood,
+            weather: None,
+            activities: None,
+            note: Some("A note"),
+            time_allocation: None,
+        }
+    }
+
+    /// Given a day log, When it is written and then edited, Then each version
+    /// has its own embedding job; When deleted, Then its embeddings go too.
+    #[tokio::test]
+    async fn day_log_embedding_jobs_and_cleanup() {
+        let pool = test_pool().await;
+        run_migrations_unlocked(&pool).await;
+        seed_accounts(&pool, &["life_embed_alice", "life_embed_bob"]).await;
+        let alice = AccountId::from_seed("life_embed_alice");
+        let bob = AccountId::from_seed("life_embed_bob");
+        let svc = LifeService::new(pool.clone());
+        let key = |l: &LifeDayLog| format!("journal:{}:{}", l.id, l.updated_at);
+        let queued = |k: String| {
+            let pool = pool.clone();
+            async move {
+                jobs::status_by_key(&pool, "knowledge.embed_item", &k)
+                    .await
+                    .unwrap()
+                    .is_some()
+            }
+        };
+
+        let first = svc
+            .upsert_day_log(&alice, "2026-10-12", day("good"))
+            .await
+            .unwrap();
+        assert!(queued(key(&first)).await);
+        let second = svc
+            .upsert_day_log(&alice, "2026-10-12", day("bad"))
+            .await
+            .unwrap();
+        assert_ne!(key(&first), key(&second));
+        assert!(queued(key(&second)).await);
+
+        knowledge::upsert_embedding_chunk(
+            &pool,
+            &alice,
+            "journal",
+            first.id,
+            0,
+            "snippet",
+            &vec![0.0; 384],
+            "model-a",
+        )
+        .await
+        .unwrap();
+        let chunks = || async {
+            knowledge::list_chunks(&pool, &alice, "journal", first.id)
+                .await
+                .unwrap()
+                .len()
+        };
+        assert!(!svc.delete_day_log(&bob, "2026-10-12").await.unwrap());
+        assert_eq!(chunks().await, 1);
+        assert!(svc.delete_day_log(&alice, "2026-10-12").await.unwrap());
+        assert_eq!(chunks().await, 0);
     }
 }

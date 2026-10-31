@@ -157,6 +157,14 @@ impl BookmarkService {
         if !deleted {
             return Err(AppError::NotFound("Bookmark not found".to_string()));
         }
+        // Same transaction as the row delete, or search keeps returning a ghost.
+        repositories::knowledge::delete_embeddings_for_item(
+            &mut *tx,
+            owner,
+            KnowledgeItemType::Bookmark.as_str(),
+            id,
+        )
+        .await?;
 
         outbox::publish(
             &mut tx,
@@ -191,6 +199,84 @@ mod tests {
             .await;
         let service = BookmarkService::new(pool);
         (service, owner)
+    }
+
+    async fn plant_chunk(service: &BookmarkService, owner: &AccountId, id: i64) {
+        repositories::knowledge::upsert_embedding_chunk(
+            &service.pool,
+            owner,
+            "bookmark",
+            id,
+            0,
+            "snippet",
+            &vec![0.0; 384],
+            "model-a",
+        )
+        .await
+        .unwrap();
+    }
+
+    async fn chunk_count(service: &BookmarkService, owner: &AccountId, id: i64) -> usize {
+        repositories::knowledge::list_chunks(&service.pool, owner, "bookmark", id)
+            .await
+            .unwrap()
+            .len()
+    }
+
+    /// Given an embedded bookmark, When it is deleted, Then its embeddings go with it.
+    #[tokio::test]
+    async fn delete_removes_embeddings() {
+        let (service, owner) = setup().await;
+        let b = service
+            .create(
+                &owner,
+                "https://rust-lang.org",
+                None,
+                None,
+                ExtractedMetadata {
+                    title: "Rust".to_string(),
+                    domain: "rust-lang.org".to_string(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        plant_chunk(&service, &owner, b.id).await;
+
+        service.delete(&owner, b.id).await.unwrap();
+
+        assert_eq!(chunk_count(&service, &owner, b.id).await, 0);
+    }
+
+    /// Given another account's bookmark, When a stranger deletes its id, Then
+    /// NotFound is returned and the owner's embeddings survive.
+    #[tokio::test]
+    async fn delete_by_stranger_keeps_embeddings() {
+        let (service, owner) = setup().await;
+        let stranger = crate::application::AppServices::new(&service.pool)
+            .identity
+            .provision_matrix_for_test("@bob:mbm.one")
+            .await;
+        let b = service
+            .create(
+                &owner,
+                "https://rust-lang.org",
+                None,
+                None,
+                ExtractedMetadata {
+                    title: "Rust".to_string(),
+                    domain: "rust-lang.org".to_string(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        plant_chunk(&service, &owner, b.id).await;
+
+        let err = service.delete(&stranger, b.id).await.unwrap_err();
+
+        assert!(matches!(err, AppError::NotFound(_)));
+        assert_eq!(chunk_count(&service, &owner, b.id).await, 1);
     }
 
     #[tokio::test]

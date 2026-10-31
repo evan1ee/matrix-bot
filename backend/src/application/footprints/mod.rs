@@ -14,6 +14,8 @@ use crate::domain::footprints::{
     calculate_stay_duration, CreateFootprint, Footprint, FootprintsSummary, UpdateFootprint,
     MAX_NOTE_LEN, MAX_TITLE_LEN,
 };
+use crate::domain::jobs::NewJob;
+use crate::domain::knowledge::search::KnowledgeItemType;
 use crate::infrastructure::postgres::repositories::{self, outbox};
 
 #[derive(Debug, Clone)]
@@ -124,6 +126,7 @@ impl FootprintService {
         let mut tx = self.pool.begin().await?;
         let created = repositories::footprints::create(&mut *tx, owner, &cmd).await?;
         outbox::publish(&mut tx, &SystemEvent::FootprintCreated(created.clone())).await?;
+        repositories::jobs::enqueue(&mut *tx, &embed_job(owner, &created)).await?;
         tx.commit().await?;
         Ok(created)
     }
@@ -241,6 +244,7 @@ impl FootprintService {
         let updated =
             updated.ok_or_else(|| AppError::NotFound(format!("Footprint #{id} not found")))?;
         outbox::publish(&mut tx, &SystemEvent::FootprintUpdated(updated.clone())).await?;
+        repositories::jobs::enqueue(&mut *tx, &embed_job(owner, &updated)).await?;
         tx.commit().await?;
         Ok(updated)
     }
@@ -251,6 +255,14 @@ impl FootprintService {
         if !deleted {
             return Err(AppError::NotFound(format!("Footprint #{id} not found")));
         }
+        // Same transaction as the row delete, or search keeps returning a ghost.
+        repositories::knowledge::delete_embeddings_for_item(
+            &mut *tx,
+            owner,
+            KnowledgeItemType::Footprint.as_str(),
+            id,
+        )
+        .await?;
         outbox::publish(
             &mut tx,
             &SystemEvent::FootprintDeleted {
@@ -267,6 +279,17 @@ impl FootprintService {
         let stats = repositories::footprints::summary_stats(&self.pool, owner).await?;
         Ok(stats)
     }
+}
+
+/// Embedding job keyed by the footprint's version, so an edit is not swallowed
+/// by the finished job of the version before it.
+fn embed_job(owner: &AccountId, footprint: &Footprint) -> NewJob {
+    NewJob::knowledge_embed_item_versioned(
+        *owner,
+        KnowledgeItemType::Footprint,
+        footprint.id,
+        &footprint.updated_at.to_rfc3339(),
+    )
 }
 
 /// Parses a human-typed spend amount into integer minor units.
@@ -458,5 +481,95 @@ mod tests {
                 "FootprintDeleted"
             ]
         );
+    }
+
+    fn input(title: &str) -> CreateFootprintInput {
+        CreateFootprintInput {
+            title: title.to_string(),
+            latitude: 35.0,
+            longitude: 135.7,
+            country: Some("Japan".to_string()),
+            city: None,
+            address: None,
+            arrival_date: "2026-05-01".to_string(),
+            departure_date: None,
+            spend_amount: None,
+            spend_currency: Some("USD".to_string()),
+            rating: None,
+            category: None,
+            note: None,
+        }
+    }
+
+    async fn embed_status(pool: &PgPool, fp: &Footprint) -> Option<crate::domain::jobs::JobStatus> {
+        let key = format!("footprint:{}:{}", fp.id, fp.updated_at.to_rfc3339());
+        repositories::jobs::status_by_key(pool, "knowledge.embed_item", &key)
+            .await
+            .unwrap()
+    }
+
+    /// Given a footprint, When it is created then edited, Then each version has
+    /// its own embedding job.
+    #[tokio::test]
+    async fn create_and_update_enqueue_versioned_embed_jobs() {
+        let pool = test_pool().await;
+        run_migrations_unlocked(&pool).await;
+        seed_accounts(&pool, &["fp_embed_alice"]).await;
+        let alice = AccountId::from_seed("fp_embed_alice");
+        let svc = FootprintService::new(pool.clone(), SettingsService::new(pool.clone()));
+
+        let created = svc.create(&alice, input("Kyoto")).await.unwrap();
+        assert!(embed_status(&pool, &created).await.is_some());
+
+        let updated = svc
+            .update(
+                &alice,
+                created.id,
+                UpdateFootprintInput {
+                    title: Some("Kyoto Station".to_string()),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+        assert_ne!(created.updated_at, updated.updated_at);
+        assert!(embed_status(&pool, &updated).await.is_some());
+    }
+
+    /// Given an embedded footprint, When a stranger deletes it, Then the
+    /// embeddings survive; When the owner deletes it, Then they are gone.
+    #[tokio::test]
+    async fn delete_removes_embeddings_only_for_the_owner() {
+        let pool = test_pool().await;
+        run_migrations_unlocked(&pool).await;
+        seed_accounts(&pool, &["fp_clean_alice", "fp_clean_bob"]).await;
+        let alice = AccountId::from_seed("fp_clean_alice");
+        let bob = AccountId::from_seed("fp_clean_bob");
+        let svc = FootprintService::new(pool.clone(), SettingsService::new(pool.clone()));
+        let fp = svc.create(&alice, input("Kyoto")).await.unwrap();
+        repositories::knowledge::upsert_embedding_chunk(
+            &pool,
+            &alice,
+            "footprint",
+            fp.id,
+            0,
+            "snippet",
+            &vec![0.0; 384],
+            "model-a",
+        )
+        .await
+        .unwrap();
+        let chunks = |pool: PgPool| async move {
+            repositories::knowledge::list_chunks(&pool, &alice, "footprint", fp.id)
+                .await
+                .unwrap()
+                .len()
+        };
+
+        assert!(svc.delete(&bob, fp.id).await.is_err());
+        assert_eq!(chunks(pool.clone()).await, 1);
+
+        svc.delete(&alice, fp.id).await.unwrap();
+        assert_eq!(chunks(pool.clone()).await, 0);
     }
 }

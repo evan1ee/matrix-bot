@@ -179,23 +179,26 @@ pub async fn update_time_allocation(
     })
 }
 
+/// Deletes the day's log and returns its id, so the caller can drop the
+/// derived embeddings in the same transaction.
 pub async fn delete_day_log(
     conn: impl sqlx::PgExecutor<'_>,
     owner_id: &AccountId,
     log_date: &str,
-) -> Result<bool, sqlx::Error> {
-    let result = sqlx::query!(
+) -> Result<Option<i64>, sqlx::Error> {
+    let row = sqlx::query!(
         r#"
         DELETE FROM life_day_logs
         WHERE owner_id = $1 AND log_date = $2
+        RETURNING id
         "#,
         owner_id.as_uuid(),
         log_date
     )
-    .execute(conn)
+    .fetch_optional(conn)
     .await?;
 
-    Ok(result.rows_affected() > 0)
+    Ok(row.map(|r| r.id))
 }
 
 pub async fn get_year_view(
@@ -424,9 +427,19 @@ mod tests {
         let year = get_year_view(&pool, &alice, 2026).await.expect("year view");
         assert_eq!(year.logs.len(), 1);
 
-        assert!(delete_day_log(&pool, &alice, "2026-03-10")
-            .await
-            .expect("delete"));
+        // Bob cannot delete Alice's log; Alice gets the deleted row's id back.
+        assert_eq!(
+            delete_day_log(&pool, &bob, "2026-03-10")
+                .await
+                .expect("bob delete"),
+            None
+        );
+        assert_eq!(
+            delete_day_log(&pool, &alice, "2026-03-10")
+                .await
+                .expect("delete"),
+            Some(d1.id)
+        );
         assert!(get_day_log(&pool, &alice, "2026-03-10")
             .await
             .expect("get after delete")
