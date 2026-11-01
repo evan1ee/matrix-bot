@@ -465,8 +465,10 @@ mod tests {
         // A zero vector is enough: the merge moves the row by owner and never reads the embedding.
         sqlx::query!("INSERT INTO knowledge_embeddings (owner_id, item_type, item_id, content_snippet, embedding) VALUES ($1, 'note', 1, 'body', array_fill(0::real, ARRAY[384])::vector)", from.as_uuid()).execute(&pool).await.unwrap();
 
+        sqlx::query!("INSERT INTO briefing_audio (owner_id, local_date, storage_key) VALUES ($1, '2026-10-31', 'k')", from.as_uuid()).execute(&pool).await.unwrap();
+
         let preview = MergeService::preview(&pool, &from).await.unwrap();
-        assert_eq!(preview.total(), 26, "one row per owned table");
+        assert_eq!(preview.total(), 27, "one row per owned table");
 
         MergeService::merge(&pool, &from, &into).await.unwrap();
 
@@ -484,6 +486,33 @@ mod tests {
                 .unwrap();
             assert_eq!(arrived, 1, "{table} did not receive its row");
         }
+    }
+
+    /// Given both accounts have a recording for one day, When merged, Then the
+    /// surviving account's recording stays and the merge does not fail.
+    #[tokio::test]
+    async fn test_a_merge_keeps_the_survivors_briefing_recording_on_a_clash() {
+        let pool = db().await;
+        let from = repo_core::create(&pool, "old", STATUS_UNCLAIMED)
+            .await
+            .unwrap();
+        let into = repo_core::create(&pool, "new", STATUS_ACTIVE)
+            .await
+            .unwrap();
+        for (owner, key) in [(&from, "from-key"), (&into, "into-key")] {
+            sqlx::query!("INSERT INTO briefing_audio (owner_id, local_date, storage_key) VALUES ($1, '2026-10-31', $2)", owner.as_uuid(), key).execute(&pool).await.unwrap();
+        }
+
+        MergeService::merge(&pool, &from, &into).await.unwrap();
+
+        let keys = sqlx::query_scalar!(
+            "SELECT storage_key FROM briefing_audio WHERE owner_id = $1",
+            into.as_uuid()
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(keys, ["into-key"]);
     }
 
     #[tokio::test]

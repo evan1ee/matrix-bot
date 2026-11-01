@@ -7,14 +7,16 @@ use async_trait::async_trait;
 use chrono::Utc;
 use tracing::{error, info, warn};
 
-use super::{deliverable, message, parse_payload, Outbound, SendFailure, CHANNEL_RETRY};
+use super::{
+    briefing_audio, deliverable, message, parse_payload, Outbound, SendFailure, CHANNEL_RETRY,
+};
 use crate::application::briefing::BriefingPayload;
 use crate::application::AppServices;
 use crate::domain::accounts::AccountId;
 use crate::domain::channels::{Channel, ConversationAddress};
 use crate::domain::jobs::{BriefingSendPayload, JobType};
 use crate::interface::channels::adapter::ChannelError;
-use crate::interface::channels::message::Target;
+use crate::interface::channels::message::{Attachment, Target};
 use crate::jobs::{JobContext, JobError, JobHandler};
 
 pub struct BriefingSendHandler {
@@ -48,19 +50,19 @@ impl BriefingSendHandler {
         owner: &AccountId,
         address: ConversationAddress,
         briefing: &BriefingPayload,
+        audio: Option<Attachment>,
     ) -> Result<(), ChannelError> {
         self.outbound
             .authorize_delivery(owner, &address)
             .await
             .map_err(ChannelError::Rejected)?;
-        self.outbound
-            .send(message(
-                Target::Conversation(address),
-                &briefing.plain_text,
-                &briefing.html_content,
-            ))
-            .await
-            .map(|_| ())
+        let mut outgoing = message(
+            Target::Conversation(address),
+            &briefing.plain_text,
+            &briefing.html_content,
+        );
+        outgoing.content.attachments.extend(audio);
+        self.outbound.send(outgoing).await.map(|_| ())
     }
 
     /// Sends `briefing` to the account's default channel on demand. Returns
@@ -76,7 +78,7 @@ impl BriefingSendHandler {
         let Some((address, _)) = target else {
             return Ok(false);
         };
-        self.send_to(owner, address, briefing).await?;
+        self.send_to(owner, address, briefing, None).await?;
         Ok(true)
     }
 }
@@ -137,12 +139,19 @@ impl JobHandler for BriefingSendHandler {
             .generate_briefing(&owner, &settings)
             .await
             .map_err(JobError::Retryable)?;
+        let audio = match briefing.audio_script.as_deref() {
+            Some(script) => {
+                briefing_audio::prepare(&self.services, &owner, p.local_date, script).await
+            }
+            None => None,
+        };
         let delivered = self
             .deliver(
                 &owner,
                 room.as_deref(),
                 target.map(|(address, _)| address),
                 &briefing,
+                audio,
             )
             .await?;
         // Frozen: the day is recorded even when the send failed (the old loop
@@ -156,6 +165,7 @@ impl JobHandler for BriefingSendHandler {
                 error!(%owner, error = %err, "Briefing sent but the day could not be recorded");
                 JobError::Permanent(anyhow::anyhow!("record briefing day: {err}"))
             })?;
+        briefing_audio::prune(&self.services, &owner, p.local_date).await;
         info!(%owner, delivered, "Morning briefing completed");
         Ok(())
     }
@@ -171,6 +181,7 @@ impl BriefingSendHandler {
         room: Option<&str>,
         address: Option<ConversationAddress>,
         briefing: &BriefingPayload,
+        audio: Option<Attachment>,
     ) -> Result<bool, JobError> {
         let Some(room) = room else {
             return Ok(false);
@@ -178,7 +189,7 @@ impl BriefingSendHandler {
         let Some(address) = address else {
             return Ok(true);
         };
-        match self.send_to(owner, address, briefing).await {
+        match self.send_to(owner, address, briefing, audio).await {
             Ok(()) => Ok(true),
             Err(err) => match SendFailure::from(err) {
                 SendFailure::Defer => Err(JobError::Unavailable(CHANNEL_RETRY)),
@@ -512,5 +523,133 @@ mod tests {
             sent_events(&f).await,
             ["0 tasks, 0 habits, 0 bills, 0 holdings"]
         );
+    }
+
+    /// Serves `/audio/speech` with `status` and points the TTS setting at it.
+    async fn tts_server(f: &Fixture, status: axum::http::StatusCode) {
+        use crate::domain::config::{SettingKey, SettingValue};
+        let app = axum::Router::new().route(
+            "/audio/speech",
+            axum::routing::post(move || async move { (status, "ogg-bytes") }),
+        );
+        let base = crate::infrastructure::inference::test_support::spawn_server(app).await;
+        f.services
+            .app_config
+            .update_setting(
+                &f.owner,
+                SettingKey::InferenceTtsBaseUrl,
+                SettingValue::String(base),
+            )
+            .await
+            .unwrap();
+    }
+
+    /// Given working TTS, Then the message carries the audio, the recording is
+    /// stored and recorded for the day.
+    #[tokio::test]
+    async fn the_briefing_carries_its_recording() {
+        let f = fixture("acct_brief_audio", true).await;
+        tts_server(&f, axum::http::StatusCode::OK).await;
+        let fake = FakeOutbound::connected();
+        let handler = BriefingSendHandler::new(f.services.clone(), fake.clone());
+        let day = today(&f).await;
+
+        let out = handler.run(&ctx(Some(f.owner)), payload(day)).await;
+
+        assert!(out.is_ok(), "{out:?}");
+        let sent = fake.messages();
+        assert_eq!(sent.len(), 1);
+        let audio = &sent[0].content.attachments;
+        assert_eq!(audio.len(), 1);
+        assert_eq!(
+            audio[0].kind,
+            crate::interface::channels::message::AttachmentKind::Audio
+        );
+        assert_eq!(audio[0].filename, "morning-briefing.ogg");
+        let key = f
+            .services
+            .briefing
+            .audio_key(&f.owner, day)
+            .await
+            .unwrap()
+            .unwrap();
+        let stored = f
+            .services
+            .storage
+            .get(&crate::domain::storage::StorageKey::parse(&key).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(stored.as_ref(), audio[0].bytes.as_slice());
+    }
+
+    /// Given a failing TTS service, Then the text still goes out, the day is
+    /// recorded and no recording exists.
+    #[tokio::test]
+    async fn a_failing_tts_service_costs_only_the_audio() {
+        let f = fixture("acct_brief_tts_down", true).await;
+        tts_server(&f, axum::http::StatusCode::INTERNAL_SERVER_ERROR).await;
+        let fake = FakeOutbound::connected();
+        let handler = BriefingSendHandler::new(f.services.clone(), fake.clone());
+        let day = today(&f).await;
+
+        let out = handler.run(&ctx(Some(f.owner)), payload(day)).await;
+
+        assert!(out.is_ok(), "{out:?}");
+        let sent = fake.messages();
+        assert_eq!(sent.len(), 1);
+        assert!(sent[0].content.attachments.is_empty());
+        assert_eq!(
+            f.services.briefing.audio_key(&f.owner, day).await.unwrap(),
+            None
+        );
+        assert_eq!(last_date(&f).await, Some(ymd(day)));
+    }
+
+    /// Given a recording older than 30 days, When the day's briefing runs,
+    /// Then that recording and its object are gone and a recent one stays.
+    #[tokio::test]
+    async fn old_recordings_are_pruned_by_the_next_briefing() {
+        use crate::domain::storage::{StorageCategory, StorageKey};
+        let f = fixture("acct_brief_prune", true).await;
+        let day = today(&f).await;
+        let old_key = StorageKey::generate(&f.owner, StorageCategory::Audio, "ogg");
+        f.services
+            .storage
+            .put(&old_key, bytes::Bytes::from_static(b"old"), "audio/ogg")
+            .await
+            .unwrap();
+        let old_day = day - Duration::days(31);
+        let recent_day = day - Duration::days(5);
+        f.services
+            .briefing
+            .record_audio(&f.owner, old_day, old_key.as_str())
+            .await
+            .unwrap();
+        f.services
+            .briefing
+            .record_audio(&f.owner, recent_day, "accounts/x/audio/recent.ogg")
+            .await
+            .unwrap();
+        let handler = BriefingSendHandler::new(f.services.clone(), FakeOutbound::connected());
+
+        let out = handler.run(&ctx(Some(f.owner)), payload(day)).await;
+
+        assert!(out.is_ok(), "{out:?}");
+        assert_eq!(
+            f.services
+                .briefing
+                .audio_key(&f.owner, old_day)
+                .await
+                .unwrap(),
+            None
+        );
+        assert!(f.services.storage.get(&old_key).await.is_err());
+        assert!(f
+            .services
+            .briefing
+            .audio_key(&f.owner, recent_day)
+            .await
+            .unwrap()
+            .is_some());
     }
 }

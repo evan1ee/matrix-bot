@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO briefing_audio (owner_id, local_date, storage_key) VALUES ($1, '2026-10-31', $2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e866f26d36aa9b818755922292e8d0a656106733fb2dcf5606fae7d5ee52d47d"
+}

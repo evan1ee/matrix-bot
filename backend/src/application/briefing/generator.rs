@@ -2,10 +2,12 @@ use crate::db::DbPool;
 use anyhow::Result;
 use chrono::{DateTime, Duration, LocalResult, TimeZone, Utc};
 
+use super::audio_script::build_audio_script;
 use super::models::{BriefingPayload, BriefingSummary, TickerPerformance};
 use super::ticker::{fetch_all_tickers_performance, format_ticker_html, format_ticker_plain};
 use crate::application::finance::FinanceService;
 use crate::domain::accounts::AccountId;
+use crate::domain::briefing::BriefingAudioScript;
 use crate::domain::finance::budget::{BudgetState, BudgetStatus};
 use crate::domain::finance::money::format_amount;
 use crate::domain::habits::HabitWithStatus;
@@ -94,12 +96,22 @@ pub async fn generate_briefing(
         now_utc,
     );
 
+    let audio_script = build_audio_script(
+        now_local.date_naive(),
+        &todos,
+        &habits,
+        &upcoming_bills,
+        budgets.len(),
+    )
+    .map(BriefingAudioScript::into_string);
+
     Ok(BriefingPayload {
         owner_id: owner_id.to_string(),
         html_content,
         plain_text,
         summary,
         tickers,
+        audio_script,
     })
 }
 

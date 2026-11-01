@@ -18,6 +18,7 @@ use crate::jobs::{JobError, JobHandler};
 
 pub mod agent;
 pub mod briefing;
+mod briefing_audio;
 pub mod budgets;
 pub(crate) mod dm;
 pub mod knowledge;

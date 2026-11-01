@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 
-mod audio;
+pub(super) mod audio;
 mod resume;
 
 use super::{deliverable, message, parse_payload, Outbound};

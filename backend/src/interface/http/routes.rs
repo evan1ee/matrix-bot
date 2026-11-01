@@ -132,6 +132,7 @@ fn routes_account() -> Router<auth::ApiState> {
 fn routes_productivity() -> Router<auth::ApiState> {
     Router::new()
         .route("/briefing/trigger", post(briefing::trigger_briefing))
+        .route("/briefing/audio", get(briefing::briefing_audio))
         .route("/todos", get(todos::list_todos).post(todos::create_todo))
         // Static `tags` and `order` segments outrank the `:id` / `:step_id` params in
         // matchit; `static_segments_win_over_id_params` pins that down.

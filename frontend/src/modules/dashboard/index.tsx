@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { CheckSquare, Clock, TrendingUp, Receipt, Plus } from 'lucide-react';
 import { FrontendModule } from '../../core/types';
 import { fetchApi } from '../../core/apiClient';
+import { BriefingCard } from './BriefingCard';
 
 interface TodoListResponse {
   items: Array<{ id: number }>;
@@ -138,6 +139,8 @@ const DashboardView = ({ onNavigate }: { onNavigate?: (moduleId: string) => void
           onClick={() => onNavigate?.('recurring_bills')}
         />
       </div>
+
+      <BriefingCard />
 
       {/* Quick Actions */}
       <div className="flex flex-wrap gap-2.5 pt-2">

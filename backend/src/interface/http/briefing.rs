@@ -1,9 +1,21 @@
-use axum::{extract::State, Json};
+use std::time::Duration;
+
+use axum::{
+    extract::{Query, State},
+    Json,
+};
+use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::domain::storage::StorageKey;
 use crate::interface::http::auth::{ApiState, AuthUser};
 use crate::interface::http::error::ApiError;
+#[allow(
+    unused_imports,
+    reason = "named only inside #[utoipa::path] attributes, where it fixes the OpenAPI schema name; a path-qualified body would rename it"
+)]
+use crate::interface::http::error::ApiErrorResponse;
 use crate::interface::jobs::briefing::BriefingSendHandler;
 use crate::interface::jobs::deliverable;
 
@@ -144,6 +156,60 @@ pub async fn trigger_briefing(
     Ok(Json(BriefingPayload::from(payload)))
 }
 
+const AUDIO_URL_TTL_SECS: u64 = 3600;
+
+#[derive(Debug, Deserialize, utoipa::IntoParams)]
+pub struct BriefingAudioQuery {
+    /// The briefing's local date, `YYYY-MM-DD`.
+    date: String,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct BriefingAudioResponse {
+    pub url: String,
+    pub expires_in_seconds: i64,
+}
+
+/// Returns a link to the spoken version of the caller's briefing for a day.
+#[utoipa::path(
+    get,
+    path = "/api/v1/briefing/audio",
+    params(BriefingAudioQuery),
+    responses(
+        (status = 200, description = "Presigned link to the recording", body = BriefingAudioResponse),
+        (status = 400, description = "Malformed date", body = ApiErrorResponse),
+        (status = 404, description = "No recording for that day", body = ApiErrorResponse),
+        (status = 401, description = "Unauthorized", body = ApiErrorResponse)
+    ),
+    security(("session_cookie" = []))
+)]
+pub async fn briefing_audio(
+    State(state): State<ApiState>,
+    user: AuthUser,
+    Query(query): Query<BriefingAudioQuery>,
+) -> Result<Json<BriefingAudioResponse>, ApiError> {
+    let date = NaiveDate::parse_from_str(&query.date, "%Y-%m-%d")
+        .map_err(|_| ApiError::bad_request("date must be YYYY-MM-DD"))?;
+    let key = state
+        .services
+        .briefing
+        .audio_key(&user.account_id, date)
+        .await?
+        .and_then(|raw| StorageKey::parse(&raw).ok())
+        .filter(|key| key.account_id() == user.account_id)
+        .ok_or_else(|| ApiError::not_found("No briefing recording for that day"))?;
+    let url = state
+        .services
+        .storage
+        .get_presigned_url(&key, Duration::from_secs(AUDIO_URL_TTL_SECS))
+        .await
+        .map_err(|e| ApiError::internal(format!("presign failed: {e}")))?;
+    Ok(Json(BriefingAudioResponse {
+        url,
+        expires_in_seconds: AUDIO_URL_TTL_SECS as i64,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -156,7 +222,7 @@ mod tests {
     async fn state() -> ApiState {
         let pool = crate::db::pool::test_pool().await;
         crate::db::migrate::run_migrations_unlocked(&pool).await;
-        crate::db::pool::seed_accounts(&pool, &["acct_alice"]).await;
+        crate::db::pool::seed_accounts(&pool, &["acct_alice", "acct_bob"]).await;
         ApiState::new(
             crate::db::Database { pool },
             None,
@@ -213,5 +279,57 @@ mod tests {
         let res = trigger_briefing(State(state), user).await.unwrap();
         assert!(res.html_content.contains("早安简报"));
         assert_eq!(up.sent().len(), 1);
+    }
+
+    #[tokio::test]
+    async fn briefing_audio_returns_a_link_only_for_the_owners_recording() {
+        let state = state().await;
+        let alice = AuthUser::named_seed("@alice:example.org", "acct_alice");
+        let bob = AuthUser::named_seed("@bob:example.org", "acct_bob");
+        let date = NaiveDate::from_ymd_opt(2026, 10, 31).unwrap();
+        let key = StorageKey::generate(
+            &alice.account_id,
+            crate::domain::storage::StorageCategory::Audio,
+            "ogg",
+        );
+        state
+            .services
+            .storage
+            .put(&key, bytes::Bytes::from_static(b"ogg"), "audio/ogg")
+            .await
+            .unwrap();
+        state
+            .services
+            .briefing
+            .record_audio(&alice.account_id, date, key.as_str())
+            .await
+            .unwrap();
+        let query = || {
+            Query(BriefingAudioQuery {
+                date: "2026-10-31".into(),
+            })
+        };
+
+        let ok = briefing_audio(State(state.clone()), alice.clone(), query())
+            .await
+            .unwrap();
+        assert_eq!(ok.expires_in_seconds, 3600);
+        assert!(ok.url.contains(key.filename()));
+
+        let other = briefing_audio(State(state.clone()), bob, query())
+            .await
+            .unwrap_err();
+        assert_eq!(other.status, axum::http::StatusCode::NOT_FOUND);
+
+        let bad = briefing_audio(
+            State(state),
+            alice,
+            Query(BriefingAudioQuery {
+                date: "tomorrow".into(),
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert_eq!(bad.status, axum::http::StatusCode::BAD_REQUEST);
     }
 }

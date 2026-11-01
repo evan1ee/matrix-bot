@@ -5,11 +5,13 @@ use crate::application::settings::SettingsService;
 use crate::application::AppError;
 use crate::db::DbPool;
 use crate::domain::accounts::AccountId;
+use crate::domain::briefing::AUDIO_RETENTION_DAYS;
 use crate::domain::events::SystemEvent;
 use crate::domain::jobs::NewJob;
 use crate::domain::settings::{briefing_due_date, UserSettings};
 use crate::infrastructure::postgres::repositories::{self, outbox};
 
+pub mod audio_script;
 pub mod generator;
 pub mod models;
 pub mod ticker;
@@ -77,6 +79,43 @@ impl BriefingService {
         outbox::publish(&mut tx, &sent_event(owner, date, summary)).await?;
         tx.commit().await?;
         Ok(())
+    }
+
+    /// The stored recording of `local_date`'s briefing, if one was kept.
+    pub async fn audio_key(
+        &self,
+        owner: &AccountId,
+        local_date: NaiveDate,
+    ) -> Result<Option<String>, AppError> {
+        Ok(repositories::briefing_audio::find_key(&self.pool, owner, local_date).await?)
+    }
+
+    /// Points `local_date` at the stored recording `key`. Returns the key of
+    /// the recording it replaced, so the caller can delete that object.
+    pub async fn record_audio(
+        &self,
+        owner: &AccountId,
+        local_date: NaiveDate,
+        key: &str,
+    ) -> Result<Option<String>, AppError> {
+        let mut tx = self.pool.begin().await?;
+        let previous = repositories::briefing_audio::find_key(&mut *tx, owner, local_date)
+            .await?
+            .filter(|old| old != key);
+        repositories::briefing_audio::upsert(&mut *tx, owner, local_date, key).await?;
+        tx.commit().await?;
+        Ok(previous)
+    }
+
+    /// Forgets the owner's recordings older than the retention window and
+    /// returns their keys for the caller to delete from storage.
+    pub async fn prune_audio(
+        &self,
+        owner: &AccountId,
+        today: NaiveDate,
+    ) -> Result<Vec<String>, AppError> {
+        let cutoff = today - chrono::Duration::days(AUDIO_RETENTION_DAYS);
+        Ok(repositories::briefing_audio::delete_before(&self.pool, owner, cutoff).await?)
     }
 
     /// Announces an on-demand briefing (REST trigger, `!briefing`) to the
@@ -224,6 +263,7 @@ mod tests {
             plain_text: String::new(),
             summary: summary(),
             tickers: Vec::new(),
+            audio_script: None,
         };
 
         f.services

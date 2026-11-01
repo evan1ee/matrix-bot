@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO briefing_audio (owner_id, local_date, storage_key) VALUES ($1, $2, $3) ON CONFLICT (owner_id, local_date) DO UPDATE SET storage_key = EXCLUDED.storage_key, created_at = now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Date",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "887a31496d270b4320135a831f8d91f0fb5e61aae6a88e9d4909ad4055e25be9"
+}

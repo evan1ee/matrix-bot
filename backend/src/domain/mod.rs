@@ -6,6 +6,7 @@
 pub mod accounts;
 pub mod agent;
 pub mod bookmarks;
+pub mod briefing;
 pub mod calendar;
 pub mod channels;
 pub mod chat;

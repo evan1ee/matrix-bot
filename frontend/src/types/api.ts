@@ -979,6 +979,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/briefing/audio": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Returns a link to the spoken version of the caller's briefing for a day. */
+        get: operations["briefing_audio"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/briefing/trigger": {
         parameters: {
             query?: never;
@@ -2694,6 +2711,11 @@ export interface components {
             total_count: number;
             /** Format: int64 */
             unread_count: number;
+        };
+        BriefingAudioResponse: {
+            /** Format: int64 */
+            expires_in_seconds: number;
+            url: string;
         };
         /** @description Formatted briefing payload ready for Matrix delivery and REST preview. */
         BriefingPayload: {
@@ -6839,6 +6861,56 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Bookmark"];
+                };
+            };
+        };
+    };
+    briefing_audio: {
+        parameters: {
+            query: {
+                /** @description The briefing's local date, `YYYY-MM-DD`. */
+                date: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Presigned link to the recording */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BriefingAudioResponse"];
+                };
+            };
+            /** @description Malformed date */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description Unauthorized */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
+                };
+            };
+            /** @description No recording for that day */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorResponse"];
                 };
             };
         };
