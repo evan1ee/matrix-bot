@@ -29,10 +29,10 @@ interface UserProfileResponse {
   avatar_url?: string | null;
 }
 
-type NavItem = { id: string; label: string; icon: LucideIcon };
-type NavGroup = { title: string; items: NavItem[] };
+export type NavItem = { id: string; label: string; icon: LucideIcon };
+export type NavGroup = { title: string; items: NavItem[] };
 
-const NAV_GROUPS: NavGroup[] = [
+export const NAV_GROUPS: NavGroup[] = [
   {
     title: 'Productivity',
     items: [
