@@ -86,6 +86,48 @@ pub async fn resolve_dangling(
     Ok(())
 }
 
+/// Re-points every dangling link of `owner` whose title now matches a note.
+/// Run after a delete: the target's `ON DELETE SET NULL` leaves its links
+/// dangling even when another note carries the same title.
+pub async fn resolve_all_dangling(
+    executor: impl PgExecutor<'_>,
+    owner: &AccountId,
+) -> Result<(), sqlx::Error> {
+    sqlx::query!(
+        r#"
+        UPDATE knowledge_note_links l
+        SET target_note_id = (
+            SELECT n.id FROM notes n
+             WHERE n.owner_id = l.owner_id AND LOWER(n.title) = LOWER(l.target_title)
+               AND n.id <> l.source_note_id
+             ORDER BY n.id LIMIT 1)
+        WHERE l.owner_id = $1 AND l.target_note_id IS NULL
+          AND EXISTS (
+            SELECT 1 FROM notes n
+             WHERE n.owner_id = l.owner_id AND LOWER(n.title) = LOWER(l.target_title)
+               AND n.id <> l.source_note_id)
+        "#,
+        owner.as_uuid()
+    )
+    .execute(executor)
+    .await?;
+    Ok(())
+}
+
+/// Serializes link maintenance per owner for the rest of the transaction, so
+/// two notes that reference each other and are written at once each see the
+/// other's committed row.
+pub async fn lock_owner(
+    conn: &mut sqlx::PgConnection,
+    owner: &AccountId,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(format!("note_links:{owner}"))
+        .execute(conn)
+        .await?;
+    Ok(())
+}
+
 /// After `note` was renamed to `new_title`: links that pointed at it under the
 /// old title are re-resolved against the owner's notes (another note with that
 /// title, else dangling).

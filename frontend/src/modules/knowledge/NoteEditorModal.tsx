@@ -10,6 +10,7 @@ import { NoteLinksPanel } from './NoteLinksPanel';
 import {
   activeWikiQuery,
   completeWikiLink,
+  isLinkableTitle,
   linkifyWikiLinks,
   titleKey,
   wikiLinkTitle,
@@ -65,6 +66,10 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
   const [previewTab, setPreviewTab] = useState<'write' | 'preview'>('write');
   const [error, setError] = useState<string | null>(null);
 
+  // What the draft was seeded with, to tell unsaved edits from a clean draft.
+  const [seed, setSeed] = useState({ title: '', content: '', tags: '', noteType: 'note' });
+  const [pendingOpenId, setPendingOpenId] = useState<number | null>(null);
+
   const [caret, setCaret] = useState(0);
   const [suggestionIndex, setSuggestionIndex] = useState(0);
   const [suggestionsDismissed, setSuggestionsDismissed] = useState(false);
@@ -79,16 +84,33 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
   const wikiMatches = useNotes({ archived: false, search: wiki?.query, enabled: wiki !== null });
   const suggestions =
     wiki && !suggestionsDismissed
-      ? (wikiMatches.data ?? []).filter((n) => n.id !== noteId).slice(0, MAX_SUGGESTIONS)
+      ? (wikiMatches.data ?? [])
+          .filter((n) => n.id !== noteId && isLinkableTitle(n.title))
+          .slice(0, MAX_SUGGESTIONS)
       : [];
+  const listboxId = 'note-wiki-suggestions';
   const isEditing = Boolean(initialNote) || isLoading || loadError !== null;
   const awaitingNote = isEditing && !initialNote;
 
+  const isDirty =
+    title !== seed.title ||
+    content !== seed.content ||
+    tagsInput !== seed.tags ||
+    noteType !== seed.noteType;
+
   const applyNote = (note: Note | null) => {
-    setTitle(note?.title ?? '');
-    setContent(note?.content ?? '');
-    setTagsInput(note ? note.tags.map((t) => `#${t}`).join(' ') : '');
-    setNoteType((note?.note_type as NoteTypeValue | undefined) ?? 'note');
+    const next = {
+      title: note?.title ?? '',
+      content: note?.content ?? '',
+      tags: note ? note.tags.map((t) => `#${t}`).join(' ') : '',
+      noteType: (note?.note_type as NoteTypeValue | undefined) ?? 'note',
+    };
+    setSeed(next);
+    setTitle(next.title);
+    setContent(next.content);
+    setTagsInput(next.tags);
+    setNoteType(next.noteType);
+    setPendingOpenId(null);
     setBaseHash(note?.content_hash ?? null);
     setConflict(false);
     setError(null);
@@ -180,6 +202,13 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
     }
   };
 
+  /** Opening another note replaces the draft, so unsaved edits ask first. */
+  const requestOpenNote = (id: number) => {
+    if (!onOpenNote) return;
+    if (isDirty) setPendingOpenId(id);
+    else onOpenNote(id);
+  };
+
   const pickSuggestion = (title: string) => {
     if (!wiki) return;
     const next = completeWikiLink(content, wiki, caret, title);
@@ -215,7 +244,7 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
     if (title === null) return;
     e.preventDefault();
     const target = noteLinks.data?.outgoing.find((l) => titleKey(l.title) === titleKey(title));
-    if (target?.note_id != null) onOpenNote?.(target.note_id);
+    if (target?.note_id != null) requestOpenNote(target.note_id);
   };
 
   const renderedPreview = () => {
@@ -278,6 +307,31 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
                   >
                     {isReloading ? 'Reloading...' : 'Reload'}
                   </button>
+                </div>
+              )}
+
+              {pendingOpenId !== null && (
+                <div
+                  role="alert"
+                  className="flex items-center justify-between gap-3 p-3 text-xs bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-900 rounded-md"
+                >
+                  <span>Discard your unsaved changes and open the other note?</span>
+                  <div className="flex shrink-0 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setPendingOpenId(null)}
+                      className="px-2.5 py-1 font-medium rounded-md border border-amber-300 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors"
+                    >
+                      Keep editing
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onOpenNote?.(pendingOpenId)}
+                      className="px-2.5 py-1 font-medium rounded-md border border-amber-300 dark:border-amber-800 hover:bg-amber-100 dark:hover:bg-amber-900/40 transition-colors"
+                    >
+                      Discard and open
+                    </button>
+                  </div>
                 </div>
               )}
 
@@ -399,12 +453,22 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
                         setSuggestionsDismissed(false);
                       }}
                       onKeyDown={handleContentKeyDown}
+                      role="combobox"
+                      aria-autocomplete="list"
+                      aria-expanded={suggestions.length > 0}
+                      aria-controls={suggestions.length > 0 ? listboxId : undefined}
+                      aria-activedescendant={
+                        suggestions.length > 0
+                          ? `${listboxId}-${Math.min(suggestionIndex, suggestions.length - 1)}`
+                          : undefined
+                      }
                       onKeyUp={(e) => setCaret(e.currentTarget.selectionStart)}
                       onClick={(e) => setCaret(e.currentTarget.selectionStart)}
                       className="w-full px-3 py-2 text-sm bg-neutral-50 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 rounded-md text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 focus:outline-hidden focus:ring-2 focus:ring-neutral-400 dark:focus:ring-neutral-600 font-mono transition resize-y"
                     />
                     {suggestions.length > 0 && (
                       <ul
+                        id={listboxId}
                         role="listbox"
                         aria-label="Link to note"
                         data-testid="wiki-suggestions"
@@ -413,24 +477,21 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
                         {suggestions.map((note, i) => (
                           <li
                             key={note.id}
+                            id={`${listboxId}-${i}`}
                             role="option"
                             aria-selected={i === suggestionIndex}
+                            // Mouse-down keeps the textarea focused (and its caret) while picking.
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              pickSuggestion(note.title);
+                            }}
+                            className={`block w-full cursor-pointer truncate px-3 py-1.5 text-left text-xs transition-colors ${
+                              i === suggestionIndex
+                                ? 'bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100'
+                                : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800'
+                            }`}
                           >
-                            <button
-                              type="button"
-                              // Mouse-down keeps the textarea focused (and its caret) while picking.
-                              onMouseDown={(e) => {
-                                e.preventDefault();
-                                pickSuggestion(note.title);
-                              }}
-                              className={`block w-full truncate px-3 py-1.5 text-left text-xs transition-colors ${
-                                i === suggestionIndex
-                                  ? 'bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100'
-                                  : 'text-neutral-600 dark:text-neutral-400 hover:bg-neutral-50 dark:hover:bg-neutral-800'
-                              }`}
-                            >
-                              {note.title}
-                            </button>
+                            {note.title}
                           </li>
                         ))}
                       </ul>
@@ -447,7 +508,7 @@ export const NoteEditorModal: React.FC<NoteEditorModalProps> = ({
                 <NoteLinksPanel
                   links={noteLinks.data}
                   isLoading={noteLinks.isLoading}
-                  onOpenNote={onOpenNote}
+                  onOpenNote={requestOpenNote}
                 />
               )}
             </>

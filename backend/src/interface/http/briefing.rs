@@ -156,7 +156,8 @@ pub async fn trigger_briefing(
     Ok(Json(BriefingPayload::from(payload)))
 }
 
-const AUDIO_URL_TTL_SECS: u64 = 3600;
+/// The link is a bearer credential; the SPA fetches it right before playback.
+const AUDIO_URL_TTL_SECS: u64 = 300;
 
 #[derive(Debug, Deserialize, utoipa::IntoParams)]
 pub struct BriefingAudioQuery {
@@ -195,8 +196,9 @@ pub async fn briefing_audio(
         .briefing
         .audio_key(&user.account_id, date)
         .await?
+        // The row is owner-scoped and only server code writes it. The key's own
+        // account may differ: an account merge moves rows, not objects.
         .and_then(|raw| StorageKey::parse(&raw).ok())
-        .filter(|key| key.account_id() == user.account_id)
         .ok_or_else(|| ApiError::not_found("No briefing recording for that day"))?;
     let url = state
         .services
@@ -313,7 +315,7 @@ mod tests {
         let ok = briefing_audio(State(state.clone()), alice.clone(), query())
             .await
             .unwrap();
-        assert_eq!(ok.expires_in_seconds, 3600);
+        assert_eq!(ok.expires_in_seconds, 300);
         assert!(ok.url.contains(key.filename()));
 
         let other = briefing_audio(State(state.clone()), bob, query())
@@ -331,5 +333,37 @@ mod tests {
         .await
         .unwrap_err();
         assert_eq!(bad.status, axum::http::StatusCode::BAD_REQUEST);
+    }
+
+    /// Given a recording whose key names another account (an account merge
+    /// moves rows, not objects), When the owner asks, Then the link is served.
+    #[tokio::test]
+    async fn briefing_audio_serves_a_recording_moved_by_a_merge() {
+        let state = state().await;
+        let alice = AuthUser::named_seed("@alice:example.org", "acct_alice");
+        let absorbed = crate::domain::accounts::AccountId::from_seed("acct_absorbed_by_alice");
+        let date = NaiveDate::from_ymd_opt(2026, 10, 30).unwrap();
+        let key = StorageKey::generate(
+            &absorbed,
+            crate::domain::storage::StorageCategory::Audio,
+            "ogg",
+        );
+        state
+            .services
+            .briefing
+            .record_audio(&alice.account_id, date, key.as_str())
+            .await
+            .unwrap();
+
+        let ok = briefing_audio(
+            State(state),
+            alice,
+            Query(BriefingAudioQuery {
+                date: "2026-10-30".into(),
+            }),
+        )
+        .await
+        .unwrap();
+        assert!(ok.url.contains(key.filename()));
     }
 }

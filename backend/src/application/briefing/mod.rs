@@ -99,6 +99,7 @@ impl BriefingService {
         key: &str,
     ) -> Result<Option<String>, AppError> {
         let mut tx = self.pool.begin().await?;
+        repositories::briefing_audio::lock_day(&mut tx, owner, local_date).await?;
         let previous = repositories::briefing_audio::find_key(&mut *tx, owner, local_date)
             .await?
             .filter(|old| old != key);

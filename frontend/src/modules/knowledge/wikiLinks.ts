@@ -8,6 +8,23 @@ const CODE_SPAN = /(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`)/;
 
 const HREF_PREFIX = '#wiki:';
 
+/**
+ * `encodeURIComponent` leaves `! ' ( ) *` alone, and a bare `)` ends the
+ * Markdown link early, so those are percent-encoded as well.
+ */
+function encodeTitle(title: string): string {
+  return encodeURIComponent(title).replace(
+    /[!'()*]/g,
+    (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`
+  );
+}
+
+/** Whether `[[title]]` can be written and parsed back: `[`, `]`, `|` and newlines cannot. */
+export function isLinkableTitle(title: string): boolean {
+  const t = title.trim();
+  return t !== '' && t.length <= MAX_TITLE_LEN && !/[[\]|\n]/.test(t);
+}
+
 /** Case-insensitive key two titles are compared by. */
 export function titleKey(title: string): string {
   return title.trim().toLowerCase();
@@ -26,7 +43,7 @@ export function linkifyWikiLinks(markdown: string): string {
         : part.replace(WIKI_LINK, (_m, target: string, alias?: string) => {
             const title = target.trim();
             if (!title || title.length > MAX_TITLE_LEN) return _m;
-            return `[${(alias ?? title).trim()}](${HREF_PREFIX}${encodeURIComponent(title)})`;
+            return `[${(alias ?? title).trim()}](${HREF_PREFIX}${encodeTitle(title)})`;
           })
     )
     .join('');

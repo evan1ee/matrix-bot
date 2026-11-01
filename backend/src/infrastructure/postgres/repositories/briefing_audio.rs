@@ -20,6 +20,20 @@ pub async fn find_key(
     .await
 }
 
+/// Serializes writers of one day's recording for the rest of the transaction,
+/// so the key a writer reads is the key it replaces.
+pub async fn lock_day(
+    conn: &mut sqlx::PgConnection,
+    owner_id: &AccountId,
+    local_date: NaiveDate,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))")
+        .bind(format!("briefing_audio:{owner_id}:{local_date}"))
+        .execute(conn)
+        .await?;
+    Ok(())
+}
+
 /// Points `local_date` at `storage_key`, replacing an earlier recording.
 pub async fn upsert(
     conn: impl PgExecutor<'_>,

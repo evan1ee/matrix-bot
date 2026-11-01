@@ -233,6 +233,7 @@ impl NoteService {
             return Err(not_found());
         }
         repositories::knowledge::delete_embeddings_for_item(&mut *tx, owner, "note", id).await?;
+        links::after_delete(&mut tx, owner).await?;
 
         outbox::publish(
             &mut tx,

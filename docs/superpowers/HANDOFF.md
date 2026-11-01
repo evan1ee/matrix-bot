@@ -424,3 +424,13 @@ A fresh local test PostgreSQL server needs the `vector` and `pg_trgm` extensions
 - *Ruling: instant search uses the existing `POST /knowledge/search` (200 ms debounce), not the blueprint's nonexistent `GET /api/v1/search/hybrid` — cost if wrong: none; the endpoint already spans notes, bookmarks, journal and footprints.*
 - *Ruling: navigation entries reuse the Sidebar's exported `NAV_GROUPS`; quick actions reuse the existing autofocus jump (`onQuickNavigate`) rather than opening Add modals from outside their modules — cost if wrong: one extra click to submit.*
 - *Ruling: the palette arms only when signed in; no unit-test runner was added, the pure matcher is covered by `e2e/command-palette-match.spec.ts` — cost if wrong: none.*
+
+### Rulings (2026-11-01 — review fixes for Blueprints 6, 7 and 9)
+
+- *Ruling: an account merge moves `briefing_audio` rows but not objects, so a moved row's key names the absorbed account; the audio endpoint now trusts the owner-scoped row instead of re-checking the key's account — cost if wrong: none while only server code writes the table.*
+- *Ruling: a clashing recording dropped by a merge leaves its object in storage (merge holds no storage handle; a deletion job was judged speculative infrastructure) — cost if wrong: at most one small unreachable object per clashing day in the 30-day window.*
+- *Ruling: the briefing audio link lives 300 s (was 3600); the SPA's query goes stale after 3 min and refetches on an `<audio>` error.*
+- *Ruling: a retried `briefing.send` reuses the day's stored recording instead of calling TTS again, and skips synthesis when there is no room or address; `record_audio` serializes per `(owner, day)` with an advisory lock.*
+- *Ruling: `sync_links` and note deletion take a per-owner advisory lock; deleting a note re-points links to another note of the same title; migration 0019 indexes `(owner_id, LOWER(title))`.*
+- *Ruling: the note editor asks before switching to another note over unsaved edits (inline banner, not a nested modal, whose Escape would also close the editor); the palette stops Escape propagation for the same reason.*
+- *Ruling: graph pan is drag plus focus-to-view; no node cap beyond the server's 500, so the O(n²) layout stays on the main thread — cost if wrong: a ~50 ms first paint at the cap.*

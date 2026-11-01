@@ -6,7 +6,7 @@ const SPEEDS = [1, 1.25, 1.5, 2] as const;
 
 /** Plays today's spoken morning briefing; renders nothing when there is none. */
 export const BriefingCard = () => {
-  const { data } = useBriefingAudio();
+  const { data, refetch } = useBriefingAudio();
   const audioRef = useRef<HTMLAudioElement>(null);
   const [speed, setSpeed] = useState<number>(1);
 
@@ -28,9 +28,9 @@ export const BriefingCard = () => {
         <a
           href={data.url}
           download="morning-briefing.ogg"
-          className="flex items-center gap-1.5 text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors duration-150 focus-visible:outline focus-visible:outline-2"
+          className="flex items-center gap-1.5 text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-text-primary)]"
         >
-          <Download className="w-3.5 h-3.5" />
+          <Download className="w-3.5 h-3.5" aria-hidden="true" />
           Download
         </a>
       </div>
@@ -40,6 +40,8 @@ export const BriefingCard = () => {
         src={data.url}
         controls
         preload="none"
+        // An expired link fails to load; ask for a fresh one.
+        onError={() => void refetch()}
         onLoadedMetadata={() => {
           if (audioRef.current) audioRef.current.playbackRate = speed;
         }}
