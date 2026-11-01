@@ -1,9 +1,9 @@
-import { test, expect, gotoApp as gotoShell, DASHBOARD_READY } from './fixtures';
+import { test, expect, gotoApp as gotoShell, DASHBOARD_READY, TAB } from './fixtures';
 import type { Page } from '@playwright/test';
 
 /** The shell renders before the session resolves; the palette only arms once signed in. */
-async function gotoApp(app: Page) {
-  await gotoShell(app);
+async function gotoApp(app: Page, moduleTab?: string) {
+  await gotoShell(app, moduleTab);
   await expect(app.getByTitle(/Logged in as/).first()).toBeAttached();
 }
 
@@ -57,6 +57,48 @@ test.describe('command palette', () => {
 
     await app.keyboard.press('Tab');
     await expect(input).toBeFocused();
+  });
+
+  test('the active option stays inside the scrolled list', async ({ app }) => {
+    await gotoApp(app);
+    await app.keyboard.press('Control+k');
+
+    // ArrowUp from the first option wraps to the last, far below the fold.
+    await app.keyboard.press('ArrowUp');
+    const active = app.locator('[role="option"][aria-selected="true"]');
+    const list = app.getByRole('listbox', { name: 'Results' });
+    await expect(active).toBeVisible();
+    const [a, l] = [await active.boundingBox(), await list.boundingBox()];
+    expect(a && l).toBeTruthy();
+    expect(a!.y).toBeGreaterThanOrEqual(l!.y - 1);
+    expect(a!.y + a!.height).toBeLessThanOrEqual(l!.y + l!.height + 1);
+  });
+
+  test('Escape closes only the palette when a dialog is open beneath it', async ({ app }) => {
+    await gotoApp(app, TAB.knowledge);
+    await app.getByTestId('create-note-button').click();
+    await expect(app.getByRole('heading', { name: 'New Note' })).toBeVisible();
+
+    await app.keyboard.press('Control+k');
+    await expect(PALETTE(app)).toBeVisible();
+    await app.keyboard.press('Escape');
+
+    await expect(PALETTE(app)).toBeHidden();
+    await expect(app.getByRole('heading', { name: 'New Note' })).toBeVisible();
+  });
+
+  test('the highlight stays on the same action when search results arrive', async ({ app, api }) => {
+    api.seedNote({ title: 'Quarterly zebra plan', content: 'Stripes' });
+    await gotoApp(app);
+    await app.keyboard.press('Control+k');
+    await app.getByRole('combobox').fill('zebra');
+    const askAi = app.getByRole('option', { name: /Ask AI: zebra/ });
+    await expect(askAi).toBeVisible();
+    await app.keyboard.press('ArrowUp');
+    await expect(askAi).toHaveAttribute('aria-selected', 'true');
+
+    await expect(app.getByRole('option', { name: /Quarterly zebra plan/ })).toBeVisible();
+    await expect(askAi).toHaveAttribute('aria-selected', 'true');
   });
 
   test('a quick action jumps to the module with its input focused', async ({ app }) => {

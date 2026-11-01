@@ -139,11 +139,16 @@ impl JobHandler for BriefingSendHandler {
             .generate_briefing(&owner, &settings)
             .await
             .map_err(JobError::Retryable)?;
-        let audio = match briefing.audio_script.as_deref() {
-            Some(script) => {
+        // Nothing to attach it to without a room and address, so skip the
+        // synthesis; a channel-outage retry reuses the recording it made.
+        let audio = match (
+            briefing.audio_script.as_deref(),
+            room.is_some() && target.is_some(),
+        ) {
+            (Some(script), true) => {
                 briefing_audio::prepare(&self.services, &owner, p.local_date, script).await
             }
-            None => None,
+            _ => None,
         };
         let delivered = self
             .deliver(
@@ -580,6 +585,48 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(stored.as_ref(), audio[0].bytes.as_slice());
+    }
+
+    /// Given a recording already kept for the day (an earlier attempt), When
+    /// the job prepares audio again, Then it reuses it without calling TTS.
+    #[tokio::test]
+    async fn a_retry_reuses_the_kept_recording() {
+        use crate::domain::config::{SettingKey, SettingValue};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let hits = std::sync::Arc::new(AtomicUsize::new(0));
+        let counter = hits.clone();
+        let app = axum::Router::new().route(
+            "/audio/speech",
+            axum::routing::post(move || {
+                let counter = counter.clone();
+                async move {
+                    counter.fetch_add(1, Ordering::SeqCst);
+                    (axum::http::StatusCode::OK, "ogg-bytes")
+                }
+            }),
+        );
+        let base = crate::infrastructure::inference::test_support::spawn_server(app).await;
+        let f = fixture("acct_brief_retry_audio", true).await;
+        f.services
+            .app_config
+            .update_setting(
+                &f.owner,
+                SettingKey::InferenceTtsBaseUrl,
+                SettingValue::String(base),
+            )
+            .await
+            .unwrap();
+        let day = today(&f).await;
+
+        let first = briefing_audio::prepare(&f.services, &f.owner, day, "Good morning")
+            .await
+            .expect("first attempt synthesizes");
+        let second = briefing_audio::prepare(&f.services, &f.owner, day, "Good morning")
+            .await
+            .expect("retry reuses the recording");
+
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+        assert_eq!(first.bytes, second.bytes);
     }
 
     /// Given a failing TTS service, Then the text still goes out, the day is

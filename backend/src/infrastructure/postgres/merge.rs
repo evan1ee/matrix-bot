@@ -67,8 +67,11 @@ pub struct ReconciledCollisions {
 /// 3. Combines colliding `portfolio_holdings` (`(owner_id, symbol)` with same
 ///    `currency`) by summing quantities and computing weighted average cost.
 /// 4. Sums colliding `portfolio_daily_snapshots` (`(owner_id, snapshot_date, currency)`).
-/// 5. Drops `from`'s `briefing_audio` for days `into` already has (`into` wins; the
-///    orphaned object is not deleted, there is no storage sweep).
+/// 5. Drops `from`'s `briefing_audio` for days `into` already has (`into` wins).
+///    The merge holds no storage handle, so the dropped object stays behind,
+///    unreachable: at most one small recording per clashing day inside the
+///    30-day retention window. Surviving rows keep their key, which still names
+///    the old account's prefix; readers trust the owner-scoped row, not the key.
 pub async fn reconcile_colliding_owned_rows(
     conn: &mut sqlx::PgConnection,
     from: &AccountId,

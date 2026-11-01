@@ -34,7 +34,9 @@ export function layoutGraph(graph: KnowledgeGraph): Map<number, Point> {
     .filter((e): e is readonly [number, number] => e[0] !== undefined && e[1] !== undefined);
 
   const k = 0.8 * Math.sqrt((GRAPH_SIZE * GRAPH_SIZE) / n);
-  // O(n²) per step: fewer steps for big graphs keeps the first paint quick.
+  // O(n²) per step. The server returns at most 500 notes, so this is bounded
+  // (about 10M pair evaluations at the cap); fewer steps for big graphs keeps
+  // the first paint quick.
   const steps = n > 200 ? 80 : 200;
   const dx = new Float64Array(n);
   const dy = new Float64Array(n);

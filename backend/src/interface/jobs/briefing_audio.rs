@@ -10,9 +10,34 @@ use super::agent::audio::compile_audio_digest;
 use crate::application::AppServices;
 use crate::domain::accounts::AccountId;
 use crate::domain::storage::{StorageCategory, StorageKey};
-use crate::interface::channels::message::Attachment;
+use crate::interface::channels::message::{Attachment, AttachmentKind};
 
 const FILENAME: &str = "morning-briefing.ogg";
+
+/// The recording kept for `local_date` by an earlier attempt of this job, as
+/// an attachment. A retried job (channel outage) must not pay for TTS again.
+async fn existing(
+    services: &AppServices,
+    owner: &AccountId,
+    local_date: NaiveDate,
+) -> Option<Attachment> {
+    let raw = services
+        .briefing
+        .audio_key(owner, local_date)
+        .await
+        .ok()??;
+    let key = StorageKey::parse(&raw).ok()?;
+    let bytes = services.storage.get(&key).await.ok()?;
+    Some(Attachment {
+        kind: AttachmentKind::Audio,
+        mime: "audio/ogg".to_string(),
+        filename: FILENAME.to_string(),
+        bytes: bytes.to_vec(),
+        // Not kept with the object; the chat clients tolerate their absence.
+        duration_ms: None,
+        waveform: None,
+    })
+}
 
 /// Synthesizes `script`, keeps the recording and records it for `local_date`.
 /// Returns the attachment for the chat message whenever synthesis worked, even
@@ -23,6 +48,9 @@ pub(super) async fn prepare(
     local_date: NaiveDate,
     script: &str,
 ) -> Option<Attachment> {
+    if let Some(audio) = existing(services, owner, local_date).await {
+        return Some(audio);
+    }
     let mut audio = compile_audio_digest(services, owner, script, None).await?;
     audio.filename = FILENAME.to_string();
     store(services, owner, local_date, &audio).await;

@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE knowledge_note_links l\n        SET target_note_id = (\n            SELECT n.id FROM notes n\n             WHERE n.owner_id = l.owner_id AND LOWER(n.title) = LOWER(l.target_title)\n               AND n.id <> l.source_note_id\n             ORDER BY n.id LIMIT 1)\n        WHERE l.owner_id = $1 AND l.target_note_id IS NULL\n          AND EXISTS (\n            SELECT 1 FROM notes n\n             WHERE n.owner_id = l.owner_id AND LOWER(n.title) = LOWER(l.target_title)\n               AND n.id <> l.source_note_id)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "fe89fea8a1fb65943f541573c0efbc83fee5f30dd1ee11604ad6da0c518b6846"
+}

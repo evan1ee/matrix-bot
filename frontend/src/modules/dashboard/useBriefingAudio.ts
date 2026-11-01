@@ -34,7 +34,9 @@ export function useBriefingAudio(date?: string) {
         throw err;
       }
     },
-    staleTime: 30 * 60 * 1000,
+    // The link expires after 5 minutes; stay under that so a refetch on focus or
+    // mount never hands out one about to lapse.
+    staleTime: 3 * 60 * 1000,
     retry: false,
   });
 }

@@ -41,6 +41,7 @@ pub(super) async fn sync_links(
     markdown: &str,
     previous_title: Option<&str>,
 ) -> Result<(), AppError> {
+    repo::lock_owner(tx, owner).await?;
     if previous_title.is_some_and(|old| old != title) {
         repo::re_resolve_stale(&mut **tx, owner, note_id, title).await?;
     }
@@ -52,6 +53,17 @@ pub(super) async fn sync_links(
         .map(|l| l.target_title)
         .collect();
     repo::replace_outgoing(tx, owner, note_id, &titles).await?;
+    Ok(())
+}
+
+/// After a note was deleted: links that pointed at it may have another note
+/// with the same title to land on.
+pub(super) async fn after_delete(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    owner: &AccountId,
+) -> Result<(), AppError> {
+    repo::lock_owner(tx, owner).await?;
+    repo::resolve_all_dangling(&mut **tx, owner).await?;
     Ok(())
 }
 
@@ -184,6 +196,25 @@ mod tests {
             .unwrap()
             .backlinks
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn deleting_a_target_repoints_links_to_a_note_with_the_same_title() {
+        let (svc, alice, _pool) = setup().await;
+        let first = note(&svc, &alice, "Twin", "x").await;
+        let second = note(&svc, &alice, "twin", "y").await;
+        let src = note(&svc, &alice, "Source", "[[Twin]]").await;
+        assert_eq!(
+            svc.links(&alice, src).await.unwrap().outgoing,
+            vec![link(Some(first), "Twin")]
+        );
+
+        svc.delete_note(&alice, first).await.unwrap();
+
+        assert_eq!(
+            svc.links(&alice, src).await.unwrap().outgoing,
+            vec![link(Some(second), "twin")]
+        );
     }
 
     #[tokio::test]

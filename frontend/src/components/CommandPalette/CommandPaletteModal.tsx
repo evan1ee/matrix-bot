@@ -34,7 +34,8 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
   context,
 }) => {
   const [query, setQuery] = useState('');
-  const [activeIndex, setActiveIndex] = useState(0);
+  // The highlighted action by id, so results landing late never move it.
+  const [activeId, setActiveId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const listId = useId();
 
@@ -56,8 +57,19 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
     return [...local, ...found, buildAskAiAction(trimmed)];
   }, [trimmed, debounced, staticActions, search.data, context]);
 
-  useEffect(() => setActiveIndex(0), [trimmed]);
-  const active = Math.min(activeIndex, actions.length - 1);
+  useEffect(() => setActiveId(null), [trimmed]);
+  const found = actions.findIndex((a) => a.id === activeId);
+  const active = found === -1 ? 0 : found;
+
+  // Keep the highlighted option inside the scrolled list.
+  useEffect(() => {
+    document.getElementById(`${listId}-option-${active}`)?.scrollIntoView?.({ block: 'nearest' });
+  }, [active, listId, actions.length]);
+
+  const move = (step: number) => {
+    if (actions.length === 0) return;
+    setActiveId(actions[(active + step + actions.length) % actions.length].id);
+  };
 
   const execute = (action: PaletteAction | undefined) => {
     if (!action) return;
@@ -68,13 +80,15 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Escape') {
       e.preventDefault();
+      // Closes the palette only; a dialog beneath it listens on the window.
+      e.stopPropagation();
       onClose();
     } else if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setActiveIndex((i) => (actions.length === 0 ? 0 : (i + 1) % actions.length));
+      move(1);
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
-      setActiveIndex((i) => (actions.length === 0 ? 0 : (i - 1 + actions.length) % actions.length));
+      move(-1);
     } else if (e.key === 'Enter') {
       e.preventDefault();
       execute(actions[active]);
@@ -137,7 +151,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
                   id={optionId(index)}
                   role="option"
                   aria-selected={index === active}
-                  onMouseMove={() => setActiveIndex(index)}
+                  onMouseMove={() => setActiveId(action.id)}
                   onClick={() => execute(action)}
                   className={`flex items-center gap-3 px-4 py-2 text-[13px] cursor-pointer transition-colors duration-150 ${
                     index === active
