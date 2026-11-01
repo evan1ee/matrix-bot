@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO knowledge_note_links (owner_id, source_note_id, target_note_id, target_title)\n        SELECT $1, $2,\n               (SELECT n.id FROM notes n\n                 WHERE n.owner_id = $1 AND LOWER(n.title) = LOWER(t.title) AND n.id <> $2\n                 ORDER BY n.id LIMIT 1),\n               t.title\n        FROM unnest($3::TEXT[]) AS t(title)\n        ON CONFLICT DO NOTHING\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8",
+        "TextArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8c8d6f1e81e9e612bcfdca480e217965b6179317c1a3c189dc37f5132ea6391e"
+}

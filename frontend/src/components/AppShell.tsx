@@ -16,6 +16,7 @@ interface AppShellProps {
   isConnected: boolean;
   onOpenAuth: () => void;
   onOpenSettings: () => void;
+  onOpenPalette: () => void;
   user: SessionUser | null;
   currentTheme: Theme;
   onThemeChange: (theme: Theme) => void;
@@ -52,6 +53,7 @@ export const AppShell: React.FC<AppShellProps> = ({
   isConnected,
   onOpenAuth,
   onOpenSettings,
+  onOpenPalette,
   user,
   currentTheme,
   onThemeChange,
@@ -95,6 +97,15 @@ export const AppShell: React.FC<AppShellProps> = ({
           <h1 className="text-lg font-semibold tracking-tight text-[var(--color-text-primary)]">
             {moduleLabel}
           </h1>
+          <button
+            type="button"
+            onClick={onOpenPalette}
+            aria-label="Open command palette"
+            className="flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-[var(--color-border-subtle)] text-xs text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)] transition-colors duration-150 cursor-pointer"
+          >
+            <span>Search</span>
+            <kbd className="font-mono text-[10px]">Ctrl K</kbd>
+          </button>
         </header>
 
         {/* Module View */}

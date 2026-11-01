@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { registry } from './core/registry';
 import { dashboardModule } from './modules/dashboard';
@@ -24,6 +24,9 @@ import { AppShell } from './components/AppShell';
 import { AuthModal } from './components/AuthModal';
 import { SettingsModal } from './components/SettingsModal';
 import { ToastContainer } from './components/ToastContainer';
+import { CommandPalette } from './components/CommandPalette';
+import { useCommandPalette } from './components/CommandPalette/useCommandPalette';
+import type { PaletteContext } from './components/CommandPalette/paletteRegistry';
 import { AUTH_EXPIRED_EVENT } from './core/apiClient';
 import { useSession, useRefreshSession } from './core/session';
 import { Theme, getStoredTheme, setStoredTheme, applyTheme } from './core/theme';
@@ -80,6 +83,7 @@ const AppContent: React.FC = () => {
   const refreshSession = useRefreshSession();
 
   const { events, isConnected } = useSystemEvents(isSignedIn && !onLinkRoute);
+  const palette = useCommandPalette(isSignedIn && !onLinkRoute && !publicFinanceToken);
 
   useEffect(() => {
     applyTheme(theme);
@@ -152,6 +156,19 @@ const AppContent: React.FC = () => {
     setFocusModuleId(id);
   };
 
+  const paletteContext = useMemo<PaletteContext>(
+    () => ({
+      isAdmin: user?.role === 'admin',
+      isDark: theme === 'dark',
+      onSelectModule: handleSelectModule,
+      onQuickNavigate: handleQuickNavigate,
+      onToggleTheme: () => handleThemeChange(theme === 'dark' ? 'light' : 'dark'),
+    }),
+    // The handlers only call state setters, so they are stable in effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [user?.role, theme]
+  );
+
   if (onLinkRoute) {
     return (
       <React.Suspense fallback={null}>
@@ -196,6 +213,7 @@ const AppContent: React.FC = () => {
         isConnected={isConnected}
         onOpenAuth={() => setIsAuthOpen(true)}
         onOpenSettings={() => setIsSettingsOpen(true)}
+        onOpenPalette={palette.open}
         user={user}
         currentTheme={theme}
         onThemeChange={handleThemeChange}
@@ -216,6 +234,11 @@ const AppContent: React.FC = () => {
       />
 
       <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
+      <CommandPalette
+        isOpen={palette.isOpen}
+        onClose={palette.close}
+        context={paletteContext}
+      />
       <ToastContainer />
     </>
   );

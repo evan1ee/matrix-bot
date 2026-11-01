@@ -236,7 +236,7 @@ High-impact capabilities brainstormed via multi-agent architectural analysis acr
    - Fix multi-currency blind addition in `domain/recurring_bills/due.rs:75`.
    - ~~Fix vector embedding deletion leak~~ (done, Blueprint 8).
 3. **Web AI Assistant Phase 2:** Implement multi-conversation thread switcher, dynamic model badge, and non-destructive new chat in `AiAssistantView.tsx`.
-4. **Roadmap execution (2026-10-31):** Phase A done for Blueprints 8 and 10 (plans: `plans/2026-10-31-knowledge-embedding-lifecycle.md`, `plans/2026-10-31-agent-task-controls.md`); Blueprint 1 (Web AI Phase 2/3) done too (plan: `plans/2026-10-31-web-ai-threads.md`), so Phase A is complete; Phase B: Blueprint 5 (receipt viewer) done (plan: `plans/2026-10-31-receipt-preservation-viewer.md`), Blueprint 4 (email receipts) done (plan: `plans/2026-10-31-email-receipt-ingestion.md`); Blueprint 3 (Telegram/Discord voice) done (plan: `plans/2026-10-31-audio-ingress-parity.md`); Blueprint 2 (calendar feed) done (plan: `plans/2026-10-31-calendar-feed.md`, branch `feat/calendar-feed`, unmerged); Phase C untouched. Follow the implementation blueprints in [`docs/superpowers/specs/2026-10-31-feature-blueprints.md`](specs/2026-10-31-feature-blueprints.md) across Phase A (critical data integrity & core usability), Phase B (omnichannel parity & financial automation), and Phase C (personal productivity & knowledge management).
+4. **Roadmap execution (2026-10-31):** Phase A done for Blueprints 8 and 10 (plans: `plans/2026-10-31-knowledge-embedding-lifecycle.md`, `plans/2026-10-31-agent-task-controls.md`); Blueprint 1 (Web AI Phase 2/3) done too (plan: `plans/2026-10-31-web-ai-threads.md`), so Phase A is complete; Phase B: Blueprint 5 (receipt viewer) done (plan: `plans/2026-10-31-receipt-preservation-viewer.md`), Blueprint 4 (email receipts) done (plan: `plans/2026-10-31-email-receipt-ingestion.md`); Blueprint 3 (Telegram/Discord voice) done (plan: `plans/2026-10-31-audio-ingress-parity.md`); Blueprint 2 (calendar feed) done and merged (plan: `plans/2026-10-31-calendar-feed.md`); Phase C: Blueprint 7 (wiki-links and graph) done (plan: `plans/2026-10-31-note-wiki-links.md`, branch `feat/note-wiki-links`, unmerged); Blueprint 9 (command palette) done (plan: `plans/2026-11-01-command-palette.md`, branch `feat/command-palette`, stacked on `feat/note-wiki-links`, unmerged); Blueprint 6 remains. Follow the implementation blueprints in [`docs/superpowers/specs/2026-10-31-feature-blueprints.md`](specs/2026-10-31-feature-blueprints.md) across Phase A (critical data integrity & core usability), Phase B (omnichannel parity & financial automation), and Phase C (personal productivity & knowledge management).
 
 ---
 
@@ -383,6 +383,19 @@ Plan: `plans/2026-10-31-audio-ingress-parity.md`. Status: done and verified; liv
 - *Ruling: no frontend change and no Settings STT badge — `NoteCard` already shows `source_channel`, and voice notes carry the `voice` tag — cost if wrong: STT health is not visible in Settings.*
 - *Ruling: `SttUnavailable`/`TranscriptionFailed` are not domain errors; `process_audio` already turns every `SttServiceError` into a reply — cost if wrong: none.*
 
+### Rulings (2026-10-31 — Feature blueprints, Phase C: note wiki-links)
+
+Plan: `plans/2026-10-31-note-wiki-links.md`. Status: done; backend service/parser tests and Playwright pass. Not covered: no HTTP-level test for the two new routes (handlers are thin over `NoteService`), and unsaved-draft switching in the editor (below).
+
+- *Ruling: migration is `0017_knowledge_note_links.sql` (the spec's 0018 was stale), with a unique index on `(source_note_id, LOWER(target_title))`; `knowledge_note_links` is in `OWNED_TABLES` — cost if wrong: none.*
+- *Ruling: links are derived data, rewritten by `NoteService` (`application/knowledge/links.rs::sync_links`) in the same transaction as create, update and append; no new `SystemEvent` — `NoteCreated`/`NoteUpdated` already fire — cost if wrong: SSE listeners cannot tell a link change from another edit.*
+- *Ruling: titles resolve case-insensitively within the owner; duplicate titles resolve to the lowest id; a link to the note itself (by id or own title) is dropped; dangling links keep `target_note_id NULL` and resolve when a note is created or renamed into that title (`resolve_dangling`), while renaming a target away re-resolves its inbound links (`re_resolve_stale`) — cost if wrong: with duplicate titles a link may bind to the older note.*
+- *Ruling: deleting a target leaves inbound links dangling (`ON DELETE SET NULL`) and is not re-resolved to a same-titled duplicate — cost if wrong: such a link stays dangling until its source is next edited.*
+- *Ruling: the parser (`domain/knowledge/links.rs`) is a hand-written line scanner, ignores fenced and inline code, caps at 50 distinct targets and 200-character titles — cost if wrong: exotic Markdown (indented code blocks) still yields links.*
+- *Ruling: the graph returns non-archived notes only, newest 500, and edges between returned nodes; links from or to archived notes still exist in the table and show in `/notes/{id}/links` — cost if wrong: an archived note's backlinks panel lists notes the graph hides.*
+- *Ruling: no new graph dependency; `frontend/src/modules/knowledge/graphLayout.ts` is a deterministic Fruchterman-Reingold layout drawn as SVG with zoom buttons and a title highlight filter (no pan/drag) — cost if wrong: dense graphs are less explorable than with d3.*
+- *Ruling: the editor's links panel and `[[` rendering describe the saved note; opening another note from it replaces the draft without a prompt — cost if wrong: unsaved edits are lost on that click. Follow-up: guard on a dirty draft.*
+
 ---
 
 ## 6. Verification
@@ -390,3 +403,9 @@ Plan: `plans/2026-10-31-audio-ingress-parity.md`. Status: done and verified; liv
 The verification gates are listed once, in [AGENTS.md §8](../../AGENTS.md#8-verification). Run them from the repository root.
 
 A fresh local test PostgreSQL server needs the `vector` and `pg_trgm` extensions created once in `public` before parallel tests run: `CREATE EXTENSION IF NOT EXISTS vector SCHEMA public; CREATE EXTENSION IF NOT EXISTS pg_trgm SCHEMA public;`. Database setup is in [`docs/database.md`](../database.md#test-databases).
+
+### Rulings (2026-11-01 — Blueprint 9: command palette)
+
+- *Ruling: instant search uses the existing `POST /knowledge/search` (200 ms debounce), not the blueprint's nonexistent `GET /api/v1/search/hybrid` — cost if wrong: none; the endpoint already spans notes, bookmarks, journal and footprints.*
+- *Ruling: navigation entries reuse the Sidebar's exported `NAV_GROUPS`; quick actions reuse the existing autofocus jump (`onQuickNavigate`) rather than opening Add modals from outside their modules — cost if wrong: one extra click to submit.*
+- *Ruling: the palette arms only when signed in; no unit-test runner was added, the pure matcher is covered by `e2e/command-palette-match.spec.ts` — cost if wrong: none.*

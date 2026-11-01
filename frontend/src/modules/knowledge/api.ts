@@ -10,9 +10,16 @@ import type {
   SearchResultItem,
   KnowledgeSearchResponse,
   ImportReport,
+  NoteLinks,
+  KnowledgeGraph,
 } from './types';
 
-export function useNotes(filter?: { tag?: string | null; archived?: boolean; search?: string }) {
+export function useNotes(filter?: {
+  tag?: string | null;
+  archived?: boolean;
+  search?: string;
+  enabled?: boolean;
+}) {
   const queryParams = new URLSearchParams();
   if (filter?.archived !== undefined) {
     queryParams.set('archived', String(filter.archived));
@@ -30,6 +37,7 @@ export function useNotes(filter?: { tag?: string | null; archived?: boolean; sea
   return useQuery<NoteSummary[]>({
     queryKey: ['notes', queryString],
     queryFn: () => fetchApi<NoteSummary[]>(endpoint),
+    enabled: filter?.enabled ?? true,
   });
 }
 
@@ -44,6 +52,24 @@ export function useNote(id: number | null) {
     queryFn: () => fetchApi<Note>(`/notes/${id}`),
     enabled: id !== null,
     gcTime: 0,
+  });
+}
+
+/** Outgoing links and backlinks of the saved note (not of an unsaved draft). */
+export function useNoteLinks(id: number | null) {
+  return useQuery<NoteLinks>({
+    queryKey: ['notes', 'links', id],
+    queryFn: () => fetchApi<NoteLinks>(`/notes/${id}/links`),
+    enabled: id !== null,
+    gcTime: 0,
+  });
+}
+
+export function useKnowledgeGraph(enabled: boolean) {
+  return useQuery<KnowledgeGraph>({
+    queryKey: ['notes', 'graph'],
+    queryFn: () => fetchApi<KnowledgeGraph>('/notes/graph'),
+    enabled,
   });
 }
 

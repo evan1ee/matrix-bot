@@ -7,9 +7,10 @@ use axum::{
 use super::{
     account, admin, agent, ai, ai_stream, auth, bookmarks, briefing, calendar, finance,
     finance_analytics, finance_budgets, finance_categories, finance_net_worth, finance_receipts,
-    footprints, habits, identities, knowledge, knowledge_transfer, life, life_activity, link, mcp,
-    ocr, openapi, portfolio, portfolio_alerts, portfolio_cash, portfolio_history, portfolio_prices,
-    recurring_bills, reminders, rooms, settings, sse, storage, todo_steps, todos, voice, webhooks,
+    footprints, habits, identities, knowledge, knowledge_links, knowledge_transfer, life,
+    life_activity, link, mcp, ocr, openapi, portfolio, portfolio_alerts, portfolio_cash,
+    portfolio_history, portfolio_prices, recurring_bills, reminders, rooms, settings, sse, storage,
+    todo_steps, todos, voice, webhooks,
 };
 
 /// The API route table.
@@ -194,6 +195,8 @@ fn routes_productivity() -> Router<auth::ApiState> {
             get(knowledge::list_notes).post(knowledge::create_note),
         )
         .route("/notes/tags", get(knowledge::list_tags))
+        .route("/notes/graph", get(knowledge_links::get_knowledge_graph))
+        .route("/notes/:id/links", get(knowledge_links::get_note_links))
         .route("/notes/export", get(knowledge_transfer::export_notes))
         .route(
             "/notes/import",

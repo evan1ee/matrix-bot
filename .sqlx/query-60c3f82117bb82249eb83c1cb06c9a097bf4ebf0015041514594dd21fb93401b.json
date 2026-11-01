@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO knowledge_note_links (owner_id, source_note_id, target_title) VALUES ($1, $2, 'elsewhere')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "60c3f82117bb82249eb83c1cb06c9a097bf4ebf0015041514594dd21fb93401b"
+}

@@ -747,6 +747,29 @@ export class FakeApi {
     return note;
   }
 
+  /** Distinct `[[Title]]` targets in a note body (code is not special-cased here). */
+  private noteLinkTitles(note: FakeNote): string[] {
+    const seen = new Set<string>();
+    const titles: string[] = [];
+    for (const m of note.content.matchAll(/\[\[([^[\]\n|]+)(?:\|[^[\]\n]+)?\]\]/g)) {
+      const title = m[1].trim();
+      const key = title.toLowerCase();
+      if (key === note.title.toLowerCase() || seen.has(key)) continue;
+      seen.add(key);
+      titles.push(title);
+    }
+    return titles;
+  }
+
+  /** Ids of the notes a note links to; null where no note has that title. */
+  private noteLinkTargets(note: FakeNote): (number | null)[] {
+    return this.noteLinkTitles(note).map(
+      (title) =>
+        this.notes.find((n) => n.id !== note.id && n.title.toLowerCase() === title.toLowerCase())
+          ?.id ?? null
+    );
+  }
+
   seedLifeProfile(partial: Partial<FakeLifeProfile> = {}): FakeLifeProfile {
     const profile: FakeLifeProfile = {
       id: this.nextLifeProfileId++,
@@ -3762,6 +3785,37 @@ export class FakeApi {
         tags: Array.isArray(body.tags) ? body.tags : [],
       });
       return json(route, 201, noteDocument(note));
+    }
+
+    if (path === '/notes/graph' && method === 'GET') {
+      const active = this.notes.filter((n) => !n.is_archived);
+      const ids = new Set(active.map((n) => n.id));
+      const edges = active.flatMap((n) =>
+        this.noteLinkTargets(n)
+          .filter((t) => t !== null && t !== n.id && ids.has(t))
+          .map((t) => ({ source: n.id, target: t as number }))
+      );
+      return json(route, 200, {
+        nodes: active.map((n) => ({ id: n.id, title: n.title, note_type: n.note_type })),
+        edges,
+      });
+    }
+
+    const noteLinksMatch = path.match(/^\/notes\/(\d+)\/links$/);
+    if (noteLinksMatch && method === 'GET') {
+      const id = Number(noteLinksMatch[1]);
+      const note = this.notes.find((n) => n.id === id);
+      if (!note) return json(route, 404, { error: 'Note not found', code: 404 });
+      const outgoing = this.noteLinkTitles(note).map((title) => {
+        const target = this.notes.find(
+          (n) => n.id !== id && n.title.toLowerCase() === title.toLowerCase()
+        );
+        return { note_id: target?.id ?? null, title: target?.title ?? title };
+      });
+      const backlinks = this.notes
+        .filter((n) => n.id !== id && this.noteLinkTargets(n).includes(id))
+        .map((n) => ({ note_id: n.id, title: n.title }));
+      return json(route, 200, { outgoing, backlinks });
     }
 
     const noteIdMatch = path.match(/^\/notes\/(\d+)$/);

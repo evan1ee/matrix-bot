@@ -7,6 +7,7 @@
 
 use sqlx::PgPool;
 
+use super::links;
 use super::markdown::{self, Derived};
 use crate::application::AppError;
 use crate::domain::accounts::AccountId;
@@ -88,6 +89,7 @@ impl NoteService {
                 .ok_or_else(not_found)?;
         }
 
+        links::sync_links(&mut tx, owner, note.id.0, &title, &markdown, None).await?;
         outbox::publish(&mut tx, &SystemEvent::NoteCreated(note.clone())).await?;
         enqueue_embedding(&mut tx, owner, &note).await?;
         tx.commit().await?;
@@ -333,6 +335,17 @@ async fn apply(
             .ok_or_else(not_found)?;
     }
 
+    if body_changed || title_changed {
+        links::sync_links(
+            tx,
+            owner,
+            note.id.0,
+            &change.title,
+            &change.markdown,
+            Some(&current.note.title),
+        )
+        .await?;
+    }
     outbox::publish(tx, &SystemEvent::NoteUpdated(note.clone())).await?;
     if body_changed || title_changed {
         enqueue_embedding(tx, owner, &note).await?;

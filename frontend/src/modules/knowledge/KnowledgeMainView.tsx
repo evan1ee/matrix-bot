@@ -4,6 +4,7 @@ import { useNotes, useNote, useNoteTags, useCreateNote, useUpdateNote, useDelete
 import { NoteCard } from './NoteCard';
 import { NoteEditorModal } from './NoteEditorModal';
 import type { NoteEditorSave } from './NoteEditorModal';
+import { KnowledgeGraphView } from './KnowledgeGraphView';
 import { KnowledgeSearchPanel } from './KnowledgeSearchPanel';
 import { NotesTransfer } from './NotesTransfer';
 import { TagFilterChips } from './TagFilterChips';
@@ -11,7 +12,7 @@ import { ConfirmModal } from '../../components/ConfirmModal';
 import type { NoteSummary, SearchResultItem } from './types';
 
 export const KnowledgeMainView: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'active' | 'archived'>('active');
+  const [activeTab, setActiveTab] = useState<'active' | 'archived' | 'graph'>('active');
   const [selectedTag, setSelectedTag] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showHybridSearch, setShowHybridSearch] = useState(false);
@@ -28,6 +29,7 @@ export const KnowledgeMainView: React.FC = () => {
     archived: activeTab === 'archived',
     tag: selectedTag,
     search: searchQuery,
+    enabled: activeTab !== 'graph',
   });
 
   const createMutation = useCreateNote();
@@ -124,6 +126,17 @@ export const KnowledgeMainView: React.FC = () => {
           >
             Archive
           </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('graph')}
+            className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+              activeTab === 'graph'
+                ? 'bg-white dark:bg-neutral-700 text-neutral-900 dark:text-neutral-100 shadow-xs'
+                : 'text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-200'
+            }`}
+          >
+            Graph
+          </button>
         </div>
 
         {/* Action Buttons: Toggle Search & New Note */}
@@ -160,6 +173,10 @@ export const KnowledgeMainView: React.FC = () => {
         <KnowledgeSearchPanel onSelectResult={handleSelectSearchResult} />
       )}
 
+      {activeTab === 'graph' ? (
+        <KnowledgeGraphView onOpenNote={(id) => handleOpenEdit({ id })} />
+      ) : (
+        <>
       {/* Search Filter & Tag Selector Bar */}
       <div className="space-y-2">
         <div className="relative">
@@ -226,6 +243,8 @@ export const KnowledgeMainView: React.FC = () => {
           ))}
         </div>
       )}
+        </>
+      )}
 
       {/* Editor Modal */}
       <NoteEditorModal
@@ -236,6 +255,7 @@ export const KnowledgeMainView: React.FC = () => {
         isLoading={editingId !== null && editedNote.isLoading}
         loadError={editingId !== null && editedNote.isError ? 'Could not load this note.' : null}
         onReload={handleReloadNote}
+        onOpenNote={(id) => setEditingId(id)}
         isSaving={createMutation.isPending || updateMutation.isPending}
       />
 

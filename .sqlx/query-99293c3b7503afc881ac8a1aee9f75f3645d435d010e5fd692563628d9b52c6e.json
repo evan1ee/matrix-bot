@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM knowledge_note_links WHERE owner_id = $1 AND source_note_id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "99293c3b7503afc881ac8a1aee9f75f3645d435d010e5fd692563628d9b52c6e"
+}
